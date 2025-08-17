@@ -1,10 +1,10 @@
-# o11a-processor
-The o11a processor has five modules that form an almost linear processing pipeline:
+# o11a-backend
+The o11a backend has five modules that form an almost linear processing pipeline:
 
 1. Parser - parses the audit source and allows clients to post new text blobs (added comments and docs) to be parsed in the context of the audit
-2. Analyzer - analyzes the audit source, producing a directory of definitions and their attributes
+2. Analyzer - analyzes the audit source, producing a directory of definitions and their attributes, allowing clients to fetch structured audit data.
 3. Formatter - transforms the AST into Formatter Nodes
-4. Provider - provides an API for clients to get structured audit data from
+4. Collaborator - allows clients to post comments on topics, stores topics, and allows clients to approve or disapprove of comments 
 5. Checker - checks variable constraints and allows clients to post new constraints to be checked, providing data on any conflicting constraints.
 
 # Parser
