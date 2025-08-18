@@ -21,26 +21,21 @@ For contract source files, the container is the source file, the component is a 
 
 
 # Formatter
-The formatter takes an AST node as the input and returns a tree of formatter nodes as HTML. These nodes are sent to the browser as HTML elements so the browser can dynamically render the nodes based on the width of the container they are present in. 
+The formatter takes an AST node as the input and returns a tree of formatter nodes rendered as HTML. This HTML is sent to the browser so it can dynamically render the source text based on the width of the container it is present in. 
 
 Should the formatter have a naive "parents always split first" approach, or a more sophisticated approach where all children are traversed first, then all ranked by node type so a child could potentially split before its parent?
 
-The formatter HTML elements are either text with a class representing any highlighting, or a whitespace node with a class representing its split rank. The lower split rank whitespace nodes will be changed from rendering as a space to a newline before the higher split ranks.
-
 There can always only be one declaration per line to give space for inline comments above it.
 
-The dynamic formatting works as follows:
-The source text is rendered in a container. A JavaScript function initializes an internal state with a counter of 0 and an empty list of prior splits. It then runs a check on scrollWidth vs clientWidth to determine if the source text is overflowing horizontally. This check is attached to a resize event and will continually shrink or grow the source text as the container shrinks or grows. The check is as follows:
-If the text is overflowing:
-1. Search for the .split<count> elements and their text to a newline to split the line. If none exist, do nothing further
-2. Increment the counter by 1, indicating that it has split the element at that rank
-3. Save the width that triggered this overflow, along with the split rank that the width triggered
-4. Run again until the text is not overflowing
-If the text is not overflowing:
-1. Check if the width is greater than the most recent (smallest) width that caused an overflow. If it is not, do nothing further
-3. Search for the .split<count> elements, changing their text to a space
-4. Decrement the counter by 1.
-5. Run again until the width is not greater than the most recent width that caused an overflow
+The formatter nodes can be:
+
+- A text node with a class for syntax highlighting (keywords, operators, literals)
+- A reference node (variable reference, function calls)
+- A declaration node (variable declaration, function definition)
+- A whitespace node (can be rendered as a space or a newline depending on container width)
+- A space node (always forces a space)
+- A newline node (always forces a newline)
+- A block node (contains other nodes with an indent)
 
 # Collaborator
 
