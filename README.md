@@ -26,7 +26,7 @@ The formatter takes an AST node and the source file as the inputs and returns a 
 
 Should the formatter have a naive "parents always split first" approach, or a more sophisticated approach where all children are traversed first, then all ranked by node type so a child could potentially split before its parent?
 
-There can always only be one declaration per line to give space for inline comments above it.
+There can always only be one declaration per line to give space for inline comments above it. The same for function arguments, so the info comments of the descendants can be shown inline above the ancestors.   
 
 The formatter nodes can be:
 
@@ -78,6 +78,25 @@ if (
 ) {
  rev
 }
+```
+``` solidity
+// Vanilla solidity
+_transfer(rewardToken, participation.userAddress, userRewards);
+
+// o11a formatter output
+_transfer(
+  rewardToken,
+  participation.userAddress,
+  userRewards
+);
+
+// o11a condensed output
+_transfer(
+ rewardToken,
+ participation
+  .userAddress,
+ userRewards
+);
 ```
 
 The formatter output is more concise than Solidity, but it is complete. The condensed view is not complete, but can be displayed in tiny containers. The semicolon is missing from all condensed lines to designate that it is not a complete line of code. Hovering over the line will show the complete line.
