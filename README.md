@@ -22,11 +22,11 @@ For contract source files, the container is the source file, the component is a 
 
 
 # Formatter
-The formatter takes an AST node and the source file as the inputs and returns a tree of formatter nodes as HTML. This HTML is sent to the browser so it can dynamically render the source text based on the width of the container it is present in. 
+The formatter takes an AST node and its source file as inputs and returns a tree of formatter nodes as HTML. These AST nodes are largely formatted without consideration of the source file; however, the output does need to retain the comments and extra whitespace of the original source file. Extra whitespace is often used to group statements and has some semantic meaning, which is missing from the AST. This HTML is sent to the browser so it can dynamically render the source text based on the width of the container it is present in.
 
 Should the formatter have a naive "parents always split first" approach, or a more sophisticated approach where all children are traversed first, then all ranked by node type so a child could potentially split before its parent?
 
-There can always only be one declaration per line to give space for inline comments above it. The same for function arguments, so the info comments of the descendants can be shown inline above the ancestors.   
+There can always only be one declaration per line to give space for inline comments above it. The same for function arguments, so the info comments of the descendants can be shown inline above the ancestors. When declaration or function argument lines are rendered to HTML, they have an empty span element before them so the client can dynamically inject any info comments above them. It has to be a sibling to the source line so that it can use the native word-wrapping while the source line uses the custom formatter.
 
 The formatter nodes can be:
 
@@ -100,6 +100,8 @@ _transfer(
 ```
 
 The formatter output is more concise than Solidity, but it is complete. The condensed view is not complete, but can be displayed in tiny containers. The semicolon is missing from all condensed lines to designate that it is not a complete line of code. Hovering over the line will show the complete line.
+
+Because the formatter output is aggresive at changing the original source text and the API is designed to enable clients to show many smaller snippets of code, the formatter output does not include line numbers. Clients are not expected to show full source files in regular use. They may want to show or allow copying the full source file under a separate view by request of the user for niche uses, but it should not be interactive.
 
 # Collaborator
 
