@@ -1,30 +1,15 @@
-use clap::Parser;
 use foundry_compilers::{Project, ProjectPathsConfig, artifacts::Remapping};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::str::FromStr;
 use std::vec;
 
-#[derive(Parser)]
-#[command(author = "John Strunk", version, about)]
-struct Arguments {
-    path: PathBuf,
-}
-
-impl Default for Arguments {
-    fn default() -> Self {
-        Self {
-            path: PathBuf::from("."),
-        }
-    }
-}
-
 fn main() {
-    let args = Arguments::parse();
+    process(Path::new("/home/john/audits/fallback"));
+}
 
-    let root = Path::new(args.path.as_path());
-
+fn process(root: &Path) {
     // Gather remappings
     let mut remappings = vec![];
 
@@ -38,7 +23,7 @@ fn main() {
     }
 
     let project_path_config = ProjectPathsConfig::builder()
-        .root(Path::new(args.path.as_path()))
+        .root(root)
         .sources(ProjectPathsConfig::<_>::find_source_dir(root))
         .libs(ProjectPathsConfig::<_>::find_libs(root))
         .artifacts(ProjectPathsConfig::<_>::find_artifacts_dir(root))
@@ -56,11 +41,6 @@ fn main() {
         .unwrap();
 
     let output = project.compile().unwrap();
-
-    println!(
-        "Welcome to Solv! Done building your project at \"{}\"",
-        args.path.display()
-    );
 
     for (_artifact_id, artifact) in output.artifacts() {
         if let Some(source_unit) = artifact.ast.as_ref() {
