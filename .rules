@@ -1,0 +1,6 @@
+# Development Rules
+
+## Before completing any task:
+1. Always run diagnostics to check for compilation errors
+2. Fix any errors before considering the task complete
+3. Unit test functionality after making changes
