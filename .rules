@@ -1,6 +1,5 @@
-# Development Rules
-
-## Before completing any task:
+Before completing any task:
 1. Always run diagnostics to check for compilation errors
 2. Fix any errors before considering the task complete
 3. Unit test functionality after making changes
+4. Check the changes files for best practices, and suggest improvements if any

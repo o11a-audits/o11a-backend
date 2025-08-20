@@ -1645,6 +1645,8 @@ version = "0.1.0"
 dependencies = [
  "foundry-compilers",
  "foundry-compilers-artifacts",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
