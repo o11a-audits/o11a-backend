@@ -1,5 +1,10 @@
+Before any task:
+1. Explore the project first. List out all project files and the functions within them to understand the project structure and the existing codebase.
+2. Before adding a new type or function, check if it is already defined in the codebase. If so, try to use or adapt it to the new use case
+
 Before completing any task:
 1. Always run diagnostics to check for compilation errors
 2. Fix any errors before considering the task complete
-3. Unit test functionality after making changes
-4. Check the changes files for best practices, and suggest improvements if any
+3. Check your work for best practices, and suggest improvements if any
+4. Do not add tests
+5. Do not run terminal commands

@@ -9,7 +9,7 @@ use std::vec;
 mod solidity;
 
 fn main() {
-    process(Path::new("/home/john/audits/fallback"));
+    process(Path::new("/home/john/olla/server/priv/audits/nudgexyz"));
 }
 
 fn process(root: &Path) {
@@ -20,7 +20,12 @@ fn process(root: &Path) {
         let reader = BufReader::new(file);
 
         for line in reader.lines() {
-            let remapping = Remapping::from_str(line.unwrap().as_str()).unwrap();
+            let line = line.unwrap();
+            // If the line is empty, skip it
+            if line.is_empty() {
+                continue;
+            }
+            let remapping = Remapping::from_str(line.as_str()).unwrap();
             remappings.push(remapping);
         }
     }

@@ -70,6 +70,14 @@ pub enum FunctionKind {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ContractKind {
+    Contract,
+    Library,
+    Abstract,
+    Interface,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum FunctionStateMutability {
     Pure,
     View,
@@ -83,6 +91,95 @@ pub enum FunctionVisibility {
     Private,
     Internal,
     External,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum VariableVisibility {
+    Public,
+    Private,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum VariableMutability {
+    Mutable,
+    Immutable,
+    Constant,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum StorageLocation {
+    Default,
+    Storage,
+    Memory,
+    Calldata,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum LiteralKind {
+    Number,
+    Bool,
+    String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct TypeDescriptions {
+    pub type_identifier: String,
+    pub type_string: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ArgumentType {
+    pub type_identifier: String,
+    pub type_string: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum FunctionCallKind {
+    FunctionCall,
+    TypeConversion,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum BinaryOperator {
+    // Arithmetic
+    Add,      // +
+    Subtract, // -
+    Multiply, // *
+    Divide,   // /
+    Modulo,   // %
+    Power,    // **
+
+    // Comparison
+    Equal,              // ==
+    NotEqual,           // !=
+    LessThan,           // <
+    LessThanOrEqual,    // <=
+    GreaterThan,        // >
+    GreaterThanOrEqual, // >=
+
+    // Logical
+    And, // &&
+    Or,  // ||
+
+    // Bitwise
+    BitwiseAnd, // &
+    BitwiseOr,  // |
+    BitwiseXor, // ^
+    LeftShift,  // <<
+    RightShift, // >>
+
+    // Assignment
+    Assign,           // =
+    AddAssign,        // +=
+    SubtractAssign,   // -=
+    MultiplyAssign,   // *=
+    DivideAssign,     // /=
+    ModuloAssign,     // %=
+    BitwiseAndAssign, // &=
+    BitwiseOrAssign,  // |=
+    BitwiseXorAssign, // ^=
+    LeftShiftAssign,  // <<=
+    RightShiftAssign, // >>=
 }
 
 impl FromStr for FunctionKind {
@@ -127,15 +224,175 @@ impl FromStr for FunctionVisibility {
     }
 }
 
+impl FromStr for VariableVisibility {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "public" => Ok(VariableVisibility::Public),
+            "private" => Ok(VariableVisibility::Private),
+            _ => Err(format!("Unknown variable visibility: {}", s)),
+        }
+    }
+}
+
+impl FromStr for LiteralKind {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "number" => Ok(LiteralKind::Number),
+            "bool" => Ok(LiteralKind::Bool),
+            "string" => Ok(LiteralKind::String),
+            _ => Err(format!("Unknown literal kind: {}", s)),
+        }
+    }
+}
+
+impl FromStr for FunctionCallKind {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "functionCall" => Ok(FunctionCallKind::FunctionCall),
+            "typeConversion" => Ok(FunctionCallKind::TypeConversion),
+            _ => Err(format!("Unknown function call kind: {}", s)),
+        }
+    }
+}
+
+impl FromStr for BinaryOperator {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "+" => Ok(BinaryOperator::Add),
+            "-" => Ok(BinaryOperator::Subtract),
+            "*" => Ok(BinaryOperator::Multiply),
+            "/" => Ok(BinaryOperator::Divide),
+            "%" => Ok(BinaryOperator::Modulo),
+            "**" => Ok(BinaryOperator::Power),
+            "==" => Ok(BinaryOperator::Equal),
+            "!=" => Ok(BinaryOperator::NotEqual),
+            "<" => Ok(BinaryOperator::LessThan),
+            "<=" => Ok(BinaryOperator::LessThanOrEqual),
+            ">" => Ok(BinaryOperator::GreaterThan),
+            ">=" => Ok(BinaryOperator::GreaterThanOrEqual),
+            "&&" => Ok(BinaryOperator::And),
+            "||" => Ok(BinaryOperator::Or),
+            "&" => Ok(BinaryOperator::BitwiseAnd),
+            "|" => Ok(BinaryOperator::BitwiseOr),
+            "^" => Ok(BinaryOperator::BitwiseXor),
+            "<<" => Ok(BinaryOperator::LeftShift),
+            ">>" => Ok(BinaryOperator::RightShift),
+            "=" => Ok(BinaryOperator::Assign),
+            "+=" => Ok(BinaryOperator::AddAssign),
+            "-=" => Ok(BinaryOperator::SubtractAssign),
+            "*=" => Ok(BinaryOperator::MultiplyAssign),
+            "/=" => Ok(BinaryOperator::DivideAssign),
+            "%=" => Ok(BinaryOperator::ModuloAssign),
+            "&=" => Ok(BinaryOperator::BitwiseAndAssign),
+            "|=" => Ok(BinaryOperator::BitwiseOrAssign),
+            "^=" => Ok(BinaryOperator::BitwiseXorAssign),
+            "<<=" => Ok(BinaryOperator::LeftShiftAssign),
+            ">>=" => Ok(BinaryOperator::RightShiftAssign),
+            _ => Err(format!("Unknown binary operator: {}", s)),
+        }
+    }
+}
+
+impl FromStr for VariableMutability {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "mutable" => Ok(VariableMutability::Mutable),
+            "immutable" => Ok(VariableMutability::Immutable),
+            "constant" => Ok(VariableMutability::Constant),
+            _ => Err(format!("Unknown mutability: {}", s)),
+        }
+    }
+}
+
+impl FromStr for StorageLocation {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "default" => Ok(StorageLocation::Default),
+            "storage" => Ok(StorageLocation::Storage),
+            "memory" => Ok(StorageLocation::Memory),
+            "calldata" => Ok(StorageLocation::Calldata),
+            _ => Err(format!("Invalid storage location: {}", s)),
+        }
+    }
+}
+
+impl FromStr for ContractKind {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "contract" => Ok(ContractKind::Contract),
+            "library" => Ok(ContractKind::Library),
+            "abstract" => Ok(ContractKind::Abstract),
+            "interface" => Ok(ContractKind::Interface),
+            _ => Err(format!("Invalid contract kind: {}", s)),
+        }
+    }
+}
+
+impl TypeDescriptions {
+    pub fn from_json(value: &serde_json::Value) -> Result<Self, String> {
+        let type_identifier = value
+            .get("typeIdentifier")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "TypeDescriptions missing typeIdentifier".to_string())?
+            .to_string();
+        let type_string = value
+            .get("typeString")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "TypeDescriptions missing typeString".to_string())?
+            .to_string();
+
+        Ok(TypeDescriptions {
+            type_identifier,
+            type_string,
+        })
+    }
+
+    pub fn from_json_optional(value: &serde_json::Value) -> Option<Self> {
+        if value.is_object() && !value.as_object().unwrap().is_empty() {
+            Self::from_json(value).ok()
+        } else {
+            None
+        }
+    }
+}
+
+impl ArgumentType {
+    pub fn from_json(value: &serde_json::Value) -> Result<Self, String> {
+        let type_identifier = value
+            .get("typeIdentifier")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "ArgumentType missing typeIdentifier".to_string())?
+            .to_string();
+        let type_string = value
+            .get("typeString")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "ArgumentType missing typeString".to_string())?
+            .to_string();
+
+        Ok(ArgumentType {
+            type_identifier,
+            type_string,
+        })
+    }
+}
+
 pub enum ContractVariableVisibility {
     Public,
     Private,
-}
-
-pub enum ContractVariableMutability {
-    Constant,
-    Mutable,
-    Immutable,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -152,6 +409,15 @@ pub enum ASTNode {
         src_location: SourceLocation,
         nodes: Vec<ASTNode>,
         body: Option<Box<ASTNode>>,
+        common_type: TypeDescriptions,
+        is_constant: bool,
+        is_l_value: bool,
+        is_pure: bool,
+        l_value_requested: bool,
+        left_expression: Box<ASTNode>,
+        operator: BinaryOperator,
+        right_expression: Box<ASTNode>,
+        type_descriptions: TypeDescriptions,
     },
     Conditional {
         node_id: i32,
@@ -164,12 +430,30 @@ pub enum ASTNode {
         src_location: SourceLocation,
         nodes: Vec<ASTNode>,
         body: Option<Box<ASTNode>>,
+        argument_types: Vec<ArgumentType>,
+        is_constant: bool,
+        is_l_value: bool,
+        is_pure: bool,
+        l_value_requested: bool,
+        type_descriptions: TypeDescriptions,
+        type_name: Box<ASTNode>,
     },
     FunctionCall {
         node_id: i32,
         src_location: SourceLocation,
         nodes: Vec<ASTNode>,
         body: Option<Box<ASTNode>>,
+        arguments: Vec<ASTNode>,
+        expression: Box<ASTNode>,
+        is_constant: bool,
+        is_l_value: bool,
+        is_pure: bool,
+        kind: FunctionCallKind,
+        l_value_requested: bool,
+        name_locations: Vec<SourceLocation>,
+        names: Vec<String>,
+        try_call: bool,
+        type_descriptions: TypeDescriptions,
     },
     FunctionCallOptions {
         node_id: i32,
@@ -182,6 +466,19 @@ pub enum ASTNode {
         src_location: SourceLocation,
         nodes: Vec<ASTNode>,
         body: Option<Box<ASTNode>>,
+        name: String,
+        overloaded_declarations: Vec<i32>,
+        referenced_declaration: i32,
+        type_descriptions: TypeDescriptions,
+    },
+    IdentifierPath {
+        node_id: i32,
+        src_location: SourceLocation,
+        nodes: Vec<ASTNode>,
+        body: Option<Box<ASTNode>>,
+        name: String,
+        name_locations: Vec<SourceLocation>,
+        referenced_declaration: i32,
     },
     IndexAccess {
         node_id: i32,
@@ -200,6 +497,14 @@ pub enum ASTNode {
         src_location: SourceLocation,
         nodes: Vec<ASTNode>,
         body: Option<Box<ASTNode>>,
+        hex_value: String,
+        is_constant: bool,
+        is_l_value: bool,
+        is_pure: bool,
+        kind: LiteralKind,
+        l_value_requested: bool,
+        type_descriptions: TypeDescriptions,
+        value: String,
     },
     MemberAccess {
         node_id: i32,
@@ -230,8 +535,7 @@ pub enum ASTNode {
     Block {
         node_id: i32,
         src_location: SourceLocation,
-        nodes: Vec<ASTNode>,
-        body: Option<Box<ASTNode>>,
+        statements: Vec<ASTNode>,
     },
     Break {
         node_id: i32,
@@ -322,118 +626,18 @@ pub enum ASTNode {
         src_location: SourceLocation,
         nodes: Vec<ASTNode>,
         body: Option<Box<ASTNode>>,
+        constant: bool,
+        function_selector: Option<String>,
+        mutability: VariableMutability,
+        name: String,
+        name_location: SourceLocation,
+        scope: i32,
+        state_variable: bool,
+        storage_location: StorageLocation,
+        type_name: Box<ASTNode>,
+        visibility: VariableVisibility,
     },
     WhileStatement {
-        node_id: i32,
-        src_location: SourceLocation,
-        nodes: Vec<ASTNode>,
-        body: Option<Box<ASTNode>>,
-    },
-
-    // Yul nodes
-    YulAssignment {
-        node_id: i32,
-        src_location: SourceLocation,
-        nodes: Vec<ASTNode>,
-        body: Option<Box<ASTNode>>,
-    },
-    YulBlock {
-        node_id: i32,
-        src_location: SourceLocation,
-        nodes: Vec<ASTNode>,
-        body: Option<Box<ASTNode>>,
-    },
-    YulBreak {
-        node_id: i32,
-        src_location: SourceLocation,
-        nodes: Vec<ASTNode>,
-        body: Option<Box<ASTNode>>,
-    },
-    YulCase {
-        node_id: i32,
-        src_location: SourceLocation,
-        nodes: Vec<ASTNode>,
-        body: Option<Box<ASTNode>>,
-    },
-    YulContinue {
-        node_id: i32,
-        src_location: SourceLocation,
-        nodes: Vec<ASTNode>,
-        body: Option<Box<ASTNode>>,
-    },
-    YulExpressionStatement {
-        node_id: i32,
-        src_location: SourceLocation,
-        nodes: Vec<ASTNode>,
-        body: Option<Box<ASTNode>>,
-    },
-    YulLeave {
-        node_id: i32,
-        src_location: SourceLocation,
-        nodes: Vec<ASTNode>,
-        body: Option<Box<ASTNode>>,
-    },
-    YulForLoop {
-        node_id: i32,
-        src_location: SourceLocation,
-        nodes: Vec<ASTNode>,
-        body: Option<Box<ASTNode>>,
-    },
-    YulFunctionDefinition {
-        node_id: i32,
-        src_location: SourceLocation,
-        nodes: Vec<ASTNode>,
-        body: Option<Box<ASTNode>>,
-    },
-    YulIf {
-        node_id: i32,
-        src_location: SourceLocation,
-        nodes: Vec<ASTNode>,
-        body: Option<Box<ASTNode>>,
-    },
-    YulSwitch {
-        node_id: i32,
-        src_location: SourceLocation,
-        nodes: Vec<ASTNode>,
-        body: Option<Box<ASTNode>>,
-    },
-    YulVariableDeclaration {
-        node_id: i32,
-        src_location: SourceLocation,
-        nodes: Vec<ASTNode>,
-        body: Option<Box<ASTNode>>,
-    },
-    YulFunctionCall {
-        node_id: i32,
-        src_location: SourceLocation,
-        nodes: Vec<ASTNode>,
-        body: Option<Box<ASTNode>>,
-    },
-    YulIdentifier {
-        node_id: i32,
-        src_location: SourceLocation,
-        nodes: Vec<ASTNode>,
-        body: Option<Box<ASTNode>>,
-    },
-    YulLiteral {
-        node_id: i32,
-        src_location: SourceLocation,
-        nodes: Vec<ASTNode>,
-        body: Option<Box<ASTNode>>,
-    },
-    YulLiteralValue {
-        node_id: i32,
-        src_location: SourceLocation,
-        nodes: Vec<ASTNode>,
-        body: Option<Box<ASTNode>>,
-    },
-    YulHexValue {
-        node_id: i32,
-        src_location: SourceLocation,
-        nodes: Vec<ASTNode>,
-        body: Option<Box<ASTNode>>,
-    },
-    YulTypedName {
         node_id: i32,
         src_location: SourceLocation,
         nodes: Vec<ASTNode>,
@@ -445,7 +649,11 @@ pub enum ASTNode {
         node_id: i32,
         src_location: SourceLocation,
         nodes: Vec<ASTNode>,
-        body: Option<Box<ASTNode>>,
+        abstract_: bool,
+        base_contracts: Vec<ASTNode>,
+        name: String,
+        name_location: SourceLocation,
+        contract_kind: ContractKind,
     },
     FunctionDefinition {
         node_id: i32,
@@ -505,14 +713,14 @@ pub enum ASTNode {
     PragmaDirective {
         node_id: i32,
         src_location: SourceLocation,
-        nodes: Vec<ASTNode>,
-        body: Option<Box<ASTNode>>,
+        literals: Vec<String>,
     },
     ImportDirective {
         node_id: i32,
         src_location: SourceLocation,
-        nodes: Vec<ASTNode>,
-        body: Option<Box<ASTNode>>,
+        absolute_path: String,
+        file: String,
+        source_unit: i32,
     },
     UsingForDirective {
         node_id: i32,
@@ -526,19 +734,19 @@ pub enum ASTNode {
         node_id: i32,
         src_location: SourceLocation,
         nodes: Vec<ASTNode>,
-        body: Option<Box<ASTNode>>,
     },
     InheritanceSpecifier {
         node_id: i32,
         src_location: SourceLocation,
-        nodes: Vec<ASTNode>,
-        body: Option<Box<ASTNode>>,
+        base_name: Box<ASTNode>,
     },
     ElementaryTypeName {
         node_id: i32,
         src_location: SourceLocation,
         nodes: Vec<ASTNode>,
         body: Option<Box<ASTNode>>,
+        name: String,
+        type_descriptions: Option<TypeDescriptions>,
     },
     FunctionTypeName {
         node_id: i32,
@@ -583,6 +791,12 @@ pub enum ASTNode {
         body: Option<Box<ASTNode>>,
     },
 
+    StructuredDocumentation {
+        node_id: i32,
+        src_location: SourceLocation,
+        text: String,
+    },
+
     // Catch-all for unknown node types
     Other {
         node_id: i32,
@@ -603,6 +817,7 @@ impl ASTNode {
             ASTNode::FunctionCall { node_id, .. } => *node_id,
             ASTNode::FunctionCallOptions { node_id, .. } => *node_id,
             ASTNode::Identifier { node_id, .. } => *node_id,
+            ASTNode::IdentifierPath { node_id, .. } => *node_id,
             ASTNode::IndexAccess { node_id, .. } => *node_id,
             ASTNode::IndexRangeAccess { node_id, .. } => *node_id,
             ASTNode::Literal { node_id, .. } => *node_id,
@@ -627,24 +842,6 @@ impl ASTNode {
             ASTNode::VariableDeclarationStatement { node_id, .. } => *node_id,
             ASTNode::VariableDeclaration { node_id, .. } => *node_id,
             ASTNode::WhileStatement { node_id, .. } => *node_id,
-            ASTNode::YulAssignment { node_id, .. } => *node_id,
-            ASTNode::YulBlock { node_id, .. } => *node_id,
-            ASTNode::YulBreak { node_id, .. } => *node_id,
-            ASTNode::YulCase { node_id, .. } => *node_id,
-            ASTNode::YulContinue { node_id, .. } => *node_id,
-            ASTNode::YulExpressionStatement { node_id, .. } => *node_id,
-            ASTNode::YulLeave { node_id, .. } => *node_id,
-            ASTNode::YulForLoop { node_id, .. } => *node_id,
-            ASTNode::YulFunctionDefinition { node_id, .. } => *node_id,
-            ASTNode::YulIf { node_id, .. } => *node_id,
-            ASTNode::YulSwitch { node_id, .. } => *node_id,
-            ASTNode::YulVariableDeclaration { node_id, .. } => *node_id,
-            ASTNode::YulFunctionCall { node_id, .. } => *node_id,
-            ASTNode::YulIdentifier { node_id, .. } => *node_id,
-            ASTNode::YulLiteral { node_id, .. } => *node_id,
-            ASTNode::YulLiteralValue { node_id, .. } => *node_id,
-            ASTNode::YulHexValue { node_id, .. } => *node_id,
-            ASTNode::YulTypedName { node_id, .. } => *node_id,
             ASTNode::ContractDefinition { node_id, .. } => *node_id,
             ASTNode::FunctionDefinition { node_id, .. } => *node_id,
             ASTNode::EventDefinition { node_id, .. } => *node_id,
@@ -666,6 +863,7 @@ impl ASTNode {
             ASTNode::UserDefinedTypeName { node_id, .. } => *node_id,
             ASTNode::ArrayTypeName { node_id, .. } => *node_id,
             ASTNode::Mapping { node_id, .. } => *node_id,
+            ASTNode::StructuredDocumentation { node_id, .. } => *node_id,
             ASTNode::Other { node_id, .. } => *node_id,
         }
     }
@@ -679,6 +877,7 @@ impl ASTNode {
             ASTNode::FunctionCall { src_location, .. } => src_location,
             ASTNode::FunctionCallOptions { src_location, .. } => src_location,
             ASTNode::Identifier { src_location, .. } => src_location,
+            ASTNode::IdentifierPath { src_location, .. } => src_location,
             ASTNode::IndexAccess { src_location, .. } => src_location,
             ASTNode::IndexRangeAccess { src_location, .. } => src_location,
             ASTNode::Literal { src_location, .. } => src_location,
@@ -703,24 +902,6 @@ impl ASTNode {
             ASTNode::VariableDeclarationStatement { src_location, .. } => src_location,
             ASTNode::VariableDeclaration { src_location, .. } => src_location,
             ASTNode::WhileStatement { src_location, .. } => src_location,
-            ASTNode::YulAssignment { src_location, .. } => src_location,
-            ASTNode::YulBlock { src_location, .. } => src_location,
-            ASTNode::YulBreak { src_location, .. } => src_location,
-            ASTNode::YulCase { src_location, .. } => src_location,
-            ASTNode::YulContinue { src_location, .. } => src_location,
-            ASTNode::YulExpressionStatement { src_location, .. } => src_location,
-            ASTNode::YulLeave { src_location, .. } => src_location,
-            ASTNode::YulForLoop { src_location, .. } => src_location,
-            ASTNode::YulFunctionDefinition { src_location, .. } => src_location,
-            ASTNode::YulIf { src_location, .. } => src_location,
-            ASTNode::YulSwitch { src_location, .. } => src_location,
-            ASTNode::YulVariableDeclaration { src_location, .. } => src_location,
-            ASTNode::YulFunctionCall { src_location, .. } => src_location,
-            ASTNode::YulIdentifier { src_location, .. } => src_location,
-            ASTNode::YulLiteral { src_location, .. } => src_location,
-            ASTNode::YulLiteralValue { src_location, .. } => src_location,
-            ASTNode::YulHexValue { src_location, .. } => src_location,
-            ASTNode::YulTypedName { src_location, .. } => src_location,
             ASTNode::ContractDefinition { src_location, .. } => src_location,
             ASTNode::FunctionDefinition { src_location, .. } => src_location,
             ASTNode::EventDefinition { src_location, .. } => src_location,
@@ -742,6 +923,7 @@ impl ASTNode {
             ASTNode::UserDefinedTypeName { src_location, .. } => src_location,
             ASTNode::ArrayTypeName { src_location, .. } => src_location,
             ASTNode::Mapping { src_location, .. } => src_location,
+            ASTNode::StructuredDocumentation { src_location, .. } => src_location,
             ASTNode::Other { src_location, .. } => src_location,
         }
     }
@@ -770,42 +952,359 @@ impl ASTNode {
                 nodes,
                 body,
             },
-            NodeType::BinaryOperation => ASTNode::BinaryOperation {
-                node_id,
-                src_location,
-                nodes,
-                body,
-            },
+            NodeType::BinaryOperation => {
+                let common_type = node
+                    .other
+                    .get("commonType")
+                    .ok_or_else(|| "BinaryOperation missing commonType".to_string())
+                    .and_then(|v| TypeDescriptions::from_json(v))?;
+
+                let is_constant = node
+                    .other
+                    .get("isConstant")
+                    .and_then(|v| v.as_bool())
+                    .ok_or_else(|| "BinaryOperation missing isConstant".to_string())?;
+
+                let is_l_value = node
+                    .other
+                    .get("isLValue")
+                    .and_then(|v| v.as_bool())
+                    .ok_or_else(|| "BinaryOperation missing isLValue".to_string())?;
+
+                let is_pure = node
+                    .other
+                    .get("isPure")
+                    .and_then(|v| v.as_bool())
+                    .ok_or_else(|| "BinaryOperation missing isPure".to_string())?;
+
+                let l_value_requested = node
+                    .other
+                    .get("lValueRequested")
+                    .and_then(|v| v.as_bool())
+                    .ok_or_else(|| "BinaryOperation missing lValueRequested".to_string())?;
+
+                let left_expression = node
+                    .other
+                    .get("leftExpression")
+                    .ok_or_else(|| "BinaryOperation missing leftExpression".to_string())
+                    .and_then(|v| {
+                        serde_json::from_value::<Node>(v.clone())
+                            .map_err(|_| "Invalid leftExpression".to_string())
+                    })
+                    .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
+
+                let operator_str = node
+                    .other
+                    .get("operator")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "BinaryOperation missing operator".to_string())?;
+                let operator = BinaryOperator::from_str(operator_str)
+                    .map_err(|e| format!("Invalid binary operator: {}", e))?;
+
+                let right_expression = node
+                    .other
+                    .get("rightExpression")
+                    .ok_or_else(|| "BinaryOperation missing rightExpression".to_string())
+                    .and_then(|v| {
+                        serde_json::from_value::<Node>(v.clone())
+                            .map_err(|_| "Invalid rightExpression".to_string())
+                    })
+                    .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
+
+                let type_descriptions = node
+                    .other
+                    .get("typeDescriptions")
+                    .ok_or_else(|| "BinaryOperation missing typeDescriptions".to_string())
+                    .and_then(|v| TypeDescriptions::from_json(v))?;
+
+                ASTNode::BinaryOperation {
+                    node_id,
+                    src_location,
+                    nodes,
+                    body,
+                    common_type,
+                    is_constant,
+                    is_l_value,
+                    is_pure,
+                    l_value_requested,
+                    left_expression,
+                    operator,
+                    right_expression,
+                    type_descriptions,
+                }
+            }
             NodeType::Conditional => ASTNode::Conditional {
                 node_id,
                 src_location,
                 nodes,
                 body,
             },
-            NodeType::ElementaryTypeNameExpression => ASTNode::ElementaryTypeNameExpression {
-                node_id,
-                src_location,
-                nodes,
-                body,
-            },
-            NodeType::FunctionCall => ASTNode::FunctionCall {
-                node_id,
-                src_location,
-                nodes,
-                body,
-            },
+            NodeType::ElementaryTypeNameExpression => {
+                let argument_types = node
+                    .other
+                    .get("argumentTypes")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| ArgumentType::from_json(v).ok())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let is_constant = node
+                    .other
+                    .get("isConstant")
+                    .and_then(|v| v.as_bool())
+                    .ok_or_else(|| "ElementaryTypeNameExpression missing isConstant".to_string())?;
+                let is_l_value = node
+                    .other
+                    .get("isLValue")
+                    .and_then(|v| v.as_bool())
+                    .ok_or_else(|| "ElementaryTypeNameExpression missing isLValue".to_string())?;
+                let is_pure = node
+                    .other
+                    .get("isPure")
+                    .and_then(|v| v.as_bool())
+                    .ok_or_else(|| "ElementaryTypeNameExpression missing isPure".to_string())?;
+                let l_value_requested = node
+                    .other
+                    .get("lValueRequested")
+                    .and_then(|v| v.as_bool())
+                    .ok_or_else(|| {
+                        "ElementaryTypeNameExpression missing lValueRequested".to_string()
+                    })?;
+                let type_descriptions = node
+                    .other
+                    .get("typeDescriptions")
+                    .ok_or_else(|| {
+                        "ElementaryTypeNameExpression missing typeDescriptions".to_string()
+                    })
+                    .and_then(|v| TypeDescriptions::from_json(v))?;
+                let type_name = node
+                    .other
+                    .get("typeName")
+                    .ok_or_else(|| "ElementaryTypeNameExpression missing typeName".to_string())
+                    .and_then(|v| {
+                        serde_json::from_value::<Node>(v.clone())
+                            .map_err(|_| "Invalid typeName".to_string())
+                    })
+                    .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
+
+                ASTNode::ElementaryTypeNameExpression {
+                    node_id,
+                    src_location,
+                    nodes,
+                    body,
+                    argument_types,
+                    is_constant,
+                    is_l_value,
+                    is_pure,
+                    l_value_requested,
+                    type_descriptions,
+                    type_name,
+                }
+            }
+            NodeType::FunctionCall => {
+                let empty_vec = vec![];
+                let arguments_json = node
+                    .other
+                    .get("arguments")
+                    .and_then(|v| v.as_array())
+                    .unwrap_or(&empty_vec);
+                let arguments: Result<Vec<ASTNode>, String> = arguments_json
+                    .iter()
+                    .map(|v| {
+                        serde_json::from_value::<Node>(v.clone())
+                            .map_err(|_| "Invalid argument".to_string())
+                            .and_then(|n| ASTNode::try_from_node(&n))
+                    })
+                    .collect();
+                let arguments = arguments?;
+
+                let expression = node
+                    .other
+                    .get("expression")
+                    .ok_or_else(|| "FunctionCall missing expression".to_string())
+                    .and_then(|v| {
+                        serde_json::from_value::<Node>(v.clone())
+                            .map_err(|_| "Invalid expression".to_string())
+                    })
+                    .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
+
+                let is_constant = node
+                    .other
+                    .get("isConstant")
+                    .and_then(|v| v.as_bool())
+                    .ok_or_else(|| "FunctionCall missing isConstant".to_string())?;
+
+                let is_l_value = node
+                    .other
+                    .get("isLValue")
+                    .and_then(|v| v.as_bool())
+                    .ok_or_else(|| "FunctionCall missing isLValue".to_string())?;
+
+                let is_pure = node
+                    .other
+                    .get("isPure")
+                    .and_then(|v| v.as_bool())
+                    .ok_or_else(|| "FunctionCall missing isPure".to_string())?;
+
+                let kind_str = node
+                    .other
+                    .get("kind")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "FunctionCall missing kind".to_string())?;
+                let kind = FunctionCallKind::from_str(kind_str)
+                    .map_err(|e| format!("Invalid function call kind: {}", e))?;
+
+                let l_value_requested = node
+                    .other
+                    .get("lValueRequested")
+                    .and_then(|v| v.as_bool())
+                    .ok_or_else(|| "FunctionCall missing lValueRequested".to_string())?;
+
+                let name_locations = node
+                    .other
+                    .get("nameLocations")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| {
+                                v.as_str().and_then(|s| SourceLocation::from_str(s).ok())
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
+                let names = node
+                    .other
+                    .get("names")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
+                let try_call = node
+                    .other
+                    .get("tryCall")
+                    .and_then(|v| v.as_bool())
+                    .ok_or_else(|| "FunctionCall missing tryCall".to_string())?;
+
+                let type_descriptions = node
+                    .other
+                    .get("typeDescriptions")
+                    .ok_or_else(|| "FunctionCall missing typeDescriptions".to_string())
+                    .and_then(|v| TypeDescriptions::from_json(v))?;
+
+                ASTNode::FunctionCall {
+                    node_id,
+                    src_location,
+                    nodes,
+                    body,
+                    arguments,
+                    expression,
+                    is_constant,
+                    is_l_value,
+                    is_pure,
+                    kind,
+                    l_value_requested,
+                    name_locations,
+                    names,
+                    try_call,
+                    type_descriptions,
+                }
+            }
             NodeType::FunctionCallOptions => ASTNode::FunctionCallOptions {
                 node_id,
                 src_location,
                 nodes,
                 body,
             },
-            NodeType::Identifier => ASTNode::Identifier {
-                node_id,
-                src_location,
-                nodes,
-                body,
-            },
+            NodeType::Identifier => {
+                let name = node
+                    .other
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "Identifier missing name".to_string())?
+                    .to_string();
+
+                let overloaded_declarations = node
+                    .other
+                    .get("overloadedDeclarations")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_u64().map(|n| n as i32))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
+                let referenced_declaration = node
+                    .other
+                    .get("referencedDeclaration")
+                    .and_then(|v| v.as_u64())
+                    .ok_or_else(|| "Identifier missing referencedDeclaration".to_string())?
+                    as i32;
+
+                let type_descriptions = node
+                    .other
+                    .get("typeDescriptions")
+                    .ok_or_else(|| "Identifier missing typeDescriptions".to_string())
+                    .and_then(|v| TypeDescriptions::from_json(v))?;
+
+                ASTNode::Identifier {
+                    node_id,
+                    src_location,
+                    nodes,
+                    body,
+                    name,
+                    overloaded_declarations,
+                    referenced_declaration,
+                    type_descriptions,
+                }
+            }
+            NodeType::Other(ref node_type_str) if node_type_str == "IdentifierPath" => {
+                let name = node
+                    .other
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "IdentifierPath missing name".to_string())?
+                    .to_string();
+
+                let name_locations: Result<Vec<SourceLocation>, String> = node
+                    .other
+                    .get("nameLocations")
+                    .and_then(|v| v.as_array())
+                    .ok_or_else(|| "IdentifierPath missing nameLocations".to_string())?
+                    .iter()
+                    .map(|v| {
+                        v.as_str()
+                            .ok_or_else(|| "Invalid nameLocation".to_string())
+                            .and_then(|s| SourceLocation::from_str(s).map_err(|e| e.to_string()))
+                    })
+                    .collect();
+
+                let name_locations = name_locations?;
+
+                let referenced_declaration = node
+                    .other
+                    .get("referencedDeclaration")
+                    .and_then(|v| v.as_i64())
+                    .ok_or_else(|| "IdentifierPath missing referencedDeclaration".to_string())?
+                    as i32;
+
+                ASTNode::IdentifierPath {
+                    node_id,
+                    src_location,
+                    nodes,
+                    body,
+                    name,
+                    name_locations,
+                    referenced_declaration,
+                }
+            }
             NodeType::IndexAccess => ASTNode::IndexAccess {
                 node_id,
                 src_location,
@@ -818,12 +1317,67 @@ impl ASTNode {
                 nodes,
                 body,
             },
-            NodeType::Literal => ASTNode::Literal {
-                node_id,
-                src_location,
-                nodes,
-                body,
-            },
+            NodeType::Literal => {
+                let hex_value = node
+                    .other
+                    .get("hexValue")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "Literal missing hexValue".to_string())?
+                    .to_string();
+                let is_constant = node
+                    .other
+                    .get("isConstant")
+                    .and_then(|v| v.as_bool())
+                    .ok_or_else(|| "Literal missing isConstant".to_string())?;
+                let is_l_value = node
+                    .other
+                    .get("isLValue")
+                    .and_then(|v| v.as_bool())
+                    .ok_or_else(|| "Literal missing isLValue".to_string())?;
+                let is_pure = node
+                    .other
+                    .get("isPure")
+                    .and_then(|v| v.as_bool())
+                    .ok_or_else(|| "Literal missing isPure".to_string())?;
+                let kind_str = node
+                    .other
+                    .get("kind")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "Literal missing kind".to_string())?;
+                let kind = LiteralKind::from_str(kind_str)
+                    .map_err(|e| format!("Invalid literal kind: {}", e))?;
+                let l_value_requested = node
+                    .other
+                    .get("lValueRequested")
+                    .and_then(|v| v.as_bool())
+                    .ok_or_else(|| "Literal missing lValueRequested".to_string())?;
+                let type_descriptions = node
+                    .other
+                    .get("typeDescriptions")
+                    .ok_or_else(|| "Literal missing typeDescriptions".to_string())
+                    .and_then(|v| TypeDescriptions::from_json(v))?;
+                let value = node
+                    .other
+                    .get("value")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "Literal missing value".to_string())?
+                    .to_string();
+
+                ASTNode::Literal {
+                    node_id,
+                    src_location,
+                    nodes,
+                    body,
+                    hex_value,
+                    is_constant,
+                    is_l_value,
+                    is_pure,
+                    kind,
+                    l_value_requested,
+                    type_descriptions,
+                    value,
+                }
+            }
             NodeType::MemberAccess => ASTNode::MemberAccess {
                 node_id,
                 src_location,
@@ -848,12 +1402,29 @@ impl ASTNode {
                 nodes,
                 body,
             },
-            NodeType::Block => ASTNode::Block {
-                node_id,
-                src_location,
-                nodes,
-                body,
-            },
+            NodeType::Block => {
+                let empty_vec = vec![];
+                let statements_json = node
+                    .other
+                    .get("statements")
+                    .and_then(|v| v.as_array())
+                    .unwrap_or(&empty_vec);
+                let statements: Result<Vec<ASTNode>, String> = statements_json
+                    .iter()
+                    .map(|v| {
+                        serde_json::from_value::<Node>(v.clone())
+                            .map_err(|_| "Invalid statement in Block".to_string())
+                    })
+                    .map(|node_result| node_result.and_then(|n| ASTNode::try_from_node(&n)))
+                    .collect();
+                let statements = statements?;
+
+                ASTNode::Block {
+                    node_id,
+                    src_location,
+                    statements,
+                }
+            }
             NodeType::Break => ASTNode::Break {
                 node_id,
                 src_location,
@@ -938,12 +1509,89 @@ impl ASTNode {
                 nodes,
                 body,
             },
-            NodeType::VariableDeclaration => ASTNode::VariableDeclaration {
-                node_id,
-                src_location,
-                nodes,
-                body,
-            },
+            NodeType::VariableDeclaration => {
+                let constant = node
+                    .other
+                    .get("constant")
+                    .and_then(|v| v.as_bool())
+                    .ok_or_else(|| "VariableDeclaration missing constant".to_string())?;
+                let function_selector = node
+                    .other
+                    .get("functionSelector")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                let mutability_str = node
+                    .other
+                    .get("mutability")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "VariableDeclaration missing mutability".to_string())?;
+                let mutability = VariableMutability::from_str(mutability_str)
+                    .map_err(|e| format!("Invalid mutability: {}", e))?;
+                let name = node
+                    .other
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "VariableDeclaration missing name".to_string())?
+                    .to_string();
+                let name_location_str = node
+                    .other
+                    .get("nameLocation")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "VariableDeclaration missing nameLocation".to_string())?;
+                let name_location = SourceLocation::from_str(name_location_str)
+                    .map_err(|e| format!("Invalid nameLocation: {}", e))?;
+                let scope = node
+                    .other
+                    .get("scope")
+                    .and_then(|v| v.as_u64())
+                    .ok_or_else(|| "VariableDeclaration missing scope".to_string())?
+                    as i32;
+                let state_variable = node
+                    .other
+                    .get("stateVariable")
+                    .and_then(|v| v.as_bool())
+                    .ok_or_else(|| "VariableDeclaration missing stateVariable".to_string())?;
+                let storage_location_str = node
+                    .other
+                    .get("storageLocation")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "VariableDeclaration missing storageLocation".to_string())?;
+                let storage_location = StorageLocation::from_str(storage_location_str)
+                    .map_err(|e| format!("Invalid storageLocation: {}", e))?;
+                let type_name = node
+                    .other
+                    .get("typeName")
+                    .ok_or_else(|| "VariableDeclaration missing typeName".to_string())
+                    .and_then(|v| {
+                        serde_json::from_value::<Node>(v.clone())
+                            .map_err(|_| "Invalid typeName".to_string())
+                    })
+                    .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
+                let visibility_str = node
+                    .other
+                    .get("visibility")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "VariableDeclaration missing visibility".to_string())?;
+                let visibility = VariableVisibility::from_str(visibility_str)
+                    .map_err(|e| format!("Invalid visibility: {}", e))?;
+
+                ASTNode::VariableDeclaration {
+                    node_id,
+                    src_location,
+                    nodes,
+                    body,
+                    constant,
+                    function_selector,
+                    mutability,
+                    name,
+                    name_location,
+                    scope,
+                    state_variable,
+                    storage_location,
+                    type_name,
+                    visibility,
+                }
+            }
             NodeType::WhileStatement => ASTNode::WhileStatement {
                 node_id,
                 src_location,
@@ -968,12 +1616,63 @@ impl ASTNode {
             NodeType::YulLiteralValue => return Err("Yul nodes not supported".to_string()),
             NodeType::YulHexValue => return Err("Yul nodes not supported".to_string()),
             NodeType::YulTypedName => return Err("Yul nodes not supported".to_string()),
-            NodeType::ContractDefinition => ASTNode::ContractDefinition {
-                node_id,
-                src_location,
-                nodes,
-                body,
-            },
+            NodeType::ContractDefinition => {
+                let abstract_ = node
+                    .other
+                    .get("abstract")
+                    .and_then(|v| v.as_bool())
+                    .ok_or_else(|| "ContractDefinition missing abstract".to_string())?;
+
+                let empty_vec = vec![];
+                let base_contracts_json = node
+                    .other
+                    .get("baseContracts")
+                    .and_then(|v| v.as_array())
+                    .unwrap_or(&empty_vec);
+                let base_contracts: Result<Vec<ASTNode>, String> = base_contracts_json
+                    .iter()
+                    .map(|v| {
+                        serde_json::from_value::<Node>(v.clone())
+                            .map_err(|_| "Invalid baseContract".to_string())
+                            .and_then(|n| ASTNode::try_from_node(&n))
+                    })
+                    .collect();
+                let base_contracts = base_contracts?;
+
+                let name = node
+                    .other
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "ContractDefinition missing name".to_string())?
+                    .to_string();
+
+                let name_location_str = node
+                    .other
+                    .get("nameLocation")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "ContractDefinition missing nameLocation".to_string())?;
+                let name_location = SourceLocation::from_str(name_location_str)
+                    .map_err(|e| format!("Invalid nameLocation: {}", e))?;
+
+                let contract_kind_str = node
+                    .other
+                    .get("contractKind")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "ContractDefinition missing contractKind".to_string())?;
+                let contract_kind = ContractKind::from_str(contract_kind_str)
+                    .map_err(|e| format!("Invalid contract kind: {}", e))?;
+
+                ASTNode::ContractDefinition {
+                    node_id,
+                    src_location,
+                    nodes,
+                    abstract_,
+                    base_contracts,
+                    name,
+                    name_location,
+                    contract_kind,
+                }
+            }
             NodeType::FunctionDefinition => {
                 let body = body.ok_or_else(|| "FunctionDefinition missing body".to_string())?;
                 let function_selector = node
@@ -1120,18 +1819,50 @@ impl ASTNode {
                 nodes,
                 body,
             },
-            NodeType::PragmaDirective => ASTNode::PragmaDirective {
-                node_id,
-                src_location,
-                nodes,
-                body,
-            },
-            NodeType::ImportDirective => ASTNode::ImportDirective {
-                node_id,
-                src_location,
-                nodes,
-                body,
-            },
+            NodeType::PragmaDirective => {
+                let literals = node
+                    .other
+                    .get("literals")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| arr.iter().map(|v| v.to_string()).collect())
+                    .unwrap_or_default();
+
+                ASTNode::PragmaDirective {
+                    node_id,
+                    src_location,
+                    literals,
+                }
+            }
+            NodeType::ImportDirective => {
+                let absolute_path = node
+                    .other
+                    .get("absolutePath")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+
+                let file = node
+                    .other
+                    .get("file")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+
+                let source_unit = node
+                    .other
+                    .get("sourceUnit")
+                    .and_then(|v| v.as_u64())
+                    .map(|n| n as i32)
+                    .unwrap_or(0);
+
+                ASTNode::ImportDirective {
+                    node_id,
+                    src_location,
+                    absolute_path,
+                    file,
+                    source_unit,
+                }
+            }
             NodeType::UsingForDirective => ASTNode::UsingForDirective {
                 node_id,
                 src_location,
@@ -1142,20 +1873,45 @@ impl ASTNode {
                 node_id,
                 src_location,
                 nodes,
-                body,
             },
-            NodeType::InheritanceSpecifier => ASTNode::InheritanceSpecifier {
-                node_id,
-                src_location,
-                nodes,
-                body,
-            },
-            NodeType::ElementaryTypeName => ASTNode::ElementaryTypeName {
-                node_id,
-                src_location,
-                nodes,
-                body,
-            },
+            NodeType::InheritanceSpecifier => {
+                let base_name = node
+                    .other
+                    .get("baseName")
+                    .ok_or_else(|| "FunctionDefinition missing parameters".to_string())
+                    .and_then(|v| {
+                        serde_json::from_value::<Node>(v.clone())
+                            .map_err(|_| "Invalid parameters".to_string())
+                    })
+                    .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
+
+                ASTNode::InheritanceSpecifier {
+                    node_id,
+                    src_location,
+                    base_name,
+                }
+            }
+            NodeType::ElementaryTypeName => {
+                let name = node
+                    .other
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "ElementaryTypeName missing name".to_string())?
+                    .to_string();
+                let type_descriptions = node
+                    .other
+                    .get("typeDescriptions")
+                    .and_then(|v| TypeDescriptions::from_json_optional(v));
+
+                ASTNode::ElementaryTypeName {
+                    node_id,
+                    src_location,
+                    nodes,
+                    body,
+                    name,
+                    type_descriptions,
+                }
+            }
             NodeType::FunctionTypeName => ASTNode::FunctionTypeName {
                 node_id,
                 src_location,
@@ -1198,6 +1954,19 @@ impl ASTNode {
                 nodes,
                 body,
             },
+            NodeType::Other(ref node_type_str) if node_type_str == "StructuredDocumentation" => {
+                let text = node
+                    .other
+                    .get("text")
+                    .map(|s| s.to_string())
+                    .unwrap_or_default();
+
+                ASTNode::StructuredDocumentation {
+                    node_id,
+                    src_location,
+                    text,
+                }
+            }
             NodeType::Other(ref node_type_str) => ASTNode::Other {
                 node_id,
                 src_location,
