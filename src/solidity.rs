@@ -1,6 +1,29 @@
+use foundry_compilers::artifacts::ast;
 use foundry_compilers::artifacts::ast::{LowFidelitySourceLocation, Node};
-use foundry_compilers_artifacts::NodeType;
+use foundry_compilers_artifacts::{NodeType, Source};
 use std::str::FromStr;
+
+pub struct AST {
+    node_id: i32,
+    src_location: SourceLocation,
+    nodes: Vec<ASTNode>,
+    absolute_path: String,
+}
+
+pub fn ast_from_artifact(artifact: &ast::Ast) -> Result<AST, String> {
+    let nodes: Result<Vec<ASTNode>, String> = artifact
+        .nodes
+        .iter()
+        .map(|n| ASTNode::try_from_node(&n))
+        .collect();
+
+    Ok(AST {
+        node_id: artifact.id as i32,
+        src_location: SourceLocation::from(&artifact.src),
+        nodes: nodes?,
+        absolute_path: artifact.absolute_path.clone(),
+    })
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
 pub struct SourceLocation {
