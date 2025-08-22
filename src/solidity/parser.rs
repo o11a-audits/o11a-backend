@@ -1,7 +1,63 @@
 use foundry_compilers::artifacts::ast;
 use foundry_compilers::artifacts::ast::{LowFidelitySourceLocation, Node};
-use foundry_compilers_artifacts::{NodeType, Source};
+use foundry_compilers::{Project, ProjectPathsConfig, artifacts::Remapping};
+use foundry_compilers_artifacts::NodeType;
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::{BufRead, BufReader};
+use std::path::Path;
 use std::str::FromStr;
+use std::vec;
+
+pub fn process(root: &Path) -> HashMap<i32, AST> {
+    // Gather remappings
+    let mut remappings = vec![];
+
+    if let Ok(file) = File::open(root.join(Path::new("remappings.txt"))) {
+        let reader = BufReader::new(file);
+
+        for line in reader.lines() {
+            let line = line.unwrap();
+            // If the line is empty, skip it
+            if line.is_empty() {
+                continue;
+            }
+            let remapping = Remapping::from_str(line.as_str()).unwrap();
+            remappings.push(remapping);
+        }
+    }
+
+    let project_path_config = ProjectPathsConfig::builder()
+        .root(root)
+        .sources(ProjectPathsConfig::<_>::find_source_dir(root))
+        .libs(ProjectPathsConfig::<_>::find_libs(root))
+        .artifacts(ProjectPathsConfig::<_>::find_artifacts_dir(root))
+        .tests(root.join(Path::new("test")))
+        .cache(root.join(Path::new("cache")))
+        .remappings(remappings)
+        // The standard, implicit foundry remapping
+        .remapping(Remapping::from_str("forge-std/=lib/forge-std/src/").unwrap())
+        .build()
+        .unwrap();
+
+    let project = Project::builder()
+        .paths(project_path_config)
+        .build(Default::default())
+        .unwrap();
+
+    let output = project.compile().unwrap();
+
+    let mut ast_map = HashMap::new();
+
+    for (_artifact_id, artifact) in output.artifacts() {
+        if let Some(source_unit) = artifact.ast.as_ref() {
+            let solidity_ast = ast_from_artifact(source_unit).unwrap();
+            ast_map.insert(solidity_ast.node_id, solidity_ast);
+        }
+    }
+
+    ast_map
+}
 
 pub struct AST {
     node_id: i32,
@@ -27,7 +83,7 @@ pub fn ast_from_artifact(artifact: &ast::Ast) -> Result<AST, String> {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
 pub struct SourceLocation {
-    pub start: usize,
+    pub start: Option<usize>,
     pub length: Option<usize>,
     pub index: Option<usize>,
 }
@@ -35,7 +91,7 @@ pub struct SourceLocation {
 impl From<&LowFidelitySourceLocation> for SourceLocation {
     fn from(low_fidelity: &LowFidelitySourceLocation) -> Self {
         SourceLocation {
-            start: low_fidelity.start,
+            start: Some(low_fidelity.start),
             length: low_fidelity.length,
             index: low_fidelity.index,
         }
@@ -52,7 +108,7 @@ impl FromStr for SourceLocation {
         let start = split
             .next()
             .ok_or_else(invalid_location)?
-            .parse::<usize>()
+            .parse::<isize>()
             .map_err(|_| invalid_location())?;
         let length = split
             .next()
@@ -65,6 +121,11 @@ impl FromStr for SourceLocation {
             .parse::<isize>()
             .map_err(|_| invalid_location())?;
 
+        let start = if start < 0 {
+            None
+        } else {
+            Some(start as usize)
+        };
         let length = if length < 0 {
             None
         } else {
@@ -120,6 +181,7 @@ pub enum FunctionVisibility {
 pub enum VariableVisibility {
     Public,
     Private,
+    Internal,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -160,6 +222,7 @@ pub struct ArgumentType {
 pub enum FunctionCallKind {
     FunctionCall,
     TypeConversion,
+    StructConstructor,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -284,6 +347,7 @@ impl FromStr for VariableVisibility {
         match s {
             "public" => Ok(VariableVisibility::Public),
             "private" => Ok(VariableVisibility::Private),
+            "internal" => Ok(VariableVisibility::Internal),
             _ => Err(format!("Unknown variable visibility: {}", s)),
         }
     }
@@ -309,6 +373,7 @@ impl FromStr for FunctionCallKind {
         match s {
             "functionCall" => Ok(FunctionCallKind::FunctionCall),
             "typeConversion" => Ok(FunctionCallKind::TypeConversion),
+            "structConstructorCall" => Ok(FunctionCallKind::StructConstructor),
             _ => Err(format!("Unknown function call kind: {}", s)),
         }
     }
@@ -412,6 +477,7 @@ impl FromStr for ContractVariableVisibility {
         match s {
             "public" => Ok(ContractVariableVisibility::Public),
             "private" => Ok(ContractVariableVisibility::Private),
+            "internal" => Ok(ContractVariableVisibility::Internal),
             _ => Err(format!("Invalid contract variable visibility: {}", s)),
         }
     }
@@ -422,12 +488,12 @@ impl TypeDescriptions {
         let type_identifier = value
             .get("typeIdentifier")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| "TypeDescriptions missing typeIdentifier".to_string())?
+            .ok_or_else(|| format!("TypeDescriptions missing typeIdentifier: {:?}", value))?
             .to_string();
         let type_string = value
             .get("typeString")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| "TypeDescriptions missing typeString".to_string())?
+            .ok_or_else(|| format!("TypeDescriptions missing typeString: {:?}", value))?
             .to_string();
 
         Ok(TypeDescriptions {
@@ -442,12 +508,12 @@ impl ArgumentType {
         let type_identifier = value
             .get("typeIdentifier")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| "ArgumentType missing typeIdentifier".to_string())?
+            .ok_or_else(|| format!("ArgumentType missing typeIdentifier: {:?}", value))?
             .to_string();
         let type_string = value
             .get("typeString")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| "ArgumentType missing typeString".to_string())?
+            .ok_or_else(|| format!("ArgumentType missing typeString: {:?}", value))?
             .to_string();
 
         Ok(ArgumentType {
@@ -460,6 +526,7 @@ impl ArgumentType {
 pub enum ContractVariableVisibility {
     Public,
     Private,
+    Internal,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -689,7 +756,7 @@ pub enum ASTNode {
         node_id: i32,
         src_location: SourceLocation,
         declarations: Vec<ASTNode>,
-        initial_value: Box<ASTNode>,
+        initial_value: Option<Box<ASTNode>>,
     },
     VariableDeclaration {
         node_id: i32,
@@ -703,7 +770,7 @@ pub enum ASTNode {
         state_variable: bool,
         storage_location: StorageLocation,
         type_name: Box<ASTNode>,
-        value: Box<ASTNode>,
+        value: Option<Box<ASTNode>>,
         visibility: VariableVisibility,
     },
     WhileStatement {
@@ -727,9 +794,8 @@ pub enum ASTNode {
     FunctionDefinition {
         node_id: i32,
         src_location: SourceLocation,
-        body: Box<ASTNode>,
+        body: Option<Box<ASTNode>>,
         documentation: Option<Box<ASTNode>>,
-        function_selector: String,
         implemented: bool,
         kind: FunctionKind,
         modifiers: Vec<ASTNode>,
@@ -808,8 +874,8 @@ pub enum ASTNode {
         node_id: i32,
         src_location: SourceLocation,
         global: bool,
-        library_name: Option<Box<ASTNode>>,
-        type_name: Option<Box<ASTNode>>,
+        library_name: Box<ASTNode>,
+        type_name: Box<ASTNode>,
     },
 
     // Other nodes
@@ -1016,6 +1082,95 @@ impl ASTNode {
 }
 
 impl ASTNode {
+    // The foundry parser does not parse IdentifierPath nodes
+    pub fn try_from_value(value: &serde_json::Value) -> Result<Self, String> {
+        // Create a temporary Node-like structure from the Value
+        let node_type_str = value
+            .get("nodeType")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| format!("Missing nodeType field: {:?}", value))?;
+
+        // Handle node type conversion
+        let node_type = match node_type_str {
+            "IdentifierPath" => NodeType::Other("IdentifierPath".to_string()),
+            "StructuredDocumentation" => NodeType::Other("StructuredDocumentation".to_string()),
+            _ => {
+                // Try to parse as standard NodeType, but fall back to Other if needed
+                serde_json::from_str(&format!("\"{}\"", node_type_str))
+                    .unwrap_or_else(|_| NodeType::Other(node_type_str.to_string()))
+            }
+        };
+
+        let node_id = value.get("id").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+
+        let src_location = value
+            .get("src")
+            .and_then(|v| v.as_str())
+            .and_then(|s| SourceLocation::from_str(s).ok())
+            .unwrap_or(SourceLocation {
+                start: None,
+                length: None,
+                index: None,
+            });
+
+        // Handle the conversion based on node type
+        match node_type {
+            NodeType::Other(ref node_type_str) if node_type_str == "IdentifierPath" => {
+                let name = value
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| format!("IdentifierPath missing name: {:?}", value))?
+                    .to_string();
+
+                let name_locations: Result<Vec<SourceLocation>, String> = value
+                    .get("nameLocations")
+                    .and_then(|v| v.as_array())
+                    .ok_or_else(|| format!("IdentifierPath missing nameLocations: {:?}", value))?
+                    .iter()
+                    .map(|v| {
+                        v.as_str()
+                            .ok_or_else(|| "Invalid nameLocation".to_string())
+                            .and_then(|s| SourceLocation::from_str(s).map_err(|e| e.to_string()))
+                    })
+                    .collect();
+
+                let referenced_declaration = value
+                    .get("referencedDeclaration")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0) as i32;
+
+                Ok(ASTNode::IdentifierPath {
+                    node_id,
+                    src_location,
+                    nodes: vec![],
+                    body: None,
+                    name,
+                    name_locations: name_locations?,
+                    referenced_declaration,
+                })
+            }
+            NodeType::Other(ref node_type_str) if node_type_str == "StructuredDocumentation" => {
+                let text = value
+                    .get("text")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+
+                Ok(ASTNode::StructuredDocumentation {
+                    node_id,
+                    src_location,
+                    text,
+                })
+            }
+            _ => {
+                // For other node types, fall back to the Node conversion
+                let node: Node = serde_json::from_value(value.clone())
+                    .map_err(|e| format!("Failed to convert Value to Node: {}", e))?;
+                ASTNode::try_from_node(&node)
+            }
+        }
+    }
+
     pub fn try_from_node(node: &Node) -> Result<Self, String> {
         let node_id = node.id.map(|id| id as i32).unwrap_or(0);
         let src_location = SourceLocation::from(&node.src);
@@ -1037,27 +1192,27 @@ impl ASTNode {
                     .other
                     .get("operator")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| "Assignment missing operator".to_string())?;
+                    .ok_or_else(|| format!("Assignment missing operator: {:?}", node.other))?;
                 let operator = AssignmentOperator::from_str(operator_str)
                     .map_err(|e| format!("Invalid assignment operator: {}", e))?;
 
                 let left_hand_side = node
                     .other
                     .get("leftHandSide")
-                    .ok_or_else(|| "Assignment missing leftExpression".to_string())
+                    .ok_or_else(|| format!("Assignment missing leftExpression: {:?}", node.other))
                     .and_then(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid leftExpression".to_string())
+                            .map_err(|_| format!("Invalid leftExpression: {:?}", node.other))
                     })
                     .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
 
                 let right_and_side = node
                     .other
                     .get("rightHandSide")
-                    .ok_or_else(|| "Assignment missing rightExpression".to_string())
+                    .ok_or_else(|| format!("Assignment missing rightExpression: {:?}", node.other))
                     .and_then(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid rightExpression".to_string())
+                            .map_err(|_| format!("Invalid rightExpression: {:?}", node.other))
                     })
                     .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
 
@@ -1073,40 +1228,46 @@ impl ASTNode {
                 let common_type = node
                     .other
                     .get("commonType")
-                    .ok_or_else(|| "BinaryOperation missing commonType".to_string())
+                    .ok_or_else(|| format!("BinaryOperation missing commonType: {:?}", node.other))
                     .and_then(|v| TypeDescriptions::from_json(v))?;
 
                 let is_constant = node
                     .other
                     .get("isConstant")
                     .and_then(|v| v.as_bool())
-                    .ok_or_else(|| "BinaryOperation missing isConstant".to_string())?;
+                    .ok_or_else(|| {
+                        format!("BinaryOperation missing isConstant: {:?}", node.other)
+                    })?;
 
                 let is_l_value = node
                     .other
                     .get("isLValue")
                     .and_then(|v| v.as_bool())
-                    .ok_or_else(|| "BinaryOperation missing isLValue".to_string())?;
+                    .ok_or_else(|| format!("BinaryOperation missing isLValue: {:?}", node.other))?;
 
                 let is_pure = node
                     .other
                     .get("isPure")
                     .and_then(|v| v.as_bool())
-                    .ok_or_else(|| "BinaryOperation missing isPure".to_string())?;
+                    .ok_or_else(|| format!("BinaryOperation missing isPure: {:?}", node.other))?;
 
                 let l_value_requested = node
                     .other
                     .get("lValueRequested")
                     .and_then(|v| v.as_bool())
-                    .ok_or_else(|| "BinaryOperation missing lValueRequested".to_string())?;
+                    .ok_or_else(|| {
+                        format!("BinaryOperation missing lValueRequested: {:?}", node.other)
+                    })?;
 
                 let left_expression = node
                     .other
                     .get("leftExpression")
-                    .ok_or_else(|| "BinaryOperation missing leftExpression".to_string())
+                    .ok_or_else(|| {
+                        format!("BinaryOperation missing leftExpression: {:?}", node.other)
+                    })
                     .and_then(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid leftExpression".to_string())
+                            .map_err(|_| format!("Invalid leftExpression: {:?}", node.other))
                     })
                     .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
 
@@ -1114,24 +1275,28 @@ impl ASTNode {
                     .other
                     .get("operator")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| "BinaryOperation missing operator".to_string())?;
+                    .ok_or_else(|| format!("BinaryOperation missing operator: {:?}", node.other))?;
                 let operator = BinaryOperator::from_str(operator_str)
                     .map_err(|e| format!("Invalid binary operator: {}", e))?;
 
                 let right_expression = node
                     .other
                     .get("rightExpression")
-                    .ok_or_else(|| "BinaryOperation missing rightExpression".to_string())
+                    .ok_or_else(|| {
+                        format!("BinaryOperation missing rightExpression: {:?}", node.other)
+                    })
                     .and_then(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid rightExpression".to_string())
+                            .map_err(|_| format!("Invalid rightExpression: {:?}", node.other))
                     })
                     .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
 
                 let type_descriptions = node
                     .other
                     .get("typeDescriptions")
-                    .ok_or_else(|| "BinaryOperation missing typeDescriptions".to_string())
+                    .ok_or_else(|| {
+                        format!("BinaryOperation missing typeDescriptions: {:?}", node.other)
+                    })
                     .and_then(|v| TypeDescriptions::from_json(v))?;
 
                 ASTNode::BinaryOperation {
@@ -1154,20 +1319,20 @@ impl ASTNode {
                 let condition = node
                     .other
                     .get("condition")
-                    .ok_or_else(|| "Conditional missing condition".to_string())
+                    .ok_or_else(|| format!("Conditional missing condition: {:?}", node.other))
                     .and_then(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid condition".to_string())
+                            .map_err(|_| format!("Invalid condition: {:?}", node.other))
                     })
                     .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
 
                 let true_expression = node
                     .other
                     .get("trueExpression")
-                    .ok_or_else(|| "Conditional missing trueExpression".to_string())
+                    .ok_or_else(|| format!("Conditional missing trueExpression: {:?}", node.other))
                     .and_then(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid trueExpression".to_string())
+                            .map_err(|_| format!("Invalid trueExpression: {:?}", node.other))
                     })
                     .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
 
@@ -1176,7 +1341,7 @@ impl ASTNode {
                     .get("falseExpression")
                     .map(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid falseExpression".to_string())
+                            .map_err(|_| format!("Invalid falseExpression: {:?}", node.other))
                             .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))
                             .unwrap()
                     })
@@ -1206,17 +1371,32 @@ impl ASTNode {
                     .other
                     .get("isConstant")
                     .and_then(|v| v.as_bool())
-                    .ok_or_else(|| "ElementaryTypeNameExpression missing isConstant".to_string())?;
+                    .ok_or_else(|| {
+                        format!(
+                            "ElementaryTypeNameExpression missing isConstant: {:?}",
+                            node.other
+                        )
+                    })?;
                 let is_l_value = node
                     .other
                     .get("isLValue")
                     .and_then(|v| v.as_bool())
-                    .ok_or_else(|| "ElementaryTypeNameExpression missing isLValue".to_string())?;
+                    .ok_or_else(|| {
+                        format!(
+                            "ElementaryTypeNameExpression missing isLValue: {:?}",
+                            node.other
+                        )
+                    })?;
                 let is_pure = node
                     .other
                     .get("isPure")
                     .and_then(|v| v.as_bool())
-                    .ok_or_else(|| "ElementaryTypeNameExpression missing isPure".to_string())?;
+                    .ok_or_else(|| {
+                        format!(
+                            "ElementaryTypeNameExpression missing isPure: {:?}",
+                            node.other
+                        )
+                    })?;
                 let l_value_requested = node
                     .other
                     .get("lValueRequested")
@@ -1234,10 +1414,15 @@ impl ASTNode {
                 let type_name = node
                     .other
                     .get("typeName")
-                    .ok_or_else(|| "ElementaryTypeNameExpression missing typeName".to_string())
+                    .ok_or_else(|| {
+                        format!(
+                            "ElementaryTypeNameExpression missing typeName: {:?}",
+                            node.other
+                        )
+                    })
                     .and_then(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid typeName".to_string())
+                            .map_err(|_| format!("Invalid typeName: {:?}", node.other))
                     })
                     .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
 
@@ -1266,7 +1451,7 @@ impl ASTNode {
                     .iter()
                     .map(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid argument".to_string())
+                            .map_err(|_| format!("Invalid argument: {:?}", node.other))
                             .and_then(|n| ASTNode::try_from_node(&n))
                     })
                     .collect();
@@ -1275,10 +1460,10 @@ impl ASTNode {
                 let expression = node
                     .other
                     .get("expression")
-                    .ok_or_else(|| "FunctionCall missing expression".to_string())
+                    .ok_or_else(|| format!("FunctionCall missing expression: {:?}", node.other))
                     .and_then(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid expression".to_string())
+                            .map_err(|_| format!("Invalid expression: {:?}", node.other))
                     })
                     .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
 
@@ -1286,25 +1471,25 @@ impl ASTNode {
                     .other
                     .get("isConstant")
                     .and_then(|v| v.as_bool())
-                    .ok_or_else(|| "FunctionCall missing isConstant".to_string())?;
+                    .ok_or_else(|| format!("FunctionCall missing isConstant: {:?}", node.other))?;
 
                 let is_l_value = node
                     .other
                     .get("isLValue")
                     .and_then(|v| v.as_bool())
-                    .ok_or_else(|| "FunctionCall missing isLValue".to_string())?;
+                    .ok_or_else(|| format!("FunctionCall missing isLValue: {:?}", node.other))?;
 
                 let is_pure = node
                     .other
                     .get("isPure")
                     .and_then(|v| v.as_bool())
-                    .ok_or_else(|| "FunctionCall missing isPure".to_string())?;
+                    .ok_or_else(|| format!("FunctionCall missing isPure: {:?}", node.other))?;
 
                 let kind_str = node
                     .other
                     .get("kind")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| "FunctionCall missing kind".to_string())?;
+                    .ok_or_else(|| format!("FunctionCall missing kind: {:?}", node.other))?;
                 let kind = FunctionCallKind::from_str(kind_str)
                     .map_err(|e| format!("Invalid function call kind: {}", e))?;
 
@@ -1312,7 +1497,9 @@ impl ASTNode {
                     .other
                     .get("lValueRequested")
                     .and_then(|v| v.as_bool())
-                    .ok_or_else(|| "FunctionCall missing lValueRequested".to_string())?;
+                    .ok_or_else(|| {
+                        format!("FunctionCall missing lValueRequested: {:?}", node.other)
+                    })?;
 
                 let name_locations = node
                     .other
@@ -1342,12 +1529,14 @@ impl ASTNode {
                     .other
                     .get("tryCall")
                     .and_then(|v| v.as_bool())
-                    .ok_or_else(|| "FunctionCall missing tryCall".to_string())?;
+                    .ok_or_else(|| format!("FunctionCall missing tryCall: {:?}", node.other))?;
 
                 let type_descriptions = node
                     .other
                     .get("typeDescriptions")
-                    .ok_or_else(|| "FunctionCall missing typeDescriptions".to_string())
+                    .ok_or_else(|| {
+                        format!("FunctionCall missing typeDescriptions: {:?}", node.other)
+                    })
                     .and_then(|v| TypeDescriptions::from_json(v))?;
 
                 ASTNode::FunctionCall {
@@ -1370,10 +1559,12 @@ impl ASTNode {
                 let expression = node
                     .other
                     .get("expression")
-                    .ok_or_else(|| "FunctionCallOptions missing expression".to_string())
+                    .ok_or_else(|| {
+                        format!("FunctionCallOptions missing expression: {:?}", node.other)
+                    })
                     .and_then(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid expression".to_string())
+                            .map_err(|_| format!("Invalid expression: {:?}", node.other))
                     })
                     .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
 
@@ -1404,7 +1595,7 @@ impl ASTNode {
                     .other
                     .get("name")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| "Identifier missing name".to_string())?
+                    .ok_or_else(|| format!("Identifier missing name: {:?}", node.other))?
                     .to_string();
 
                 let overloaded_declarations = node
@@ -1413,7 +1604,7 @@ impl ASTNode {
                     .and_then(|v| v.as_array())
                     .map(|arr| {
                         arr.iter()
-                            .filter_map(|v| v.as_u64().map(|n| n as i32))
+                            .filter_map(|v| v.as_i64().map(|n| n as i32))
                             .collect()
                     })
                     .unwrap_or_default();
@@ -1421,14 +1612,15 @@ impl ASTNode {
                 let referenced_declaration = node
                     .other
                     .get("referencedDeclaration")
-                    .and_then(|v| v.as_u64())
-                    .ok_or_else(|| "Identifier missing referencedDeclaration".to_string())?
-                    as i32;
+                    .and_then(|v| v.as_i64())
+                    .ok_or_else(|| {
+                        format!("Identifier missing referencedDeclaration {:?}", node.other)
+                    })? as i32;
 
                 let type_descriptions = node
                     .other
                     .get("typeDescriptions")
-                    .ok_or_else(|| "Identifier missing typeDescriptions".to_string())
+                    .ok_or_else(|| format!("Identifier missing typeDescriptions: {:?}", node.other))
                     .and_then(|v| TypeDescriptions::from_json(v))?;
 
                 ASTNode::Identifier {
@@ -1447,19 +1639,28 @@ impl ASTNode {
                     .other
                     .get("name")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| "IdentifierPath missing name".to_string())?
+                    .ok_or_else(|| format!("IdentifierPath missing name: {:?}", node.other))?
                     .to_string();
 
                 let name_locations: Result<Vec<SourceLocation>, String> = node
                     .other
                     .get("nameLocations")
                     .and_then(|v| v.as_array())
-                    .ok_or_else(|| "IdentifierPath missing nameLocations".to_string())?
+                    .ok_or_else(|| {
+                        format!("IdentifierPath missing nameLocations: {:?}", node.other)
+                    })?
                     .iter()
                     .map(|v| {
                         v.as_str()
-                            .ok_or_else(|| "Invalid nameLocation".to_string())
-                            .and_then(|s| SourceLocation::from_str(s).map_err(|e| e.to_string()))
+                            .ok_or_else(|| format!("Invalid nameLocation: {:?}", node.other))
+                            .and_then(|s| {
+                                SourceLocation::from_str(s).map_err(|e| {
+                                    format!(
+                                        "Invalid nameLocation format: {}, node: {:?}",
+                                        e, node.other
+                                    )
+                                })
+                            })
                     })
                     .collect();
 
@@ -1469,8 +1670,12 @@ impl ASTNode {
                     .other
                     .get("referencedDeclaration")
                     .and_then(|v| v.as_i64())
-                    .ok_or_else(|| "IdentifierPath missing referencedDeclaration".to_string())?
-                    as i32;
+                    .ok_or_else(|| {
+                        format!(
+                            "IdentifierPath missing referencedDeclaration: {:?}",
+                            node.other
+                        )
+                    })? as i32;
 
                 ASTNode::IdentifierPath {
                     node_id,
@@ -1486,20 +1691,20 @@ impl ASTNode {
                 let base_expression = node
                     .other
                     .get("baseExpression")
-                    .ok_or_else(|| "IndexAccess missing baseExpression".to_string())
+                    .ok_or_else(|| format!("IndexAccess missing baseExpression: {:?}", node.other))
                     .and_then(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid baseExpression".to_string())
+                            .map_err(|_| format!("Invalid baseExpression: {:?}", node.other))
                     })
                     .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
 
                 let index_expression = node
                     .other
                     .get("indexExpression")
-                    .ok_or_else(|| "IndexAccess missing indexExpression".to_string())
+                    .ok_or_else(|| format!("IndexAccess missing indexExpression: {:?}", node.other))
                     .and_then(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid indexExpression".to_string())
+                            .map_err(|_| format!("Invalid indexExpression: {:?}", node.other))
                     })
                     .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
 
@@ -1521,45 +1726,45 @@ impl ASTNode {
                     .other
                     .get("hexValue")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| "Literal missing hexValue".to_string())?
+                    .ok_or_else(|| format!("Literal missing hexValue: {:?}", node.other))?
                     .to_string();
                 let is_constant = node
                     .other
                     .get("isConstant")
                     .and_then(|v| v.as_bool())
-                    .ok_or_else(|| "Literal missing isConstant".to_string())?;
+                    .ok_or_else(|| format!("Literal missing isConstant: {:?}", node.other))?;
                 let is_l_value = node
                     .other
                     .get("isLValue")
                     .and_then(|v| v.as_bool())
-                    .ok_or_else(|| "Literal missing isLValue".to_string())?;
+                    .ok_or_else(|| format!("Literal missing isLValue: {:?}", node.other))?;
                 let is_pure = node
                     .other
                     .get("isPure")
                     .and_then(|v| v.as_bool())
-                    .ok_or_else(|| "Literal missing isPure".to_string())?;
+                    .ok_or_else(|| format!("Literal missing isPure: {:?}", node.other))?;
                 let kind_str = node
                     .other
                     .get("kind")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| "Literal missing kind".to_string())?;
+                    .ok_or_else(|| format!("Literal missing kind: {:?}", node.other))?;
                 let kind = LiteralKind::from_str(kind_str)
                     .map_err(|e| format!("Invalid literal kind: {}", e))?;
                 let l_value_requested = node
                     .other
                     .get("lValueRequested")
                     .and_then(|v| v.as_bool())
-                    .ok_or_else(|| "Literal missing lValueRequested".to_string())?;
+                    .ok_or_else(|| format!("Literal missing lValueRequested: {:?}", node.other))?;
                 let type_descriptions = node
                     .other
                     .get("typeDescriptions")
-                    .ok_or_else(|| "Literal missing typeDescriptions".to_string())
+                    .ok_or_else(|| format!("Literal missing typeDescriptions: {:?}", node.other))
                     .and_then(|v| TypeDescriptions::from_json(v))?;
                 let value = node
                     .other
                     .get("value")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| "Literal missing value".to_string())?
+                    .ok_or_else(|| format!("Literal missing value: {:?}", node.other))?
                     .to_string();
 
                 ASTNode::Literal {
@@ -1581,10 +1786,10 @@ impl ASTNode {
                 let expression = node
                     .other
                     .get("expression")
-                    .ok_or_else(|| "MemberAccess missing expression".to_string())
+                    .ok_or_else(|| format!("MemberAccess missing expression: {:?}", node.other))
                     .and_then(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid expression".to_string())
+                            .map_err(|_| format!("Invalid expression: {:?}", node.other))
                     })
                     .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
 
@@ -1592,7 +1797,7 @@ impl ASTNode {
                     .other
                     .get("memberName")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| "MemberAccess missing memberName".to_string())?
+                    .ok_or_else(|| format!("MemberAccess missing memberName: {:?}", node.other))?
                     .to_string();
 
                 let member_location = node
@@ -1649,17 +1854,19 @@ impl ASTNode {
                     .other
                     .get("operator")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| "UnaryOperation missing operator".to_string())?;
+                    .ok_or_else(|| format!("UnaryOperation missing operator: {:?}", node.other))?;
                 let operator = UnaryOperator::from_str(operator_str)
                     .map_err(|e| format!("Invalid unary operator: {}", e))?;
 
                 let sub_expression = node
                     .other
                     .get("subExpression")
-                    .ok_or_else(|| "UnaryOperation missing subExpression".to_string())
+                    .ok_or_else(|| {
+                        format!("UnaryOperation missing subExpression: {:?}", node.other)
+                    })
                     .and_then(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid subExpression".to_string())
+                            .map_err(|_| format!("Invalid subExpression: {:?}", node.other))
                     })
                     .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
 
@@ -1682,7 +1889,7 @@ impl ASTNode {
                     .iter()
                     .map(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid statement in Block".to_string())
+                            .map_err(|_| format!("Invalid statement in Block: {:?}", node.other))
                     })
                     .map(|node_result| node_result.and_then(|n| ASTNode::try_from_node(&n)))
                     .collect();
@@ -1712,10 +1919,10 @@ impl ASTNode {
                 let event_call = node
                     .other
                     .get("eventCall")
-                    .ok_or_else(|| "EmitStatement missing eventCall".to_string())
+                    .ok_or_else(|| format!("EmitStatement missing eventCall: {:?}", node.other))
                     .and_then(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid eventCall".to_string())
+                            .map_err(|_| format!("Invalid eventCall: {:?}", node.other))
                     })
                     .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
 
@@ -1729,10 +1936,12 @@ impl ASTNode {
                 let expression = node
                     .other
                     .get("expression")
-                    .ok_or_else(|| "ExpressionStatement missing expression".to_string())
+                    .ok_or_else(|| {
+                        format!("ExpressionStatement missing expression: {:?}", node.other)
+                    })
                     .and_then(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid expression".to_string())
+                            .map_err(|_| format!("Invalid expression: {:?}", node.other))
                     })
                     .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
 
@@ -1743,43 +1952,44 @@ impl ASTNode {
                 }
             }
             NodeType::ForStatement => {
-                let body = node
-                    .other
-                    .get("body")
-                    .ok_or_else(|| "ForStatement missing body".to_string())
-                    .and_then(|v| {
-                        serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid body".to_string())
-                    })
-                    .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
+                let body = match body {
+                    Option::Some(b) => Ok(b),
+                    Option::None => Err(format!("ForStatement missing body: {:?}", node.other)),
+                }?;
 
                 let condition = node
                     .other
                     .get("condition")
-                    .ok_or_else(|| "ForStatement missing condition".to_string())
+                    .ok_or_else(|| format!("ForStatement missing condition: {:?}", node.other))
                     .and_then(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid condition".to_string())
+                            .map_err(|_| format!("Invalid condition: {:?}", node.other))
                     })
                     .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
 
                 let initialization_expression = node
                     .other
                     .get("initializationExpression")
-                    .ok_or_else(|| "ForStatement missing initializationExpression".to_string())
+                    .ok_or_else(|| {
+                        format!(
+                            "ForStatement missing initializationExpression: {:?}",
+                            node.other
+                        )
+                    })
                     .and_then(|v| {
-                        serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid initializationExpression".to_string())
+                        serde_json::from_value::<Node>(v.clone()).map_err(|_| {
+                            format!("Invalid initializationExpression: {:?}", node.other)
+                        })
                     })
                     .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
 
                 let increment_expression = node
                     .other
                     .get("loopExpression")
-                    .ok_or_else(|| "ForStatement missing loopExpression".to_string())
+                    .ok_or_else(|| format!("ForStatement missing loopExpression: {:?}", node.other))
                     .and_then(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid loopExpression".to_string())
+                            .map_err(|_| format!("Invalid loopExpression: {:?}", node.other))
                     })
                     .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
 
@@ -1806,20 +2016,20 @@ impl ASTNode {
                 let condition = node
                     .other
                     .get("condition")
-                    .ok_or_else(|| "IfStatement missing condition".to_string())
+                    .ok_or_else(|| format!("IfStatement missing condition: {:?}", node.other))
                     .and_then(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid condition".to_string())
+                            .map_err(|_| format!("Invalid condition: {:?}", node.other))
                     })
                     .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
 
                 let true_body = node
                     .other
                     .get("trueBody")
-                    .ok_or_else(|| "IfStatement missing trueBody".to_string())
+                    .ok_or_else(|| format!("IfStatement missing trueBody: {:?}", node.other))
                     .and_then(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid trueBody".to_string())
+                            .map_err(|_| format!("Invalid trueBody: {:?}", node.other))
                     })
                     .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
 
@@ -1828,7 +2038,7 @@ impl ASTNode {
                     .get("falseBody")
                     .map(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid falseBody".to_string())
+                            .map_err(|_| format!("Invalid falseBody: {:?}", node.other))
                             .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))
                     })
                     .transpose()?;
@@ -1879,10 +2089,10 @@ impl ASTNode {
                 let error_call = node
                     .other
                     .get("errorCall")
-                    .ok_or_else(|| "RevertStatement missing errorCall".to_string())
+                    .ok_or_else(|| format!("RevertStatement missing errorCall: {:?}", node.other))
                     .and_then(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid errorCall".to_string())
+                            .map_err(|_| format!("Invalid errorCall: {:?}", node.other))
                     })
                     .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
 
@@ -1923,12 +2133,12 @@ impl ASTNode {
                 let initial_value = node
                     .other
                     .get("initialValue")
-                    .ok_or_else(|| "VariableDeclarationStatement missing initialValue".to_string())
-                    .and_then(|v| {
+                    .map(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid initialValue".to_string())
+                            .map_err(|_| format!("Invalid initialValue: {:?}", node.other))
+                            .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))
                     })
-                    .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
+                    .transpose()?;
 
                 ASTNode::VariableDeclarationStatement {
                     node_id,
@@ -1942,7 +2152,9 @@ impl ASTNode {
                     .other
                     .get("constant")
                     .and_then(|v| v.as_bool())
-                    .ok_or_else(|| "VariableDeclaration missing constant".to_string())?;
+                    .ok_or_else(|| {
+                        format!("VariableDeclaration missing constant: {:?}", node.other)
+                    })?;
                 let function_selector = node
                     .other
                     .get("functionSelector")
@@ -1952,63 +2164,81 @@ impl ASTNode {
                     .other
                     .get("mutability")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| "VariableDeclaration missing mutability".to_string())?;
+                    .ok_or_else(|| {
+                        format!("VariableDeclaration missing mutability: {:?}", node.other)
+                    })?;
                 let mutability = VariableMutability::from_str(mutability_str)
                     .map_err(|e| format!("Invalid mutability: {}", e))?;
                 let name = node
                     .other
                     .get("name")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| "VariableDeclaration missing name".to_string())?
+                    .ok_or_else(|| format!("VariableDeclaration missing name: {:?}", node.other))?
                     .to_string();
                 let name_location_str = node
                     .other
                     .get("nameLocation")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| "VariableDeclaration missing nameLocation".to_string())?;
+                    .ok_or_else(|| {
+                        format!("VariableDeclaration missing nameLocation: {:?}", node.other)
+                    })?;
                 let name_location = SourceLocation::from_str(name_location_str)
                     .map_err(|e| format!("Invalid nameLocation: {}", e))?;
                 let scope = node
                     .other
                     .get("scope")
-                    .and_then(|v| v.as_u64())
-                    .ok_or_else(|| "VariableDeclaration missing scope".to_string())?
+                    .and_then(|v| v.as_i64())
+                    .ok_or_else(|| format!("VariableDeclaration missing scope: {:?}", node.other))?
                     as i32;
                 let state_variable = node
                     .other
                     .get("stateVariable")
                     .and_then(|v| v.as_bool())
-                    .ok_or_else(|| "VariableDeclaration missing stateVariable".to_string())?;
+                    .ok_or_else(|| {
+                        format!(
+                            "VariableDeclaration missing stateVariable: {:?}",
+                            node.other
+                        )
+                    })?;
                 let storage_location_str = node
                     .other
                     .get("storageLocation")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| "VariableDeclaration missing storageLocation".to_string())?;
+                    .ok_or_else(|| {
+                        format!(
+                            "VariableDeclaration missing storageLocation: {:?}",
+                            node.other
+                        )
+                    })?;
                 let storage_location = StorageLocation::from_str(storage_location_str)
                     .map_err(|e| format!("Invalid storageLocation: {}", e))?;
                 let type_name = node
                     .other
                     .get("typeName")
-                    .ok_or_else(|| "VariableDeclaration missing typeName".to_string())
+                    .ok_or_else(|| {
+                        format!("VariableDeclaration missing typeName: {:?}", node.other)
+                    })
                     .and_then(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid typeName".to_string())
+                            .map_err(|_| format!("Invalid typeName: {:?}", node.other))
                     })
                     .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
                 let value = node
                     .other
                     .get("value")
-                    .ok_or_else(|| "VariableDeclaration missing value".to_string())
-                    .and_then(|v| {
+                    .map(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid value".to_string())
+                            .map_err(|_| format!("Invalid value: {:?}", node.other))
+                            .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))
                     })
-                    .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
+                    .transpose()?;
                 let visibility_str = node
                     .other
                     .get("visibility")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| "VariableDeclaration missing visibility".to_string())?;
+                    .ok_or_else(|| {
+                        format!("VariableDeclaration missing visibility: {:?}", node.other)
+                    })?;
                 let visibility = VariableVisibility::from_str(visibility_str)
                     .map_err(|e| format!("Invalid visibility: {}", e))?;
 
@@ -2057,7 +2287,9 @@ impl ASTNode {
                     .other
                     .get("abstract")
                     .and_then(|v| v.as_bool())
-                    .ok_or_else(|| "ContractDefinition missing abstract".to_string())?;
+                    .ok_or_else(|| {
+                        format!("ContractDefinition missing abstract: {:?}", node.other)
+                    })?;
 
                 let empty_vec = vec![];
                 let base_contracts_json = node
@@ -2069,7 +2301,7 @@ impl ASTNode {
                     .iter()
                     .map(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid baseContract".to_string())
+                            .map_err(|_| format!("Invalid baseContract: {:?}", node.other))
                             .and_then(|n| ASTNode::try_from_node(&n))
                     })
                     .collect();
@@ -2079,14 +2311,16 @@ impl ASTNode {
                     .other
                     .get("name")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| "ContractDefinition missing name".to_string())?
+                    .ok_or_else(|| format!("ContractDefinition missing name: {:?}", node.other))?
                     .to_string();
 
                 let name_location_str = node
                     .other
                     .get("nameLocation")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| "ContractDefinition missing nameLocation".to_string())?;
+                    .ok_or_else(|| {
+                        format!("ContractDefinition missing nameLocation: {:?}", node.other)
+                    })?;
                 let name_location = SourceLocation::from_str(name_location_str)
                     .map_err(|e| format!("Invalid nameLocation: {}", e))?;
 
@@ -2094,7 +2328,9 @@ impl ASTNode {
                     .other
                     .get("contractKind")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| "ContractDefinition missing contractKind".to_string())?;
+                    .ok_or_else(|| {
+                        format!("ContractDefinition missing contractKind: {:?}", node.other)
+                    })?;
                 let contract_kind = ContractKind::from_str(contract_kind_str)
                     .map_err(|e| format!("Invalid contract kind: {}", e))?;
 
@@ -2110,23 +2346,18 @@ impl ASTNode {
                 }
             }
             NodeType::FunctionDefinition => {
-                let body = body.ok_or_else(|| "FunctionDefinition missing body".to_string())?;
-                let function_selector = node
-                    .other
-                    .get("functionSelector")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| "FunctionDefinition missing functionSelector".to_string())?
-                    .to_string();
                 let implemented = node
                     .other
                     .get("implemented")
                     .and_then(|v| v.as_bool())
-                    .ok_or_else(|| "FunctionDefinition missing implemented".to_string())?;
+                    .ok_or_else(|| {
+                        format!("FunctionDefinition missing implemented: {:?}", node.other)
+                    })?;
                 let kind_str = node
                     .other
                     .get("kind")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| "FunctionDefinition missing kind".to_string())?;
+                    .ok_or_else(|| format!("FunctionDefinition missing kind: {:?}", node.other))?;
                 let kind = FunctionKind::from_str(kind_str)
                     .map_err(|e| format!("Invalid function kind: {}", e))?;
                 let modifiers = node
@@ -2148,74 +2379,91 @@ impl ASTNode {
                     .other
                     .get("name")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| "FunctionDefinition missing name".to_string())?
+                    .ok_or_else(|| format!("FunctionDefinition missing name: {:?}", node.other))?
                     .to_string();
                 let name_location_str = node
                     .other
                     .get("nameLocation")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| "FunctionDefinition missing nameLocation".to_string())?;
+                    .ok_or_else(|| {
+                        format!("FunctionDefinition missing nameLocation: {:?}", node.other)
+                    })?;
                 let name_location = SourceLocation::from_str(name_location_str)
                     .map_err(|e| format!("Invalid nameLocation: {}", e))?;
                 let parameters = node
                     .other
                     .get("parameters")
-                    .ok_or_else(|| "FunctionDefinition missing parameters".to_string())
+                    .ok_or_else(|| {
+                        format!("FunctionDefinition missing parameters: {:?}", node.other)
+                    })
                     .and_then(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid parameters".to_string())
+                            .map_err(|_| format!("Invalid parameters: {:?}", node.other))
                     })
                     .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
                 let return_parameters = node
                     .other
                     .get("returnParameters")
-                    .ok_or_else(|| "FunctionDefinition missing returnParameters".to_string())
+                    .ok_or_else(|| {
+                        format!(
+                            "FunctionDefinition missing returnParameters: {:?}",
+                            node.other
+                        )
+                    })
                     .and_then(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid returnParameters".to_string())
+                            .map_err(|_| format!("Invalid returnParameters: {:?}", node.other))
                     })
                     .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
                 let scope = node
                     .other
                     .get("scope")
-                    .and_then(|v| v.as_u64())
-                    .ok_or_else(|| "FunctionDefinition missing scope".to_string())?
+                    .and_then(|v| v.as_i64())
+                    .ok_or_else(|| format!("FunctionDefinition missing scope: {:?}", node.other))?
                     as i32;
                 let state_mutability_str = node
                     .other
                     .get("stateMutability")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| "FunctionDefinition missing stateMutability".to_string())?;
+                    .ok_or_else(|| {
+                        format!(
+                            "FunctionDefinition missing stateMutability: {:?}",
+                            node.other
+                        )
+                    })?;
                 let state_mutability = FunctionStateMutability::from_str(state_mutability_str)
                     .map_err(|e| format!("Invalid state mutability: {}", e))?;
                 let virtual_ = node
                     .other
                     .get("virtual")
                     .and_then(|v| v.as_bool())
-                    .ok_or_else(|| "FunctionDefinition missing virtual".to_string())?;
+                    .ok_or_else(|| {
+                        format!("FunctionDefinition missing virtual: {:?}", node.other)
+                    })?;
                 let visibility_str = node
                     .other
                     .get("visibility")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| "FunctionDefinition missing visibility".to_string())?;
+                    .ok_or_else(|| {
+                        format!("FunctionDefinition missing visibility: {:?}", node.other)
+                    })?;
                 let visibility = FunctionVisibility::from_str(visibility_str)
                     .map_err(|e| format!("Invalid visibility: {}", e))?;
-                let documentation_ = node
+                let documentation = node
                     .other
                     .get("documentation")
-                    .ok_or_else(|| "FunctionDefinition missing documentation".to_string())?;
-                let documentation = serde_json::from_value::<Node>(documentation_.clone())
-                    .map_err(|_| "Invalid returnParameters".to_string())
-                    .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))
-                    .map(|n| Option::Some(n))
-                    .unwrap_or(Option::None);
+                    .map(|d| {
+                        ASTNode::try_from_value(d)
+                            .map_err(|e| format!("Invalid documentation: {}", d))
+                            .map(Box::new)
+                    })
+                    .transpose()?;
 
                 ASTNode::FunctionDefinition {
                     node_id,
                     src_location,
                     body,
                     documentation,
-                    function_selector,
                     implemented,
                     kind,
                     modifiers,
@@ -2234,7 +2482,7 @@ impl ASTNode {
                     .other
                     .get("name")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| "EventDefinition missing name".to_string())?
+                    .ok_or_else(|| format!("EventDefinition missing name: {:?}", node.other))?
                     .to_string();
 
                 let name_location = node
@@ -2247,10 +2495,10 @@ impl ASTNode {
                 let parameters = node
                     .other
                     .get("parameters")
-                    .ok_or_else(|| "EventDefinition missing parameters".to_string())
+                    .ok_or_else(|| format!("EventDefinition missing parameters: {:?}", node.other))
                     .and_then(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid parameters".to_string())
+                            .map_err(|_| format!("Invalid parameters: {:?}", node.other))
                     })
                     .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
 
@@ -2267,7 +2515,7 @@ impl ASTNode {
                     .other
                     .get("name")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| "ErrorDefinition missing name".to_string())?
+                    .ok_or_else(|| format!("ErrorDefinition missing name: {:?}", node.other))?
                     .to_string();
 
                 let name_location = node
@@ -2280,10 +2528,10 @@ impl ASTNode {
                 let parameters = node
                     .other
                     .get("parameters")
-                    .ok_or_else(|| "ErrorDefinition missing parameters".to_string())
+                    .ok_or_else(|| format!("ParameterList missing parameters: {:?}", node.other))
                     .and_then(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid parameters".to_string())
+                            .map_err(|_| format!("Invalid parameters: {:?}", node.other))
                     })
                     .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
 
@@ -2296,39 +2544,48 @@ impl ASTNode {
                 }
             }
             NodeType::ModifierDefinition => {
-                let body = body.ok_or_else(|| "ModifierDefinition missing body".to_string())?;
+                let body = body
+                    .ok_or_else(|| format!("ModifierDefinition missing body: {:?}", node.other))?;
                 let name = node
                     .other
                     .get("name")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| "ModifierDefinition missing name".to_string())?
+                    .ok_or_else(|| format!("ModifierDefinition missing name: {:?}", node.other))?
                     .to_string();
                 let name_location_str = node
                     .other
                     .get("nameLocation")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| "ModifierDefinition missing nameLocation".to_string())?;
+                    .ok_or_else(|| {
+                        format!("ModifierDefinition missing nameLocation: {:?}", node.other)
+                    })?;
                 let name_location = SourceLocation::from_str(name_location_str)
                     .map_err(|e| format!("Invalid nameLocation: {}", e))?;
                 let parameters = node
                     .other
                     .get("parameters")
-                    .ok_or_else(|| "ModifierDefinition missing parameters".to_string())
+                    .ok_or_else(|| {
+                        format!("ModifierDefinition missing parameters: {:?}", node.other)
+                    })
                     .and_then(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid parameters".to_string())
+                            .map_err(|_| format!("Invalid parameters: {:?}", node.other))
                     })
                     .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
                 let virtual_ = node
                     .other
                     .get("virtual")
                     .and_then(|v| v.as_bool())
-                    .ok_or_else(|| "ModifierDefinition missing virtual".to_string())?;
+                    .ok_or_else(|| {
+                        format!("ModifierDefinition missing virtual: {:?}", node.other)
+                    })?;
                 let visibility_str = node
                     .other
                     .get("visibility")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| "ModifierDefinition missing visibility".to_string())?;
+                    .ok_or_else(|| {
+                        format!("ModifierDefinition missing visibility: {:?}", node.other)
+                    })?;
                 let visibility = FunctionVisibility::from_str(visibility_str)
                     .map_err(|e| format!("Invalid visibility: {}", e))?;
                 let documentation = node.other.get("documentation").and_then(|v| {
@@ -2354,7 +2611,7 @@ impl ASTNode {
                     .other
                     .get("name")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| "StructDefinition missing name".to_string())?
+                    .ok_or_else(|| format!("StructDefinition missing name: {:?}", node.other))?
                     .to_string();
 
                 let name_location = node
@@ -2408,7 +2665,7 @@ impl ASTNode {
                     .other
                     .get("name")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| "EnumDefinition missing name".to_string())?
+                    .ok_or_else(|| format!("EnumDefinition missing name: {:?}", node.other))?
                     .to_string();
 
                 let name_location = node
@@ -2487,7 +2744,7 @@ impl ASTNode {
                 let source_unit = node
                     .other
                     .get("sourceUnit")
-                    .and_then(|v| v.as_u64())
+                    .and_then(|v| v.as_i64())
                     .map(|n| n as i32)
                     .unwrap_or(0);
 
@@ -2504,27 +2761,27 @@ impl ASTNode {
                     .other
                     .get("global")
                     .and_then(|v| v.as_bool())
-                    .ok_or_else(|| "UsingForDirective missing global".to_string())?;
+                    .ok_or_else(|| format!("UsingForDirective missing global: {:?}", node.other))?;
 
                 let library_name = node
                     .other
                     .get("libraryName")
-                    .map(|v| {
-                        serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid libraryName".to_string())
-                            .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))
+                    .ok_or_else(|| {
+                        format!("UsingForDirective missing libraryName: {:?}", node.other)
                     })
-                    .transpose()?;
+                    .and_then(|v| {
+                        ASTNode::try_from_value(v).map_err(|e| format!("Invalid pathNode: {}", e))
+                    })
+                    .map(Box::new)?;
 
                 let type_name = node
                     .other
                     .get("typeName")
-                    .map(|v| {
-                        serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid typeName".to_string())
-                            .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))
+                    .ok_or_else(|| format!("UsingForDirective missing typeName: {:?}", node.other))
+                    .and_then(|v| {
+                        ASTNode::try_from_value(v).map_err(|e| format!("Invalid pathNode: {}", e))
                     })
-                    .transpose()?;
+                    .map(Box::new)?;
 
                 ASTNode::UsingForDirective {
                     node_id,
@@ -2543,12 +2800,13 @@ impl ASTNode {
                 let base_name = node
                     .other
                     .get("baseName")
-                    .ok_or_else(|| "FunctionDefinition missing parameters".to_string())
-                    .and_then(|v| {
-                        serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid parameters".to_string())
+                    .ok_or_else(|| {
+                        format!("InheritanceSpecifier missing baseName: {:?}", node.other)
                     })
-                    .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
+                    .and_then(|v| {
+                        ASTNode::try_from_value(v).map_err(|e| format!("Invalid baseName: {}", e))
+                    })
+                    .map(Box::new)?;
 
                 ASTNode::InheritanceSpecifier {
                     node_id,
@@ -2561,7 +2819,7 @@ impl ASTNode {
                     .other
                     .get("name")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| "ElementaryTypeName missing name".to_string())?
+                    .ok_or_else(|| format!("ElementaryTypeName missing name: {:?}", node.other))?
                     .to_string();
 
                 ASTNode::ElementaryTypeName {
@@ -2609,11 +2867,13 @@ impl ASTNode {
             NodeType::ModifierInvocation => {
                 let modifier_name = node
                     .other
-                    .get("modifier_name")
-                    .ok_or_else(|| "ModifierInvocation missing modifier_name".to_string())
+                    .get("modifierName")
+                    .ok_or_else(|| {
+                        format!("ModifierInvocation missing modifierName: {:?}", node.other)
+                    })
                     .and_then(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid modifier_name".to_string())
+                            .map_err(|_| format!("Invalid modifier_name: {:?}", node.other))
                     })
                     .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
 
@@ -2625,7 +2885,7 @@ impl ASTNode {
                         v.iter()
                             .map(|i| {
                                 serde_json::from_value::<Node>(i.clone())
-                                    .map_err(|_| "Invalid argument".to_string())
+                                    .map_err(|_| format!("Invalid argument: {:?}", node.other))
                                     .and_then(|n| ASTNode::try_from_node(&n))
                             })
                             .collect()
@@ -2643,12 +2903,13 @@ impl ASTNode {
                 let path_node = node
                     .other
                     .get("pathNode")
-                    .ok_or_else(|| "UserDefinedTypeName missing pathNode".to_string())
-                    .and_then(|v| {
-                        serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid pathNode".to_string())
+                    .ok_or_else(|| {
+                        format!("UserDefinedTypeName missing pathNode: {:?}", node.other)
                     })
-                    .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
+                    .and_then(|v| {
+                        ASTNode::try_from_value(v).map_err(|e| format!("Invalid pathNode: {}", e))
+                    })
+                    .map(Box::new)?;
 
                 let referenced_declaration = node
                     .other
@@ -2667,10 +2928,10 @@ impl ASTNode {
                 let base_type = node
                     .other
                     .get("baseType")
-                    .ok_or_else(|| "ArrayTypeName missing baseType".to_string())
+                    .ok_or_else(|| format!("ArrayTypeName missing baseType: {:?}", node.other))
                     .and_then(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid baseType".to_string())
+                            .map_err(|_| format!("Invalid baseType: {:?}", node.other))
                     })
                     .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
 
@@ -2684,20 +2945,20 @@ impl ASTNode {
                 let key_type = node
                     .other
                     .get("keyType")
-                    .ok_or_else(|| "Mapping missing keyType".to_string())
+                    .ok_or_else(|| format!("Mapping missing keyType: {:?}", node.other))
                     .and_then(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid keyType".to_string())
+                            .map_err(|_| format!("Invalid keyType: {:?}", node.other))
                     })
                     .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
 
                 let value_type = node
                     .other
                     .get("valueType")
-                    .ok_or_else(|| "Mapping missing valueType".to_string())
+                    .ok_or_else(|| format!("Mapping missing valueType: {:?}", node.other))
                     .and_then(|v| {
                         serde_json::from_value::<Node>(v.clone())
-                            .map_err(|_| "Invalid valueType".to_string())
+                            .map_err(|_| format!("Invalid valueType: {:?}", node.other))
                     })
                     .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
 
