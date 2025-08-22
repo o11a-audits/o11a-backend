@@ -7,7 +7,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::str::FromStr;
-use std::vec;
+use std::{panic, vec};
 
 pub fn process(root: &Path) -> HashMap<i32, AST> {
     // Gather remappings
@@ -542,13 +542,6 @@ pub enum ASTNode {
     BinaryOperation {
         node_id: i32,
         src_location: SourceLocation,
-        nodes: Vec<ASTNode>,
-        body: Option<Box<ASTNode>>,
-        common_type: TypeDescriptions,
-        is_constant: bool,
-        is_l_value: bool,
-        is_pure: bool,
-        l_value_requested: bool,
         left_expression: Box<ASTNode>,
         operator: BinaryOperator,
         right_expression: Box<ASTNode>,
@@ -564,13 +557,7 @@ pub enum ASTNode {
     ElementaryTypeNameExpression {
         node_id: i32,
         src_location: SourceLocation,
-        nodes: Vec<ASTNode>,
-        body: Option<Box<ASTNode>>,
         argument_types: Vec<ArgumentType>,
-        is_constant: bool,
-        is_l_value: bool,
-        is_pure: bool,
-        l_value_requested: bool,
         type_descriptions: TypeDescriptions,
         type_name: Box<ASTNode>,
     },
@@ -579,11 +566,7 @@ pub enum ASTNode {
         src_location: SourceLocation,
         arguments: Vec<ASTNode>,
         expression: Box<ASTNode>,
-        is_constant: bool,
-        is_l_value: bool,
-        is_pure: bool,
         kind: FunctionCallKind,
-        l_value_requested: bool,
         name_locations: Vec<SourceLocation>,
         names: Vec<String>,
         try_call: bool,
@@ -598,8 +581,6 @@ pub enum ASTNode {
     Identifier {
         node_id: i32,
         src_location: SourceLocation,
-        nodes: Vec<ASTNode>,
-        body: Option<Box<ASTNode>>,
         name: String,
         overloaded_declarations: Vec<i32>,
         referenced_declaration: i32,
@@ -608,8 +589,6 @@ pub enum ASTNode {
     IdentifierPath {
         node_id: i32,
         src_location: SourceLocation,
-        nodes: Vec<ASTNode>,
-        body: Option<Box<ASTNode>>,
         name: String,
         name_locations: Vec<SourceLocation>,
         referenced_declaration: i32,
@@ -629,14 +608,8 @@ pub enum ASTNode {
     Literal {
         node_id: i32,
         src_location: SourceLocation,
-        nodes: Vec<ASTNode>,
-        body: Option<Box<ASTNode>>,
         hex_value: String,
-        is_constant: bool,
-        is_l_value: bool,
-        is_pure: bool,
         kind: LiteralKind,
-        l_value_requested: bool,
         type_descriptions: TypeDescriptions,
         value: String,
     },
@@ -708,7 +681,6 @@ pub enum ASTNode {
         body: Box<ASTNode>,
         condition: Box<ASTNode>,
         initialization_expression: Box<ASTNode>,
-        increment_expression: Box<ASTNode>,
         is_simple_counter_loop: bool,
         loop_expression: Box<ASTNode>,
     },
@@ -732,7 +704,7 @@ pub enum ASTNode {
     Return {
         node_id: i32,
         src_location: SourceLocation,
-        body: Option<Box<ASTNode>>,
+        expression: Option<Box<ASTNode>>,
         function_return_parameters: i32,
     },
     RevertStatement {
@@ -892,8 +864,6 @@ pub enum ASTNode {
     ElementaryTypeName {
         node_id: i32,
         src_location: SourceLocation,
-        nodes: Vec<ASTNode>,
-        body: Option<Box<ASTNode>>,
         name: String,
     },
     FunctionTypeName {
@@ -1079,6 +1049,260 @@ impl ASTNode {
             ASTNode::Other { src_location, .. } => src_location,
         }
     }
+
+    pub fn nodes(&self) -> Vec<&ASTNode> {
+        match self {
+            ASTNode::Assignment {
+                right_and_side,
+                left_hand_side,
+                ..
+            } => vec![right_and_side, left_hand_side],
+            ASTNode::BinaryOperation {
+                left_expression,
+                right_expression,
+                ..
+            } => vec![left_expression, right_expression],
+            ASTNode::Conditional {
+                condition,
+                true_expression,
+                false_expression,
+                ..
+            } => match false_expression {
+                Some(false_expr) => vec![condition, true_expression, false_expr],
+                None => vec![condition, true_expression],
+            },
+            ASTNode::ElementaryTypeNameExpression { .. } => vec![],
+            ASTNode::FunctionCall {
+                arguments,
+                expression,
+                ..
+            } => {
+                let mut result = vec![&**expression];
+                for item in arguments {
+                    result.push(item);
+                }
+                result
+            }
+            ASTNode::FunctionCallOptions {
+                expression,
+                options,
+                ..
+            } => {
+                let mut result = vec![&**expression];
+                for item in options {
+                    result.push(item);
+                }
+                result
+            }
+            ASTNode::Identifier { .. } => vec![],
+            ASTNode::IdentifierPath { .. } => vec![],
+            ASTNode::IndexAccess {
+                base_expression,
+                index_expression,
+                ..
+            } => vec![base_expression, index_expression],
+            ASTNode::IndexRangeAccess { .. } => panic!("IndexRangeAccess not implemented"),
+            ASTNode::Literal { .. } => vec![],
+            ASTNode::MemberAccess { expression, .. } => vec![expression],
+            ASTNode::NewExpression { .. } => panic!("New expression not implemented"),
+            ASTNode::TupleExpression { components, .. } => {
+                let mut result = vec![];
+                for item in components {
+                    result.push(item);
+                }
+                result
+            }
+            ASTNode::UnaryOperation { sub_expression, .. } => vec![sub_expression],
+            ASTNode::EnumValue { .. } => vec![],
+            ASTNode::Block { statements, .. } => {
+                let mut result = vec![];
+                for item in statements {
+                    result.push(item);
+                }
+                result
+            }
+            ASTNode::Break { .. } => vec![],
+            ASTNode::Continue { .. } => vec![],
+            ASTNode::DoWhileStatement { .. } => panic!("DoWhileStatement not implemented"),
+            ASTNode::EmitStatement { event_call, .. } => vec![event_call],
+            ASTNode::ExpressionStatement { expression, .. } => vec![expression],
+            ASTNode::ForStatement {
+                body,
+                condition,
+                initialization_expression,
+                loop_expression,
+                ..
+            } => vec![body, condition, initialization_expression, loop_expression],
+            ASTNode::IfStatement {
+                condition,
+                true_body,
+                false_body,
+                ..
+            } => match false_body {
+                Some(false_body) => vec![condition, true_body, false_body],
+                None => vec![condition, true_body],
+            },
+            ASTNode::InlineAssembly { .. } => vec![],
+            ASTNode::PlaceholderStatement { .. } => vec![],
+            ASTNode::Return { expression, .. } => match expression {
+                Some(expr) => vec![expr],
+                None => vec![],
+            },
+            ASTNode::RevertStatement { error_call, .. } => vec![error_call],
+            ASTNode::TryStatement { .. } => panic!("TryStatement not implemented"),
+            ASTNode::UncheckedBlock { .. } => panic!("UncheckedBlock not implemented"),
+            ASTNode::VariableDeclarationStatement {
+                declarations,
+                initial_value,
+                ..
+            } => {
+                let mut result = vec![];
+                for item in declarations {
+                    result.push(item);
+                }
+                match initial_value {
+                    Some(value) => result.push(value),
+                    None => {}
+                }
+                result
+            }
+            ASTNode::VariableDeclaration { value, .. } => match value {
+                Some(val) => vec![val],
+                None => vec![],
+            },
+            ASTNode::WhileStatement { .. } => panic!("WhileStatement not implemented"),
+            ASTNode::ContractDefinition {
+                nodes,
+                base_contracts,
+                ..
+            } => {
+                let mut result = vec![];
+                for item in nodes {
+                    result.push(item);
+                }
+                for item in base_contracts {
+                    result.push(item);
+                }
+                result
+            }
+            ASTNode::FunctionDefinition {
+                body,
+                documentation,
+                modifiers,
+                parameters,
+                return_parameters,
+                ..
+            } => {
+                let mut result = vec![];
+                match body {
+                    Some(body_node) => result.push(&**body_node),
+                    None => {}
+                }
+                match documentation {
+                    Some(doc) => result.push(&**doc),
+                    None => {}
+                }
+                for item in modifiers {
+                    result.push(item);
+                }
+                result.push(&**parameters);
+                result.push(&**return_parameters);
+                result
+            }
+            ASTNode::EventDefinition { parameters, .. } => vec![parameters],
+            ASTNode::ErrorDefinition { parameters, .. } => vec![parameters],
+            ASTNode::ModifierDefinition {
+                body,
+                documentation,
+                parameters,
+                ..
+            } => {
+                let mut result = vec![&**body, &**parameters];
+                match documentation {
+                    Some(doc) => result.push(doc),
+                    None => {}
+                }
+                result
+            }
+            ASTNode::StructDefinition { members, .. } => {
+                let mut result = vec![];
+                for item in members {
+                    result.push(item);
+                }
+                result
+            }
+            ASTNode::EnumDefinition { members, .. } => {
+                let mut result = vec![];
+                for item in members {
+                    result.push(item);
+                }
+                result
+            }
+            ASTNode::UserDefinedValueTypeDefinition { .. } => {
+                panic!("UserDefinedValueTypeDefinition")
+            }
+            ASTNode::PragmaDirective { .. } => vec![],
+            ASTNode::ImportDirective { .. } => vec![],
+            ASTNode::UsingForDirective {
+                library_name,
+                type_name,
+                ..
+            } => vec![library_name, type_name],
+            ASTNode::SourceUnit { nodes, .. } => {
+                let mut result = vec![];
+                for item in nodes {
+                    result.push(item);
+                }
+                result
+            }
+            ASTNode::InheritanceSpecifier { base_name, .. } => vec![base_name],
+            ASTNode::ElementaryTypeName { .. } => vec![],
+            ASTNode::FunctionTypeName { .. } => panic!("FunctionTypeName not implemented"),
+            ASTNode::ParameterList { parameters, .. } => {
+                let mut result = vec![];
+                for item in parameters {
+                    result.push(item);
+                }
+                result
+            }
+            ASTNode::TryCatchClause { .. } => panic!("TryCatchClause not implemented"),
+            ASTNode::ModifierInvocation {
+                modifier_name,
+                arguments,
+                ..
+            } => {
+                let mut result = vec![&**modifier_name];
+                match arguments {
+                    Some(args) => {
+                        for item in args {
+                            result.push(item);
+                        }
+                    }
+                    None => {}
+                }
+                result
+            }
+            ASTNode::UserDefinedTypeName { path_node, .. } => vec![path_node],
+            ASTNode::ArrayTypeName { base_type, .. } => vec![base_type],
+            ASTNode::Mapping {
+                key_type,
+                value_type,
+                ..
+            } => vec![key_type, value_type],
+            ASTNode::StructuredDocumentation { .. } => vec![],
+            ASTNode::Other { nodes, body, .. } => {
+                let mut result = vec![];
+                for item in nodes {
+                    result.push(item);
+                }
+                match body {
+                    Some(body_node) => result.push(body_node),
+                    None => {}
+                }
+                result
+            }
+        }
+    }
 }
 
 impl ASTNode {
@@ -1142,8 +1366,6 @@ impl ASTNode {
                 Ok(ASTNode::IdentifierPath {
                     node_id,
                     src_location,
-                    nodes: vec![],
-                    body: None,
                     name,
                     name_locations: name_locations?,
                     referenced_declaration,
@@ -1225,40 +1447,6 @@ impl ASTNode {
                 }
             }
             NodeType::BinaryOperation => {
-                let common_type = node
-                    .other
-                    .get("commonType")
-                    .ok_or_else(|| format!("BinaryOperation missing commonType: {:?}", node.other))
-                    .and_then(|v| TypeDescriptions::from_json(v))?;
-
-                let is_constant = node
-                    .other
-                    .get("isConstant")
-                    .and_then(|v| v.as_bool())
-                    .ok_or_else(|| {
-                        format!("BinaryOperation missing isConstant: {:?}", node.other)
-                    })?;
-
-                let is_l_value = node
-                    .other
-                    .get("isLValue")
-                    .and_then(|v| v.as_bool())
-                    .ok_or_else(|| format!("BinaryOperation missing isLValue: {:?}", node.other))?;
-
-                let is_pure = node
-                    .other
-                    .get("isPure")
-                    .and_then(|v| v.as_bool())
-                    .ok_or_else(|| format!("BinaryOperation missing isPure: {:?}", node.other))?;
-
-                let l_value_requested = node
-                    .other
-                    .get("lValueRequested")
-                    .and_then(|v| v.as_bool())
-                    .ok_or_else(|| {
-                        format!("BinaryOperation missing lValueRequested: {:?}", node.other)
-                    })?;
-
                 let left_expression = node
                     .other
                     .get("leftExpression")
@@ -1302,13 +1490,6 @@ impl ASTNode {
                 ASTNode::BinaryOperation {
                     node_id,
                     src_location,
-                    nodes,
-                    body,
-                    common_type,
-                    is_constant,
-                    is_l_value,
-                    is_pure,
-                    l_value_requested,
                     left_expression,
                     operator,
                     right_expression,
@@ -1367,43 +1548,6 @@ impl ASTNode {
                             .collect()
                     })
                     .unwrap_or_default();
-                let is_constant = node
-                    .other
-                    .get("isConstant")
-                    .and_then(|v| v.as_bool())
-                    .ok_or_else(|| {
-                        format!(
-                            "ElementaryTypeNameExpression missing isConstant: {:?}",
-                            node.other
-                        )
-                    })?;
-                let is_l_value = node
-                    .other
-                    .get("isLValue")
-                    .and_then(|v| v.as_bool())
-                    .ok_or_else(|| {
-                        format!(
-                            "ElementaryTypeNameExpression missing isLValue: {:?}",
-                            node.other
-                        )
-                    })?;
-                let is_pure = node
-                    .other
-                    .get("isPure")
-                    .and_then(|v| v.as_bool())
-                    .ok_or_else(|| {
-                        format!(
-                            "ElementaryTypeNameExpression missing isPure: {:?}",
-                            node.other
-                        )
-                    })?;
-                let l_value_requested = node
-                    .other
-                    .get("lValueRequested")
-                    .and_then(|v| v.as_bool())
-                    .ok_or_else(|| {
-                        "ElementaryTypeNameExpression missing lValueRequested".to_string()
-                    })?;
                 let type_descriptions = node
                     .other
                     .get("typeDescriptions")
@@ -1429,13 +1573,7 @@ impl ASTNode {
                 ASTNode::ElementaryTypeNameExpression {
                     node_id,
                     src_location,
-                    nodes,
-                    body,
                     argument_types,
-                    is_constant,
-                    is_l_value,
-                    is_pure,
-                    l_value_requested,
                     type_descriptions,
                     type_name,
                 }
@@ -1467,24 +1605,6 @@ impl ASTNode {
                     })
                     .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
 
-                let is_constant = node
-                    .other
-                    .get("isConstant")
-                    .and_then(|v| v.as_bool())
-                    .ok_or_else(|| format!("FunctionCall missing isConstant: {:?}", node.other))?;
-
-                let is_l_value = node
-                    .other
-                    .get("isLValue")
-                    .and_then(|v| v.as_bool())
-                    .ok_or_else(|| format!("FunctionCall missing isLValue: {:?}", node.other))?;
-
-                let is_pure = node
-                    .other
-                    .get("isPure")
-                    .and_then(|v| v.as_bool())
-                    .ok_or_else(|| format!("FunctionCall missing isPure: {:?}", node.other))?;
-
                 let kind_str = node
                     .other
                     .get("kind")
@@ -1492,14 +1612,6 @@ impl ASTNode {
                     .ok_or_else(|| format!("FunctionCall missing kind: {:?}", node.other))?;
                 let kind = FunctionCallKind::from_str(kind_str)
                     .map_err(|e| format!("Invalid function call kind: {}", e))?;
-
-                let l_value_requested = node
-                    .other
-                    .get("lValueRequested")
-                    .and_then(|v| v.as_bool())
-                    .ok_or_else(|| {
-                        format!("FunctionCall missing lValueRequested: {:?}", node.other)
-                    })?;
 
                 let name_locations = node
                     .other
@@ -1544,11 +1656,7 @@ impl ASTNode {
                     src_location,
                     arguments,
                     expression,
-                    is_constant,
-                    is_l_value,
-                    is_pure,
                     kind,
-                    l_value_requested,
                     name_locations,
                     names,
                     try_call,
@@ -1626,8 +1734,6 @@ impl ASTNode {
                 ASTNode::Identifier {
                     node_id,
                     src_location,
-                    nodes,
-                    body,
                     name,
                     overloaded_declarations,
                     referenced_declaration,
@@ -1680,8 +1786,6 @@ impl ASTNode {
                 ASTNode::IdentifierPath {
                     node_id,
                     src_location,
-                    nodes,
-                    body,
                     name,
                     name_locations,
                     referenced_declaration,
@@ -1715,12 +1819,7 @@ impl ASTNode {
                     index_expression,
                 }
             }
-            NodeType::IndexRangeAccess => ASTNode::IndexRangeAccess {
-                node_id,
-                src_location,
-                nodes,
-                body,
-            },
+            NodeType::IndexRangeAccess => panic!("IndexRangeAccess not implemented"),
             NodeType::Literal => {
                 let hex_value = node
                     .other
@@ -1728,21 +1827,6 @@ impl ASTNode {
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| format!("Literal missing hexValue: {:?}", node.other))?
                     .to_string();
-                let is_constant = node
-                    .other
-                    .get("isConstant")
-                    .and_then(|v| v.as_bool())
-                    .ok_or_else(|| format!("Literal missing isConstant: {:?}", node.other))?;
-                let is_l_value = node
-                    .other
-                    .get("isLValue")
-                    .and_then(|v| v.as_bool())
-                    .ok_or_else(|| format!("Literal missing isLValue: {:?}", node.other))?;
-                let is_pure = node
-                    .other
-                    .get("isPure")
-                    .and_then(|v| v.as_bool())
-                    .ok_or_else(|| format!("Literal missing isPure: {:?}", node.other))?;
                 let kind_str = node
                     .other
                     .get("kind")
@@ -1750,11 +1834,6 @@ impl ASTNode {
                     .ok_or_else(|| format!("Literal missing kind: {:?}", node.other))?;
                 let kind = LiteralKind::from_str(kind_str)
                     .map_err(|e| format!("Invalid literal kind: {}", e))?;
-                let l_value_requested = node
-                    .other
-                    .get("lValueRequested")
-                    .and_then(|v| v.as_bool())
-                    .ok_or_else(|| format!("Literal missing lValueRequested: {:?}", node.other))?;
                 let type_descriptions = node
                     .other
                     .get("typeDescriptions")
@@ -1770,14 +1849,8 @@ impl ASTNode {
                 ASTNode::Literal {
                     node_id,
                     src_location,
-                    nodes,
-                    body,
                     hex_value,
-                    is_constant,
-                    is_l_value,
-                    is_pure,
                     kind,
-                    l_value_requested,
                     type_descriptions,
                     value,
                 }
@@ -1983,7 +2056,7 @@ impl ASTNode {
                     })
                     .and_then(|n| ASTNode::try_from_node(&n).map(Box::new))?;
 
-                let increment_expression = node
+                let loop_expression = node
                     .other
                     .get("loopExpression")
                     .ok_or_else(|| format!("ForStatement missing loopExpression: {:?}", node.other))
@@ -1999,15 +2072,12 @@ impl ASTNode {
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
 
-                let loop_expression = increment_expression.clone();
-
                 ASTNode::ForStatement {
                     node_id,
                     src_location,
                     body,
                     condition,
                     initialization_expression,
-                    increment_expression,
                     is_simple_counter_loop,
                     loop_expression,
                 }
@@ -2062,7 +2132,7 @@ impl ASTNode {
                 src_location,
             },
             NodeType::Return => {
-                let body = node
+                let expression = node
                     .other
                     .get("expression")
                     .map(|v| {
@@ -2081,7 +2151,7 @@ impl ASTNode {
                 ASTNode::Return {
                     node_id,
                     src_location,
-                    body,
+                    expression,
                     function_return_parameters,
                 }
             }
@@ -2825,8 +2895,6 @@ impl ASTNode {
                 ASTNode::ElementaryTypeName {
                     node_id,
                     src_location,
-                    nodes,
-                    body,
                     name,
                 }
             }
