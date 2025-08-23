@@ -1306,12 +1306,204 @@ impl ASTNode {
     }
 }
 
+// Helper functions for JSON parsing
+fn get_required_i32(val: &serde_json::Value, field_name: &str) -> Result<i32, String> {
+    val.get(field_name)
+        .and_then(|v| v.as_i64())
+        .map(|v| v as i32)
+        .ok_or_else(|| format!("Missing or invalid {} field: {:?}", field_name, val))
+}
+
+fn get_required_string(val: &serde_json::Value, field_name: &str) -> Result<String, String> {
+    val.get(field_name)
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| format!("Missing or invalid {} field: {:?}", field_name, val))
+}
+
+fn get_optional_string(val: &serde_json::Value, field_name: &str) -> Option<String> {
+    val.get(field_name)
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+}
+
+fn get_required_bool(val: &serde_json::Value, field_name: &str) -> Result<bool, String> {
+    val.get(field_name)
+        .and_then(|v| v.as_bool())
+        .ok_or_else(|| format!("Missing or invalid {} field: {:?}", field_name, val))
+}
+
+fn get_required_source_location(
+    val: &serde_json::Value,
+    field_name: &str,
+) -> Result<SourceLocation, String> {
+    val.get(field_name)
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| format!("Missing {} field: {:?}", field_name, val))
+        .and_then(|v| SourceLocation::from_str(v))
+}
+
+fn get_required_enum<T: FromStr>(val: &serde_json::Value, field_name: &str) -> Result<T, String>
+where
+    T::Err: std::fmt::Debug,
+{
+    val.get(field_name)
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| format!("Missing {} field: {:?}", field_name, val))
+        .and_then(|s| {
+            s.parse()
+                .map_err(|e| format!("Failed to parse {} '{}': {:?}", field_name, s, e))
+        })
+}
+
+fn get_required_node_vec(
+    val: &serde_json::Value,
+    field_name: &str,
+) -> Result<Vec<ASTNode>, String> {
+    val.get(field_name)
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| format!("Missing or invalid {} field: {:?}", field_name, val))
+        .and_then(|arr| {
+            arr.iter()
+                .map(|item| node_from_json(item))
+                .collect::<Result<Vec<ASTNode>, String>>()
+        })
+}
+
+fn get_optional_node_vec(
+    val: &serde_json::Value,
+    field_name: &str,
+) -> Result<Option<Vec<ASTNode>>, String> {
+    match val.get(field_name) {
+        Some(v) => {
+            if v.is_null() {
+                Ok(None)
+            } else {
+                v.as_array()
+                    .ok_or_else(|| {
+                        format!("Invalid {} field (expected array): {:?}", field_name, val)
+                    })
+                    .and_then(|arr| {
+                        arr.iter()
+                            .map(|item| node_from_json(item))
+                            .collect::<Result<Vec<ASTNode>, String>>()
+                    })
+                    .map(Some)
+            }
+        }
+        None => Ok(None),
+    }
+}
+
+fn get_required_node(val: &serde_json::Value, field_name: &str) -> Result<Box<ASTNode>, String> {
+    val.get(field_name)
+        .ok_or_else(|| format!("Missing {} field: {:?}", field_name, val))
+        .and_then(|v| node_from_json(v))
+        .map(Box::new)
+}
+
+fn get_optional_node(
+    val: &serde_json::Value,
+    field_name: &str,
+) -> Result<Option<Box<ASTNode>>, String> {
+    match val.get(field_name) {
+        Some(v) => {
+            if v.is_null() {
+                Ok(None)
+            } else {
+                node_from_json(v).map(|node| Some(Box::new(node)))
+            }
+        }
+        None => Ok(None),
+    }
+}
+
+fn get_required_string_vec(
+    val: &serde_json::Value,
+    field_name: &str,
+) -> Result<Vec<String>, String> {
+    val.get(field_name)
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| format!("Missing or invalid {} field: {:?}", field_name, val))
+        .and_then(|arr| {
+            arr.iter()
+                .map(|item| {
+                    item.as_str().map(|s| s.to_string()).ok_or_else(|| {
+                        format!("Invalid string in {} array: {:?}", field_name, item)
+                    })
+                })
+                .collect::<Result<Vec<String>, String>>()
+        })
+}
+
+fn get_required_i32_vec(val: &serde_json::Value, field_name: &str) -> Result<Vec<i32>, String> {
+    val.get(field_name)
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| format!("Missing or invalid {} field: {:?}", field_name, val))
+        .and_then(|arr| {
+            arr.iter()
+                .map(|item| {
+                    item.as_i64().map(|i| i as i32).ok_or_else(|| {
+                        format!("Invalid integer in {} array: {:?}", field_name, item)
+                    })
+                })
+                .collect::<Result<Vec<i32>, String>>()
+        })
+}
+
+fn get_required_source_location_vec(
+    val: &serde_json::Value,
+    field_name: &str,
+) -> Result<Vec<SourceLocation>, String> {
+    val.get(field_name)
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| format!("Missing or invalid {} field: {:?}", field_name, val))
+        .and_then(|arr| {
+            arr.iter()
+                .map(|item| {
+                    item.as_str()
+                        .ok_or_else(|| {
+                            format!(
+                                "Invalid source location in {} array: {:?}",
+                                field_name, item
+                            )
+                        })
+                        .and_then(|s| SourceLocation::from_str(s))
+                })
+                .collect::<Result<Vec<SourceLocation>, String>>()
+        })
+}
+
+fn get_required_argument_type_vec(
+    val: &serde_json::Value,
+    field_name: &str,
+) -> Result<Vec<ArgumentType>, String> {
+    val.get(field_name)
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| format!("Missing or invalid {} field: {:?}", field_name, val))
+        .and_then(|arr| {
+            arr.iter()
+                .map(|item| ArgumentType::from_json(item))
+                .collect::<Result<Vec<ArgumentType>, String>>()
+        })
+}
+
+fn get_required_type_descriptions(
+    val: &serde_json::Value,
+    field_name: &str,
+) -> Result<TypeDescriptions, String> {
+    val.get(field_name)
+        .ok_or_else(|| format!("Missing {} field: {:?}", field_name, val))
+        .and_then(|v| TypeDescriptions::from_json(v))
+}
+
 pub fn node_from_json(val: &serde_json::Value) -> Result<ASTNode, String> {
     let node_type_str = val
         .get("nodeType")
         .and_then(|v| v.as_str())
         .ok_or_else(|| format!("Missing nodeType field: {:?}", val))?;
 
+    let node_id = get_required_i32(val, "id")?;
     let src_location = val
         .get("src")
         .and_then(|v| v.as_str())
@@ -1319,63 +1511,705 @@ pub fn node_from_json(val: &serde_json::Value) -> Result<ASTNode, String> {
         .and_then(|v| SourceLocation::from_str(v))?;
 
     match node_type_str {
-        "Assignment" => todo!(),
-        "BinaryOperation" => todo!(),
-        "Conditional" => todo!(),
-        "ElementaryTypeNameExpression" => todo!(),
-        "FunctionCall" => todo!(),
-        "FunctionCallOptions" => todo!(),
-        "Identifier" => todo!(),
-        "IdentifierPath" => todo!(),
-        "IndexAccess" => todo!(),
-        "IndexRangeAccess" => todo!(),
-        "Literal" => todo!(),
-        "MemberAccess" => todo!(),
-        "NewExpression" => todo!(),
-        "TupleExpression" => todo!(),
-        "UnaryOperation" => todo!(),
-        "EnumValue" => todo!(),
-        "Block" => todo!(),
-        "Break" => todo!(),
-        "Continue" => todo!(),
-        "DoWhileStatement" => todo!(),
-        "EmitStatement" => todo!(),
-        "ExpressionStatement" => todo!(),
-        "ForStatement" => todo!(),
-        "IfStatement" => todo!(),
-        "InlineAssembly" => todo!(),
-        "PlaceholderStatement" => todo!(),
-        "Return" => todo!(),
-        "RevertStatement" => todo!(),
-        "TryStatement" => todo!(),
-        "UncheckedBlock" => todo!(),
-        "VariableDeclarationStatement" => todo!(),
-        "VariableDeclaration" => todo!(),
-        "WhileStatement" => todo!(),
-        "ContractDefinition" => todo!(),
-        "FunctionDefinition" => todo!(),
-        "EventDefinition" => todo!(),
-        "ErrorDefinition" => todo!(),
-        "ModifierDefinition" => todo!(),
-        "StructDefinition" => todo!(),
-        "EnumDefinition" => todo!(),
-        "UserDefinedValueTypeDefinition" => todo!(),
-        "PragmaDirective" => todo!(),
-        "ImportDirective" => todo!(),
-        "UsingForDirective" => todo!(),
-        "SourceUnit" => todo!(),
-        "InheritanceSpecifier" => todo!(),
-        "ElementaryTypeName" => todo!(),
-        "FunctionTypeName" => todo!(),
-        "ParameterList" => todo!(),
-        "TryCatchClause" => todo!(),
-        "ModifierInvocation" => todo!(),
-        "UserDefinedTypeName" => todo!(),
-        "ArrayTypeName" => todo!(),
-        "Mapping" => todo!(),
-        "StructuredDocumentation" => todo!(),
+        "Assignment" => {
+            let operator = get_required_enum(val, "operator")?;
+            let right_and_side = get_required_node(val, "right")?;
+            let left_hand_side = get_required_node(val, "left")?;
+
+            Ok(ASTNode::Assignment {
+                node_id,
+                src_location,
+                operator,
+                right_and_side,
+                left_hand_side,
+            })
+        }
+        "BinaryOperation" => {
+            let left_expression = get_required_node(val, "left")?;
+            let operator = get_required_enum(val, "operator")?;
+            let right_expression = get_required_node(val, "right")?;
+            let type_descriptions = get_required_type_descriptions(val, "typeDescriptions")?;
+
+            Ok(ASTNode::BinaryOperation {
+                node_id,
+                src_location,
+                left_expression,
+                operator,
+                right_expression,
+                type_descriptions,
+            })
+        }
+        "Conditional" => {
+            let condition = get_required_node(val, "condition")?;
+            let true_expression = get_required_node(val, "trueExpression")?;
+            let false_expression = get_optional_node(val, "falseExpression")?;
+
+            Ok(ASTNode::Conditional {
+                node_id,
+                src_location,
+                condition,
+                true_expression,
+                false_expression,
+            })
+        }
+        "ElementaryTypeNameExpression" => {
+            let argument_types = get_required_argument_type_vec(val, "argumentTypes")?;
+            let type_descriptions = get_required_type_descriptions(val, "typeDescriptions")?;
+            let type_name = get_required_node(val, "typeName")?;
+
+            Ok(ASTNode::ElementaryTypeNameExpression {
+                node_id,
+                src_location,
+                argument_types,
+                type_descriptions,
+                type_name,
+            })
+        }
+        "FunctionCall" => {
+            let arguments = get_required_node_vec(val, "arguments")?;
+            let expression = get_required_node(val, "expression")?;
+            let kind = get_required_enum(val, "kind")?;
+            let name_locations = get_required_source_location_vec(val, "nameLocations")?;
+            let names = get_required_string_vec(val, "names")?;
+            let try_call = get_required_bool(val, "tryCall")?;
+            let type_descriptions = get_required_type_descriptions(val, "typeDescriptions")?;
+
+            Ok(ASTNode::FunctionCall {
+                node_id,
+                src_location,
+                arguments,
+                expression,
+                kind,
+                name_locations,
+                names,
+                try_call,
+                type_descriptions,
+            })
+        }
+        "FunctionCallOptions" => {
+            let expression = get_required_node(val, "expression")?;
+            let options = get_required_node_vec(val, "options")?;
+
+            Ok(ASTNode::FunctionCallOptions {
+                node_id,
+                src_location,
+                expression,
+                options,
+            })
+        }
+        "Identifier" => {
+            let name = get_required_string(val, "name")?;
+            let overloaded_declarations = get_required_i32_vec(val, "overloadedDeclarations")?;
+            let referenced_declaration = get_required_i32(val, "referencedDeclaration")?;
+            let type_descriptions = get_required_type_descriptions(val, "typeDescriptions")?;
+
+            Ok(ASTNode::Identifier {
+                node_id,
+                src_location,
+                name,
+                overloaded_declarations,
+                referenced_declaration,
+                type_descriptions,
+            })
+        }
+        "IdentifierPath" => {
+            let name = get_required_string(val, "name")?;
+            let name_locations = get_required_source_location_vec(val, "nameLocations")?;
+            let referenced_declaration = get_required_i32(val, "referencedDeclaration")?;
+
+            Ok(ASTNode::IdentifierPath {
+                node_id,
+                src_location,
+                name,
+                name_locations,
+                referenced_declaration,
+            })
+        }
+        "IndexAccess" => {
+            let base_expression = get_required_node(val, "baseExpression")?;
+            let index_expression = get_required_node(val, "indexExpression")?;
+
+            Ok(ASTNode::IndexAccess {
+                node_id,
+                src_location,
+                base_expression,
+                index_expression,
+            })
+        }
+        "IndexRangeAccess" => {
+            let nodes = get_required_node_vec(val, "children")?;
+            let body = get_optional_node(val, "body")?;
+
+            Ok(ASTNode::IndexRangeAccess {
+                node_id,
+                src_location,
+                nodes,
+                body,
+            })
+        }
+        "Literal" => {
+            let hex_value = get_required_string(val, "hexValue")?;
+            let kind = get_required_enum(val, "kind")?;
+            let type_descriptions = get_required_type_descriptions(val, "typeDescriptions")?;
+            let value = get_required_string(val, "value")?;
+
+            Ok(ASTNode::Literal {
+                node_id,
+                src_location,
+                hex_value,
+                kind,
+                type_descriptions,
+                value,
+            })
+        }
+        "MemberAccess" => {
+            let expression = get_required_node(val, "expression")?;
+            let member_location = get_required_source_location(val, "memberLocation")?;
+            let member_name = get_required_string(val, "memberName")?;
+
+            Ok(ASTNode::MemberAccess {
+                node_id,
+                src_location,
+                expression,
+                member_location,
+                member_name,
+            })
+        }
+        "NewExpression" => {
+            let nodes = get_required_node_vec(val, "children")?;
+            let body = get_optional_node(val, "body")?;
+
+            Ok(ASTNode::NewExpression {
+                node_id,
+                src_location,
+                nodes,
+                body,
+            })
+        }
+        "TupleExpression" => {
+            let components = get_required_node_vec(val, "components")?;
+
+            Ok(ASTNode::TupleExpression {
+                node_id,
+                src_location,
+                components,
+            })
+        }
+        "UnaryOperation" => {
+            let prefix = get_required_bool(val, "prefix")?;
+            let operator = get_required_enum(val, "operator")?;
+            let sub_expression = get_required_node(val, "subExpression")?;
+
+            Ok(ASTNode::UnaryOperation {
+                node_id,
+                src_location,
+                prefix,
+                operator,
+                sub_expression,
+            })
+        }
+        "EnumValue" => {
+            let name = get_required_string(val, "name")?;
+            let name_location = get_required_source_location(val, "nameLocation")?;
+
+            Ok(ASTNode::EnumValue {
+                node_id,
+                src_location,
+                name,
+                name_location,
+            })
+        }
+        "Block" => {
+            let statements = get_required_node_vec(val, "statements")?;
+
+            Ok(ASTNode::Block {
+                node_id,
+                src_location,
+                statements,
+            })
+        }
+        "Break" => Ok(ASTNode::Break {
+            node_id,
+            src_location,
+        }),
+        "Continue" => Ok(ASTNode::Continue {
+            node_id,
+            src_location,
+        }),
+        "DoWhileStatement" => {
+            let nodes = get_required_node_vec(val, "children")?;
+            let body = get_optional_node(val, "body")?;
+
+            Ok(ASTNode::DoWhileStatement {
+                node_id,
+                src_location,
+                nodes,
+                body,
+            })
+        }
+        "EmitStatement" => {
+            let event_call = get_required_node(val, "eventCall")?;
+
+            Ok(ASTNode::EmitStatement {
+                node_id,
+                src_location,
+                event_call,
+            })
+        }
+        "ExpressionStatement" => {
+            let expression = get_required_node(val, "expression")?;
+
+            Ok(ASTNode::ExpressionStatement {
+                node_id,
+                src_location,
+                expression,
+            })
+        }
+        "ForStatement" => {
+            let body = get_required_node(val, "body")?;
+            let condition = get_required_node(val, "condition")?;
+            let initialization_expression = get_required_node(val, "initializationExpression")?;
+            let is_simple_counter_loop = get_required_bool(val, "isSimpleCounterLoop")?;
+            let loop_expression = get_required_node(val, "loopExpression")?;
+
+            Ok(ASTNode::ForStatement {
+                node_id,
+                src_location,
+                body,
+                condition,
+                initialization_expression,
+                is_simple_counter_loop,
+                loop_expression,
+            })
+        }
+        "IfStatement" => {
+            let condition = get_required_node(val, "condition")?;
+            let true_body = get_required_node(val, "trueBody")?;
+            let false_body = get_optional_node(val, "falseBody")?;
+
+            Ok(ASTNode::IfStatement {
+                node_id,
+                src_location,
+                condition,
+                true_body,
+                false_body,
+            })
+        }
+        "InlineAssembly" => {
+            let nodes = get_required_node_vec(val, "children")?;
+            let body = get_optional_node(val, "body")?;
+
+            Ok(ASTNode::InlineAssembly {
+                node_id,
+                src_location,
+                nodes,
+                body,
+            })
+        }
+        "PlaceholderStatement" => Ok(ASTNode::PlaceholderStatement {
+            node_id,
+            src_location,
+        }),
+        "Return" => {
+            let expression = get_optional_node(val, "expression")?;
+            let function_return_parameters = get_required_i32(val, "functionReturnParameters")?;
+
+            Ok(ASTNode::Return {
+                node_id,
+                src_location,
+                expression,
+                function_return_parameters,
+            })
+        }
+        "RevertStatement" => {
+            let error_call = get_required_node(val, "errorCall")?;
+
+            Ok(ASTNode::RevertStatement {
+                node_id,
+                src_location,
+                error_call,
+            })
+        }
+        "TryStatement" => {
+            let nodes = get_required_node_vec(val, "children")?;
+            let body = get_optional_node(val, "body")?;
+
+            Ok(ASTNode::TryStatement {
+                node_id,
+                src_location,
+                nodes,
+                body,
+            })
+        }
+        "UncheckedBlock" => {
+            let nodes = get_required_node_vec(val, "children")?;
+            let body = get_optional_node(val, "body")?;
+
+            Ok(ASTNode::UncheckedBlock {
+                node_id,
+                src_location,
+                nodes,
+                body,
+            })
+        }
+        "VariableDeclarationStatement" => {
+            let declarations = get_required_node_vec(val, "declarations")?;
+            let initial_value = get_optional_node(val, "initialValue")?;
+
+            Ok(ASTNode::VariableDeclarationStatement {
+                node_id,
+                src_location,
+                declarations,
+                initial_value,
+            })
+        }
+        "VariableDeclaration" => {
+            let constant = get_required_bool(val, "constant")?;
+            let function_selector = get_optional_string(val, "functionSelector");
+            let mutability = get_required_enum(val, "mutability")?;
+            let name = get_required_string(val, "name")?;
+            let name_location = get_required_source_location(val, "nameLocation")?;
+            let scope = get_required_i32(val, "scope")?;
+            let state_variable = get_required_bool(val, "stateVariable")?;
+            let storage_location = get_required_enum(val, "storageLocation")?;
+            let type_name = get_required_node(val, "typeName")?;
+            let value = get_optional_node(val, "value")?;
+            let visibility = get_required_enum(val, "visibility")?;
+
+            Ok(ASTNode::VariableDeclaration {
+                node_id,
+                src_location,
+                constant,
+                function_selector,
+                mutability,
+                name,
+                name_location,
+                scope,
+                state_variable,
+                storage_location,
+                type_name,
+                value,
+                visibility,
+            })
+        }
+        "WhileStatement" => {
+            let nodes = get_required_node_vec(val, "children")?;
+            let body = get_optional_node(val, "body")?;
+
+            Ok(ASTNode::WhileStatement {
+                node_id,
+                src_location,
+                nodes,
+                body,
+            })
+        }
+        "ContractDefinition" => {
+            let nodes = get_required_node_vec(val, "nodes")?;
+            let abstract_ = get_required_bool(val, "abstract")?;
+            let base_contracts = get_required_node_vec(val, "baseContracts")?;
+            let name = get_required_string(val, "name")?;
+            let name_location = get_required_source_location(val, "nameLocation")?;
+            let contract_kind = get_required_enum(val, "contractKind")?;
+
+            Ok(ASTNode::ContractDefinition {
+                node_id,
+                src_location,
+                nodes,
+                abstract_,
+                base_contracts,
+                name,
+                name_location,
+                contract_kind,
+            })
+        }
+        "FunctionDefinition" => {
+            let body = get_optional_node(val, "body")?;
+            let documentation = get_optional_node(val, "documentation")?;
+            let implemented = get_required_bool(val, "implemented")?;
+            let kind = get_required_enum(val, "kind")?;
+            let modifiers = get_required_node_vec(val, "modifiers")?;
+            let name = get_required_string(val, "name")?;
+            let name_location = get_required_source_location(val, "nameLocation")?;
+            let parameters = get_required_node(val, "parameters")?;
+            let return_parameters = get_required_node(val, "returnParameters")?;
+            let scope = get_required_i32(val, "scope")?;
+            let state_mutability = get_required_enum(val, "stateMutability")?;
+            let virtual_ = get_required_bool(val, "virtual")?;
+            let visibility = get_required_enum(val, "visibility")?;
+
+            Ok(ASTNode::FunctionDefinition {
+                node_id,
+                src_location,
+                body,
+                documentation,
+                implemented,
+                kind,
+                modifiers,
+                name,
+                name_location,
+                parameters,
+                return_parameters,
+                scope,
+                state_mutability,
+                virtual_,
+                visibility,
+            })
+        }
+        "EventDefinition" => {
+            let name = get_required_string(val, "name")?;
+            let name_location = get_required_source_location(val, "nameLocation")?;
+            let parameters = get_required_node(val, "parameters")?;
+
+            Ok(ASTNode::EventDefinition {
+                node_id,
+                src_location,
+                name,
+                name_location,
+                parameters,
+            })
+        }
+        "ErrorDefinition" => {
+            let name = get_required_string(val, "name")?;
+            let name_location = get_required_source_location(val, "nameLocation")?;
+            let parameters = get_required_node(val, "parameters")?;
+
+            Ok(ASTNode::ErrorDefinition {
+                node_id,
+                src_location,
+                name,
+                name_location,
+                parameters,
+            })
+        }
+        "ModifierDefinition" => {
+            let body = get_required_node(val, "body")?;
+            let documentation = get_optional_node(val, "documentation")?;
+            let name = get_required_string(val, "name")?;
+            let name_location = get_required_source_location(val, "nameLocation")?;
+            let parameters = get_required_node(val, "parameters")?;
+            let virtual_ = get_required_bool(val, "virtual")?;
+            let visibility = get_required_enum(val, "visibility")?;
+
+            Ok(ASTNode::ModifierDefinition {
+                node_id,
+                src_location,
+                body,
+                documentation,
+                name,
+                name_location,
+                parameters,
+                virtual_,
+                visibility,
+            })
+        }
+        "StructDefinition" => {
+            let members = get_required_node_vec(val, "members")?;
+            let canonical_name = get_required_string(val, "canonicalName")?;
+            let name = get_required_string(val, "name")?;
+            let name_location = get_required_source_location(val, "nameLocation")?;
+            let visibility = get_required_enum(val, "visibility")?;
+
+            Ok(ASTNode::StructDefinition {
+                node_id,
+                src_location,
+                members,
+                canonical_name,
+                name,
+                name_location,
+                visibility,
+            })
+        }
+        "EnumDefinition" => {
+            let members = get_required_node_vec(val, "members")?;
+            let canonical_name = get_required_string(val, "canonicalName")?;
+            let name = get_required_string(val, "name")?;
+            let name_location = get_required_source_location(val, "nameLocation")?;
+
+            Ok(ASTNode::EnumDefinition {
+                node_id,
+                src_location,
+                members,
+                canonical_name,
+                name,
+                name_location,
+            })
+        }
+        "UserDefinedValueTypeDefinition" => {
+            let nodes = get_required_node_vec(val, "children")?;
+            let body = get_optional_node(val, "body")?;
+
+            Ok(ASTNode::UserDefinedValueTypeDefinition {
+                node_id,
+                src_location,
+                nodes,
+                body,
+            })
+        }
+        "PragmaDirective" => {
+            let literals = get_required_string_vec(val, "literals")?;
+
+            Ok(ASTNode::PragmaDirective {
+                node_id,
+                src_location,
+                literals,
+            })
+        }
+        "ImportDirective" => {
+            let absolute_path = get_required_string(val, "absolutePath")?;
+            let file = get_required_string(val, "file")?;
+            let source_unit = get_required_i32(val, "sourceUnit")?;
+
+            Ok(ASTNode::ImportDirective {
+                node_id,
+                src_location,
+                absolute_path,
+                file,
+                source_unit,
+            })
+        }
+        "UsingForDirective" => {
+            let global = get_required_bool(val, "global")?;
+            let library_name = get_required_node(val, "libraryName")?;
+            let type_name = get_required_node(val, "typeName")?;
+
+            Ok(ASTNode::UsingForDirective {
+                node_id,
+                src_location,
+                global,
+                library_name,
+                type_name,
+            })
+        }
+        "SourceUnit" => {
+            let nodes = get_required_node_vec(val, "nodes")?;
+
+            Ok(ASTNode::SourceUnit {
+                node_id,
+                src_location,
+                nodes,
+            })
+        }
+        "InheritanceSpecifier" => {
+            let base_name = get_required_node(val, "baseName")?;
+
+            Ok(ASTNode::InheritanceSpecifier {
+                node_id,
+                src_location,
+                base_name,
+            })
+        }
+        "ElementaryTypeName" => {
+            let name = get_required_string(val, "name")?;
+
+            Ok(ASTNode::ElementaryTypeName {
+                node_id,
+                src_location,
+                name,
+            })
+        }
+        "FunctionTypeName" => {
+            let nodes = get_required_node_vec(val, "children")?;
+            let body = get_optional_node(val, "body")?;
+
+            Ok(ASTNode::FunctionTypeName {
+                node_id,
+                src_location,
+                nodes,
+                body,
+            })
+        }
+        "ParameterList" => {
+            let parameters = get_required_node_vec(val, "parameters")?;
+
+            Ok(ASTNode::ParameterList {
+                node_id,
+                src_location,
+                parameters,
+            })
+        }
+        "TryCatchClause" => {
+            let nodes = get_required_node_vec(val, "children")?;
+            let body = get_optional_node(val, "body")?;
+
+            Ok(ASTNode::TryCatchClause {
+                node_id,
+                src_location,
+                nodes,
+                body,
+            })
+        }
+        "ModifierInvocation" => {
+            let modifier_name = get_required_node(val, "modifierName")?;
+            let arguments = get_optional_node_vec(val, "arguments")?;
+
+            Ok(ASTNode::ModifierInvocation {
+                node_id,
+                src_location,
+                modifier_name,
+                arguments,
+            })
+        }
+        "UserDefinedTypeName" => {
+            let path_node = get_required_node(val, "pathNode")?;
+            let referenced_declaration = get_required_i32(val, "referencedDeclaration")?;
+
+            Ok(ASTNode::UserDefinedTypeName {
+                node_id,
+                src_location,
+                path_node,
+                referenced_declaration,
+            })
+        }
+        "ArrayTypeName" => {
+            let base_type = get_required_node(val, "baseType")?;
+
+            Ok(ASTNode::ArrayTypeName {
+                node_id,
+                src_location,
+                base_type,
+            })
+        }
+        "Mapping" => {
+            let key_name = get_optional_string(val, "keyName");
+            let key_name_location = get_required_source_location(val, "keyNameLocation")?;
+            let key_type = get_required_node(val, "keyType")?;
+            let value_name = get_optional_string(val, "valueName");
+            let value_name_location = get_required_source_location(val, "valueNameLocation")?;
+            let value_type = get_required_node(val, "valueType")?;
+
+            Ok(ASTNode::Mapping {
+                node_id,
+                src_location,
+                key_name,
+                key_name_location,
+                key_type,
+                value_name,
+                value_name_location,
+                value_type,
+            })
+        }
+        "StructuredDocumentation" => {
+            let text = get_required_string(val, "text")?;
+
+            Ok(ASTNode::StructuredDocumentation {
+                node_id,
+                src_location,
+                text,
+            })
+        }
         // Other node type
-        _ => todo!(),
+        _ => {
+            let nodes = get_required_node_vec(val, "children").unwrap_or_else(|_| Vec::new());
+            let body = get_optional_node(val, "body").unwrap_or(None);
+
+            Ok(ASTNode::Other {
+                node_id,
+                src_location,
+                nodes,
+                body,
+                node_type: node_type_str.to_string(),
+            })
+        }
     }
 }
 
