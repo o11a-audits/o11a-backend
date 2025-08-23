@@ -1,5 +1,6 @@
 use foundry_compilers::artifacts::ast;
 use foundry_compilers::artifacts::ast::{LowFidelitySourceLocation, Node};
+use foundry_compilers::compilers::solc;
 use foundry_compilers::{Project, ProjectPathsConfig, artifacts::Remapping};
 use foundry_compilers_artifacts::NodeType;
 use std::collections::HashMap;
@@ -1302,6 +1303,79 @@ impl ASTNode {
                 result
             }
         }
+    }
+}
+
+pub fn node_from_json(val: &serde_json::Value) -> Result<ASTNode, String> {
+    let node_type_str = val
+        .get("nodeType")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| format!("Missing nodeType field: {:?}", val))?;
+
+    let src_location = val
+        .get("src")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| format!("Missing src field: {:?}", val))
+        .and_then(|v| SourceLocation::from_str(v))?;
+
+    match node_type_str {
+        "Assignment" => todo!(),
+        "BinaryOperation" => todo!(),
+        "Conditional" => todo!(),
+        "ElementaryTypeNameExpression" => todo!(),
+        "FunctionCall" => todo!(),
+        "FunctionCallOptions" => todo!(),
+        "Identifier" => todo!(),
+        "IdentifierPath" => todo!(),
+        "IndexAccess" => todo!(),
+        "IndexRangeAccess" => todo!(),
+        "Literal" => todo!(),
+        "MemberAccess" => todo!(),
+        "NewExpression" => todo!(),
+        "TupleExpression" => todo!(),
+        "UnaryOperation" => todo!(),
+        "EnumValue" => todo!(),
+        "Block" => todo!(),
+        "Break" => todo!(),
+        "Continue" => todo!(),
+        "DoWhileStatement" => todo!(),
+        "EmitStatement" => todo!(),
+        "ExpressionStatement" => todo!(),
+        "ForStatement" => todo!(),
+        "IfStatement" => todo!(),
+        "InlineAssembly" => todo!(),
+        "PlaceholderStatement" => todo!(),
+        "Return" => todo!(),
+        "RevertStatement" => todo!(),
+        "TryStatement" => todo!(),
+        "UncheckedBlock" => todo!(),
+        "VariableDeclarationStatement" => todo!(),
+        "VariableDeclaration" => todo!(),
+        "WhileStatement" => todo!(),
+        "ContractDefinition" => todo!(),
+        "FunctionDefinition" => todo!(),
+        "EventDefinition" => todo!(),
+        "ErrorDefinition" => todo!(),
+        "ModifierDefinition" => todo!(),
+        "StructDefinition" => todo!(),
+        "EnumDefinition" => todo!(),
+        "UserDefinedValueTypeDefinition" => todo!(),
+        "PragmaDirective" => todo!(),
+        "ImportDirective" => todo!(),
+        "UsingForDirective" => todo!(),
+        "SourceUnit" => todo!(),
+        "InheritanceSpecifier" => todo!(),
+        "ElementaryTypeName" => todo!(),
+        "FunctionTypeName" => todo!(),
+        "ParameterList" => todo!(),
+        "TryCatchClause" => todo!(),
+        "ModifierInvocation" => todo!(),
+        "UserDefinedTypeName" => todo!(),
+        "ArrayTypeName" => todo!(),
+        "Mapping" => todo!(),
+        "StructuredDocumentation" => todo!(),
+        // Other node type
+        _ => todo!(),
     }
 }
 
@@ -3130,4 +3204,68 @@ impl From<&Node> for ASTNode {
             node_type: format!("{:?}", node.node_type),
         })
     }
+}
+
+/// Recursively traverses an AST starting from the given node, applying a closure to each node.
+///
+/// This function performs a depth-first traversal of the AST, visiting the current node first,
+/// then recursively visiting all child nodes obtained through the `nodes()` method.
+///
+/// # Arguments
+/// * `node` - The root AST node to start traversal from
+/// * `accumulator` - The initial accumulator value
+/// * `f` - A closure that takes an ASTNode reference and the current accumulator, returning a new accumulator
+///
+/// # Returns
+/// The final accumulator value after traversing all nodes
+///
+/// # Examples
+///
+/// Count the total number of nodes in an AST:
+/// ```rust
+/// # use crate::solidity::parser::{traverse_nodes, ASTNode};
+/// let count = traverse_nodes(&ast_node, 0, |_node, acc| acc + 1);
+/// ```
+///
+/// Collect all function names in a contract:
+/// ```rust
+/// # use crate::solidity::parser::{traverse_nodes, ASTNode};
+/// let function_names = traverse_nodes(&contract_node, Vec::new(), |node, mut acc| {
+///     if let ASTNode::FunctionDefinition { name, .. } = node {
+///         acc.push(name.clone());
+///     }
+///     acc
+/// });
+/// ```
+///
+/// Find the maximum nesting depth of blocks:
+/// ```rust
+/// # use crate::solidity::parser::{traverse_nodes, ASTNode};
+/// let max_depth = traverse_nodes(&ast_node, (0, 0), |node, (current_depth, max_depth)| {
+///     let new_depth = match node {
+///         ASTNode::Block { .. } => current_depth + 1,
+///         _ => current_depth,
+///     };
+///     (new_depth, max_depth.max(new_depth))
+/// }).1;
+/// ```
+pub fn traverse_nodes<T, F>(node: &ASTNode, accumulator: T, mut f: F) -> T
+where
+    F: FnMut(&ASTNode, T) -> T,
+{
+    // Apply the closure to the current node
+    let new_accumulator = f(node, accumulator);
+
+    // Recursively traverse all child nodes
+    node.nodes()
+        .iter()
+        .fold(new_accumulator, |acc, child_node| {
+            traverse_nodes(child_node, acc, &mut f)
+        })
+}
+
+pub fn ast_from_json_file(file_path: &str) -> Result<ASTNode, String> {
+    let json =
+        std::fs::read_to_string(file_path).map_err(|e| format!("Failed to read file: {}", e))?;
+    todo!()
 }
