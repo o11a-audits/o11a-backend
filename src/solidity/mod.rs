@@ -4,6 +4,6 @@ use std::path::Path;
 
 pub mod parser;
 
-pub fn process(path: &Path) -> HashMap<String, parser::AST> {
+pub fn process(path: &Path) -> Result<HashMap<String, Vec<parser::AST>>, String> {
     parser::process(path)
 }
