@@ -110,3 +110,17 @@ Because the formatter output is aggresive at changing the original source text a
 # Collaborator
 
 # Checker
+
+Constraint boundaries are places where two or more variables interact with each other, and are the places where constraints are checked and enforced. Constraint boundaries are:
+ - Function / struct arguments (checked from the argument variable to the parameter variable)
+ - Variable assignment (checked from the value expression to the variable)
+ - Binary operators (checked on the operands, that they have compatible units and semantics)
+ - If else / ternary operators (checked that the condition matches the semantics of both branches)
+
+### Semantic and Logical Constraint Checks
+Logical constraint checks are annotated by patterns and can be checked by a constraint algorithm. Semantic constraint checks are annotated in regular language with business logic and can only be checked by something that understands the specific business logic semantics.
+
+General audit flow is:
+1. Read and understand the docs and purpose of the project
+2. Read the code, noting what every variable is, is used for, and its constraints (values that cause error states), cross referencing the docs
+3. Step through all constraint boundaries, checking that the constraints hold up correctly by logic and semantics
