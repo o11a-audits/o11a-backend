@@ -11,12 +11,12 @@ The o11a backend has five modules that form an almost linear processing pipeline
 Audit source files are parsed and compiled by the Foundry compilers, which can output a AST in JSON format that the processor can work with. Most analysis is done with this AST, with few references to the source files. Currently, there are no plans to support audit source files not supported by the Foundry tooling. Markdown files are parsed into an AST similar to source files, with paragraphs becoming declarations and code snippets becoming references. Because most of this work is done via external libraries, it is the simplest part of the o11a processor.
 
 # Analyzer
-The analyzer is the most complex module in the processor. It is responsible for traversing the Abstract Syntax Tree and creating a directory of in-scope declarations and declarations used by in-scope members for the audit. Each declaration has many attributes, which are the result of static analysis. The core attributes are the topic ID, name, scope, and declaration kind. Depending on the kind of declaration, other attributes exist that are stored in different directories by topic ID:
+The analyzer is responsible for traversing the Abstract Syntax Tree and creating a directory of in-scope declarations and declarations used by in-scope members for the audit. Each declaration has many attributes, which are the result of static analysis. The core attributes are the topic ID, name, scope, and declaration kind. Depending on the kind of declaration, other attributes exist that are stored in different directories by topic ID:
 
 - Signature directories: store the signatures of source, text, and comment declarations. This is the value to display to the user that represents the declaration. For a function, this is the code for the function without the body. For a text declaration, this is the text itself. Signatures are rendered in the same way as source code, so any info comments or references in them will be rendered.
 - Calls directories: store the external calls in a function (or contract by association)
 
-Declarations are scoped by three properties: Container, Component, and Member. Using the scope, any declaration or its parent can be linked to.
+Declarations are scoped by three properties: Container, Component, and Member. Using the scope, any identifier/operation or its parent can be linked to.
 
 For contract source files, the container is the source file, the component is a contract, and the member is a function. A contract's scope will only be a container, a function's scope will be a container and a component, and a local variable's scope will be a container, component, and member. For documentation, the container is the source file, the component is a section, and the member is a paragraph. For comments, the container is the comment ID, the component is a section, and the member is a paragraph.
 
@@ -26,90 +26,25 @@ Projects being audited can pull in lots of dependencies, yet only use a few func
 3. Now with a dictionary of all in-scope and used by in-scope declarations, we can parse each AST in scope into memory one at a time, checking each declaration for inclusion in the in-scope dictionary. If it is, we add it to an accumulating dictionary of detailed declarations. This is the second pass, and is a great place to do processing that needs knowledge of a node's references.
 
 # Formatter
-The formatter takes an AST node and its source file as inputs and returns a tree of formatter nodes as HTML. These AST nodes are largely formatted without consideration of the source file; however, the output does need to retain the comments and extra whitespace of the original source file. Extra whitespace is often used to group statements and has some semantic meaning, which is missing from the AST. This HTML is sent to the browser so it can dynamically render the source text based on the width of the container it is present in.
+The formatter takes an AST node and its source file as inputs and returns HTML. This HTML is largely formatted without consideration of the source file; however, the output does need to retain extra whitespace of the original source file. Extra whitespace is often used to group statements and has some semantic meaning that is missing from the AST.
 
-Should the formatter have a naive "parents always split first" approach, or a more sophisticated approach where all children are traversed first, then all ranked by node type so a child could potentially split before its parent?
+This rendered HTML has a goal of being 40 characters wide. 40 characters allows for four columns of code to be displayed side-by-side on a typical screen while not being so small that the comments are difficult to read. (40 characters also allow for two columns of code to be printed on standard paper.)
 
-There can always only be one declaration per line to give space for inline comments above it. The same for function arguments, so the info comments of the descendants can be shown inline above the ancestors. When declaration or function argument lines are rendered to HTML, they have an empty span element before them so the client can dynamically inject any info comments above them. It has to be a sibling to the source line so that it can use the native word-wrapping while the source line uses the custom formatter.
+There are two core primitives for the formatter to respect: identifiers and operators. Each identifier and each operator will have dedicated topics for discussion, so they each need to be set on different lines so that their comments can be displayed inline above them. Identifier and operator inline comments are formatted differently, so there can be both an identifier and an operator on the same line, but the same line cannot have two identifiers or two operators.
 
-The formatter nodes can be:
+There is only one way to format each expression because there is strict per-line formatting rules, making the formatter output very vertical but straightforward to implement.
 
-- A text node with a class for syntax highlighting (keywords, operators, literals)
-- A reference node (variable reference, function calls)
-- A declaration node (variable declaration, function definition, contract definition)
-- A split node (can be rendered as a space or a newline depending on container width)
-- A block node (contains other nodes with an indent)
+When any declaration/reference or operator line is rendered to HTML, it will have an empty span element before it so the client can dynamically inject any info comments into that element. Because the code width is set to 40 characters, formatting of the inline comments to be injected into the HTML is straightforward as well.
 
-All nodes have both a full and a condensed value, except for references, declaration names, and some split nodes that are always a space.
+The formatter output does not include traditional line numbers because the formatter output is aggressive at changing the original source text and the API is designed to enable clients to show many smaller snippets of code. Clients are not expected to show full source files in regular use, so the original line numbers do not mean much. Because of this, if a gutter is shown, it will have operation numbers instead of line numbers.
 
-Formatting starts aggressively and progresses to a condensed version of the code. For example, here is a comparison between vanilla solidity, the formatter's full output, and the condensed output:
-``` solidity
-// Vanilla solidity
-bytes32 public immutable myBytes;
-// o11a formatter output
-pub immut myBytes;
-// o11a condensed output
-pi myBytes
-```
-``` solidity
-// Vanilla solidity
-bytes32 public constant CAMPAIGN_ADMIN_ROLE = keccak256("CAMPAIGN_ADMIN_ROLE");
-// o11a formatter output
-pub const CAMPAIGN_ADMIN_ROLE = keccak256("CAMPAIGN_ADMIN_ROLE");
-// o11a condensed output
-pc CAMPAIGN_ADMIN_ROLE
-```
-``` solidity
-// Vanilla solidity
-if (startTimestamp_ != 0 && startTimestamp_ <= block.timestamp) {
-    revert InvalidCampaignSettings(block.timestamp);
-}
-
-// o11a formatter output
-if (
-  startTimestamp_ != 0
-  && startTimestamp_ <= block.timestamp
-) {
-  rev InvalidCampaignSettings(block.timestamp);
-}
-
-// o11a condensed output
-if (
- startTimestamp_
-  != 0
- && startTimestamp_
-  <= block.timestamp
-) {
- rev
-}
-```
-``` solidity
-// Vanilla solidity
-_transfer(rewardToken, participation.userAddress, userRewards);
-
-// o11a formatter output
-_transfer(
-  rewardToken,
-  participation.userAddress,
-  userRewards
-);
-
-// o11a condensed output
-_transfer(
- rewardToken,
- participation
-  .userAddress,
- userRewards
-);
-```
-
-The formatter output is more concise than Solidity, but it is complete. The condensed view is not complete, but can be displayed in tiny containers. The semicolon is missing from all condensed lines to designate that it is not a complete line of code. Hovering over the line will show the complete line.
-
-Because the formatter output is aggresive at changing the original source text and the API is designed to enable clients to show many smaller snippets of code, the formatter output does not include line numbers. Clients are not expected to show full source files in regular use. They may want to show or allow copying the full source file under a separate view by request of the user for niche uses, but it should not be interactive.
+Though the full source code of a file is not used, clients may want to show or allow copying the full source file under a separate view by request of the user for niche uses. It should not be interactive.
 
 # Collaborator
 
 # Checker
+
+Functions need to track named return values and side effects for checking.
 
 Constraint boundaries are places where two or more variables interact with each other, and are the places where constraints are checked and enforced. Constraint boundaries are:
  - Function / struct arguments (checked from the argument variable to the parameter variable)

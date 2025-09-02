@@ -30,16 +30,20 @@ constructor(
   campaignId_
 ) {
   if (
-    rewardToken_ == address(0)
-    || campaignAdmin == address(0)
+    rewardToken_
+      == address(0)
+    || campaignAdmin
+      == address(0)
   ) {
     revert InvalidCampaignSettings();
   }
 
   if (
-    startTimestamp_ != 0
+    startTimestamp_
+      != 0
     && startTimestamp_
       <= block.timestamp
+        - 1
   ) {
     revert InvalidCampaignSettings();
   }
@@ -131,4 +135,163 @@ modifier whenNotPaused() {
   }
   _;
 }
+
+function handleReallocation(
+  campaignId_,
+  userAddress,
+  toToken,
+  toAmount,
+  memory data
+) external payable
+whenNotPaused {
+  // Check if campaign is active or can be activated
+  _validateAndActivateCampaignIfReady();
+
+  if (
+    factory
+      .hasRole(
+        role:
+          factory
+            .SWAP_CALLER_ROLE(),
+        addr:
+          msg.sender
+      )
+  ) {
+    revert UnauthorizedSwapCaller();
+  }
+
+  if (
+    toToken
+      != targetToken
+  ) {
+    revert InvalidToTokenReceived(
+      toToken
+    );
+  }
+
+  if (
+    campaignId_
+      != campaignId
+  ) {
+    revert InvalidCampaignId();
+  }
+
+  uint256 amountReceived;
+  if (
+    toToken
+      == NATIVE_TOKEN
+  ) {
+    amountReceived =
+      msg.value;
+  } else {
+    if (
+      msg.value
+        > 0
+    ) {
+      revert InvalidToTokenReceived(
+        NATIVE_TOKEN
+      );
+    }
+    IERC20 tokenReceived =
+      IERC20(
+        toToken
+      );
+    uint256 balanceOfSender =
+      tokenReceived
+        .balanceOf(
+          msg.sender
+        );
+    uint256 balanceBefore =
+      getBalanceOfSelf(
+        toToken
+      );
+
+    SafeERC20
+      .safeTransferFrom(
+        tokenReceived,
+        msg.sender,
+        address(this),
+        balanceOfSender
+      );
+
+    amountReceived =
+      getBalanceOfSelf(
+        toToken
+      )
+      - balanceBefore;
+  }
+
+  if (
+    amountReceived
+      < toAmount
+  ) {
+    revert InsufficientAmountReceived();
+  }
+
+  _transfer(
+    toToken,
+    userAddress,
+    amountReceived
+  );
+
+  totalReallocatedAmount +=
+    amountReceived;
+
+  uint256 rewardAmountIncludingFees =
+    getRewardAmountIncludingFees(
+      amountReceived
+    );
+
+  uint256 rewardsAvailable =
+    claimableRewardAmount();
+  if (
+    rewardAmountIncludingFees
+      > rewardsAvailable
+  ) {
+    revert NotEnoughRewardsAvailable();
+  }
+
+  (
+    uint256 userRewards,
+    uint256 fees
+  ) =
+    calculateUserRewardsAndFees(
+      rewardAmountIncludingFees
+    );
+  pendingRewards +=
+    userRewards;
+  accumulatedFees +=
+    fees;
+
+  pID++;
+  // Store the participation details
+  participations[
+    pID
+  ] =
+    Participation({
+      status:
+        ParticipationStatus.PARTICIPATING,
+      userAddress:
+        userAddress,
+      toAmount:
+        amountReceived,
+      rewardAmount:
+        userRewards,
+      startTimestamp:
+        block.timestamp,
+      startBlockNumber:
+        block.number
+    });
+
+  emit NewParticipation(
+    campaignId_,
+    userAddress,
+    pID,
+    amountReceived,
+    userRewards,
+    fees,
+    data
+  );
+}
+
 ```
