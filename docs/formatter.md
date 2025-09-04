@@ -97,6 +97,7 @@ constructor(
       - rewardDecimals
     );
 
+  Give the admin role to the campaign admin
   _grantRole(
     role:
       CAMPAIGN_ADMIN_ROLE,
