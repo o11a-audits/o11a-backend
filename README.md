@@ -58,24 +58,44 @@ Across the audit, two types of convergences are checked for contradictions:
 
 ## Type Convergence
 
-There is one property that can be checked on the subjects of a type convergence:
- 1. Type Constraints (what are the characteristics of the data)
+There are many type properties that can be checked on the subjects of a type convergence, depending on the type of subject:
+ - All:
+  1. Error-Causing Values (values for this subject that will cause an error)
+ - Numbers:
+  1. Upper bound
+  2. Lower bound
+  3. Set of values
+  4. Set of excluded values
+ - Addresses:
+  1. Trusted
+  2. Untrusted
+  3. Set of values
+  4. Set of excluded values
+  5. Implements
+ - Lists:
+  1. Length
+ - Mappings:
+  1. Set of keys
 
-Type constraints are assigned to identifiers, literals, and return values, and they converge when an operator is called:
+Type properties converge when an operator is called:
  - Function/struct arguments (checked from the argument variable to the parameter variable)
  - Variable assignment/mutations (checked from the value to the variable)
  - Unary, binary, ternary operators (checked on the operands)
 
 Type convergences are purely logical and can be checked for contradictions by a type checking algorithm.
 
+Type constraints help identify values that cause error conditions.
+
 ## Specification Convergence
 
 There are three types of properties that may be checked on the subjects of a specification convergence, depending on the kind of subject:
- 1. Functional Purpose (for non values/expressions, what purpose it serves within the context of the application)
- 2. Functional Requirements (for non values/expressions, what it has to do and not to do to fulfill the functional purpose)
- 3. Functional Semantics (for values/expressions, what it represents within the context of the application)
+ - Project Implementation, Contracts, Blocks, Statements:
+   1. Functional Purpose (what purpose it serves within the context of the application)
+   2. Functional Requirements (what it has to do and not to do to fulfill the functional purpose)
+ - Expressions and Values:
+   1. Functional Semantics (what it represents within the context of the application)
 
-Specification properties are assigned to the project implementation, contracts, blocks, statements, expressions, and values, and they converge between the declaration and implementation:
+Specification properties converge between the declaration and implementation of the subject:
  - Project Implementation (checked that the sum of the properties of the contracts match the properties of the project implementation)
  - Contracts (checked that the sum of the properties of the functions match the properties of the contract)
  - Functions (checked that the sum of the properties of the block statements match the properties of the function)
@@ -86,9 +106,7 @@ Specification properties are assigned to the project implementation, contracts, 
 
 Specification properties are intrinsic to the project documentation, and these properties converge with the project implementation's specification properties.
 
-### Checking Specification Convergences
-
-Specification convergences are based on project-specific design and cannot be checked by an algorithm. Instead, they must be manually verified to uphold within the unique project environment. When checking specification convergences, the requirements of the definition are checked against the purpose of its parts. This allows specification convergences to be summarized into a purpose statement, which can then be used in the next convergence check.
+Specification convergences are based on project-specific design and cannot be checked by an algorithm. Instead, they must be manually verified to uphold within the unique project environment.
 
 ### Function Call Convergences
 
@@ -102,12 +120,26 @@ Functions need to track named return values and side effects for checking.
 
 Can we have a convergence property graph that represents the properties that are dependent on other properties, so that if a property downstream of something is contradicted, we can see how it affects the upstream properties? Maybe all requirements stem from an underlying invariant (which all stem from an attack vector), so when a property is contradicted, we can immediately trace it back through the graph to see how and which invariant is violated.
 
-## Audting Convergences
+### Managing Functional Requirements
 
-Patterns annotate logical constraint checks and can be checked by a constraint algorithm. Semantic constraint checks are annotated in regular language with business logic and can only be checked by something that understands the specific business logic semantics.
+One subject may have many functional requirements. All functional requirements are distinct and independent of each other.
+
+Functional requirement properties are added to a definition initially as unverified, then are able to be marked as verified by each party in the audit as they review convergences. When reviewing a specification convergence (comparing definition requirements to containing item purposes), each functional requirement should be reviewed and marked as verified or contradicted independently of each other.
+
+Functional requirements have dependencies attached to them. When a functional requirement is added to a subject, it needs to have a reason for that requirement. Whatever depends on that requirement is a dependency. In every place a function is called, if it has to uphold a certain property, it should be listed as a dependency of the requirement. This way, if the requirement is contradicted, we can immediately trace it back through the graph to see how and which invariant is violated.
+
+Functional requirements are generally explored as the usage of the subject is studied; therefore, it is important that clients allow users to see and add functional requirements to the subject at a call site.
+
+## Auditing Convergences
+
+Patterns annotate type constraint checks and can be checked by a constraint algorithm. Specification constraint checks are annotated in regular language with business logic and can only be checked by something that understands the specific business logic semantics.
 
 General audit flow is:
  1. Read and understand the docs and the purpose of the project
  2. Brainstorm potential attack vectors
- 2. Read the code, noting what every variable is, is used for, and its constraints (values that cause error states), cross-referencing the docs, and the noting the invariants that uphold the attack vectors
- 3. Step through all constraint boundaries, checking that the constraints hold up correctly by types and specifications
+ 3. Read the code, noting what every variable is, is used for, and its type and specification properties, cross-referencing the docs
+ 4. Step through all convergences, checking that the properties hold up correctly (types and specifications), and noting the invariants that uphold the attack vectors as functional requirements
+
+### Managing Convergences
+
+Convergences are the main point of verification in the audit process. They have four states: waiting, unverified, verified, and contradicted. A waiting convergence is one is waiting for properties to be added to its parts, ie `a + b`, but `a` does not have any properties added so we cannot judge the convergence.
