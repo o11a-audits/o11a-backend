@@ -1,0 +1,3 @@
+# Audit Best Practices
+
+The functional purpose property is a good place to question the design of the implementation. Sometimes things are implemented with no bugs, but the design is flawed, allowing for issues. An example I have seen is a protocol-wide rate-limiter, which would only allow a capped amount of global interaction with the protocol. Since the interaction costs nothing but gas, it would be very easy to DOS and prevent real users from using it. This was implemented soundly, but the design itself was bad and led to a valid finding. The functional purpose is the auditor's place to question the design of the implementation, and question the value it gives from the user perspective.
