@@ -92,6 +92,7 @@ There are three types of properties that may be checked on the subjects of a spe
  - Project Implementation, Contracts, Blocks, Statements:
    1. Functional Purpose (what purpose it serves within the context of the application)
    2. Functional Requirements (what it has to do and not to do to fulfill the functional purpose)
+   3. Functional Dependencies (what it depends on to fulfill the functional purpose)
  - Expressions and Values:
    1. Functional Semantics (what it represents within the context of the application)
 
@@ -108,6 +109,8 @@ Specification properties are intrinsic to the project documentation, and these p
 
 Specification convergences are based on project-specific design and cannot be checked by an algorithm. Instead, they must be manually verified to uphold within the unique project environment.
 
+Should statements be actual source statements, or a semantic grouping of statements based on extra whitespace in the source?
+
 ### Function Call Convergences
 
 Function calls are an expression that has a subexpression of argument list passing, which results in the return value of the function. Because of this, function calls have semantic properties based on their return value and can be checked with other semantic properties in a straightforward way.
@@ -120,6 +123,10 @@ Functions need to track named return values and side effects for checking.
 
 Can we have a convergence property graph that represents the properties that are dependent on other properties, so that if a property downstream of something is contradicted, we can see how it affects the upstream properties? Maybe all requirements stem from an underlying invariant (which all stem from an attack vector), so when a property is contradicted, we can immediately trace it back through the graph to see how and which invariant is violated.
 
+### Managing Functional Purpose
+
+The functional purpose is the business logic reason for a statement. The "why" that statement is there. Try to avoid implementation details here, and focus on the business logic. "Why" is not "do to the thing is does". It is "from the project perspective, what value does this statement provide?", and "what impact would it have on the users or system if it wasn't there?"
+
 ### Managing Functional Requirements
 
 One subject may have many functional requirements. All functional requirements are distinct and independent of each other.
@@ -129,6 +136,16 @@ Functional requirement properties are added to a definition initially as unverif
 Functional requirements have dependencies attached to them. When a functional requirement is added to a subject, it needs to have a reason for that requirement. Whatever depends on that requirement is a dependency. In every place a function is called, if it has to uphold a certain property, it should be listed as a dependency of the requirement. This way, if the requirement is contradicted, we can immediately trace it back through the graph to see how and which invariant is violated.
 
 Functional requirements are generally explored as the usage of the subject is studied; therefore, it is important that clients allow users to see and add functional requirements to the subject at a call site.
+
+### Managing Functional Dependencies
+
+Functional dependencies can only be satisfied by statements, not expressions or values.
+
+Functional dependencies are things that a subject depends on outside of its interface (and thus cannot be expressed by a type constraint). These are things like a stateful function that requires another block to set some required piece of state for it to work with. Like an emergency exit function that requires an exit address to be set first. Because the dependency can be fulfilled by another block far away from the subject, statement chains have to be tracked throughout the project so we can tell where a project dependency could be fulfilled. To mark a dependency as fulfilled, the user has to provide a statement id that satisfies the dependency. This statement then becomes a convergence point for the functional dependency properties of the subject.
+
+Statement chains are as follows: there is a main, same block chain. This represents all the statements before the subject in the same block. If the dependency is satisfied by one of these statements, then the dependency will always be satisified and we can mark it as verified. If these same-block statements do not satisfy the dependency, then it may be satisfied by a statement above the containing block in the same function, but not in sub-statements of prior sibling statements (this makes it so that both blocks of an if/else statement are blanked checked as one). If statements within the containing function do not satisfy the dependency, then it may be satisfied within the constructor statements. If is it not satisfied within the constructor, then it may be satisfied within a prior sibling statement in each block where the containing function is called. (If the containing function is an external function, then the dependency can be found anywhere in the project, as they will have to be two separate user calls.) If one of the calls does not satisfy the dependency, then it is unsatisfied as a whole. If the immediate call block does not satisfy the dependency, then a prior block in ethe call chain is searched for in the same way as the original same block chain.
+
+To implement this, we can gather all statements that could satisfy the dependency (when a dependency is added, as many statements will have none and we do not want to waste time processing them) and store them as a tree, with the subject being the root, and tree depth representing prior statements. Then we take the statements that the user said satisfied the dependency, and search for a path to a leaf statement that does not encounter one of the satisfying statements. If we can get to a leaf without encountering a satisfying statement, then that is a path to the subject where the dependency is not satisfied, and the dependency is not satisfied as a whole. A leaf node would be some entry point to the project, like a public function. For this implementation, we would have to store an AST of statements to pull the sub-trees from to get the subject as the root.
 
 ## Auditing Convergences
 
