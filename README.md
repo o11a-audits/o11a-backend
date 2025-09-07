@@ -113,13 +113,13 @@ Should statements be actual source statements, or a semantic grouping of stateme
 
 ### Function Call Convergences
 
-Function calls are an expression that has a subexpression of argument list passing, which results in the return value of the function. Because of this, function calls have semantic properties based on their return value and can be checked with other semantic properties in a straightforward way.
+Function calls are an expression that has a subexpression of argument list passing, which results in the return value of the function. Because of this, function calls have both semantic properties based on their return value to can be checked with other semantic properties in a straightforward way, and other functional properties.
 
-Pure functions and index access only have functional semantic properties, just like operators. For example, `a + b - c` has the exact same properties and convergences as `add(a, b) - c`. In either situation, we would ask the same questions at the same convergences: what does `a` and `b` represent within this project, what does the result of `a + b` or `add(a, b)` represent within this project, what does `c` represent within this project, and what does the result of `the_result_of_a+b - c` represent within this project?
+Index access only has semantic properties like values.
 
-Unpure functions have extra properties.
+Functions have a semantic return value can converge with other semantic properties in an expression, but they also have functional properties. These functional properties may not affect the semantics of the expression, but they converge with the containing statement's functional properties. For example, `add(a, b) - c` has a semantic property convergence at `the_result_of_add_a_b - c` to form one semantic property for the expression, but the functional properties of `add` converge with the containing statement's functional properties to make sure they fulfill the containing statement's functional requirements and align with its purpose.
 
-Functions need to track named return values and side effects for checking.
+Functions need to track side effects and present them to the user in the interface like exceptions are.
 
 Can we have a convergence property graph that represents the properties that are dependent on other properties, so that if a property downstream of something is contradicted, we can see how it affects the upstream properties? Maybe all requirements stem from an underlying invariant (which all stem from an attack vector), so when a property is contradicted, we can immediately trace it back through the graph to see how and which invariant is violated.
 
