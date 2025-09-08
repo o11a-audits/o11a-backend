@@ -86,6 +86,18 @@ Type convergences are purely logical and can be checked for contradictions by a 
 
 Type constraints help identify values that cause error conditions.
 
+### Managing Type Convergences
+
+#### Variable Ancestors
+
+Function parameters each have ancestors that are the call arguments which correspond to the function parameters. A parameter may have many ancestors, as it has one for each call to that function. In the case of a function that is only called once, the parameter ancestors can be thought of as the same as the parameter itself. This is called a transitive ancestor. In the analysis, both the subject and ancestor can be given the same topic so they will be treated as the same in the audit.
+
+When auditing a variable, it is useful for the client to present all of its ancestors to the user to check at once. This may reveal a common pattern or outlier among the ancestors.
+
+#### Variable Descendants
+
+Variable descendants are the function parameters that are passed the subject variable. A variable may have many descendants if it is passed into multiple functions. When auditing a variable, it is useful for the client to present all of its descendants to the user to check at once. This may reveal how a variable value propagates through the codebase, seeing the properties of the places it ends up, especially into other contracts and blocks of logic.
+
 ## Specification Convergence
 
 There are three types of properties that may be checked on the subjects of a specification convergence, depending on the kind of subject:
