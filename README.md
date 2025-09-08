@@ -119,19 +119,23 @@ Index access only has semantic properties like values.
 
 Functions have a semantic return value can converge with other semantic properties in an expression, but they also have functional properties. These functional properties may not affect the semantics of the expression, but they converge with the containing statement's functional properties. For example, `add(a, b) - c` has a semantic property convergence at `the_result_of_add_a_b - c` to form one semantic property for the expression, but the functional properties of `add` converge with the containing statement's functional properties to make sure they fulfill the containing statement's functional requirements and align with its purpose.
 
-Functions need to track side effects and present them to the user in the interface like exceptions are.
+Functions need to track side effects and present them to the user in the interface, like exceptions are.
 
 Can we have a convergence property graph that represents the properties that are dependent on other properties, so that if a property downstream of something is contradicted, we can see how it affects the upstream properties? Maybe all requirements stem from an underlying invariant (which all stem from an attack vector), so when a property is contradicted, we can immediately trace it back through the graph to see how and which invariant is violated.
 
 ### Managing Functional Purpose
 
-The functional purpose is the business logic reason for a statement. The "why" that statement is there. Try to avoid implementation details here, and focus on the business logic. "Why" is not "do to the thing is does". It is "from the project perspective, what value does this statement provide?", and "what impact would it have on the users or system if it wasn't there?"
+The functional purpose is the business logic reason for a statement—the "why" that statement is there. Try to avoid implementation details here, and focus on the business logic. "Why" is not "to do the thing it does". It is "from the project perspective, what value does this statement provide?", and "what impact would it have on the users or system if it weren't there?"
+
+When adding functional purposes, preset questions are presented to the user that help guide them in thinking about the purpose correctly. The purpose is NOT what it does, but WHY it does it.
+
+Functional purposes can be categorized, which will adjust the preset questions for the user to answer. Some of the categories could be for Shared Resources, Authorization, or Reentry Guards. This will make sure the user is reminded of common issues with these things, like a DOS exhaustion of a shared resource.
 
 ### Managing Functional Requirements
 
 One subject may have many functional requirements. All functional requirements are distinct and independent of each other.
 
-Functional requirement properties are added to a definition initially as unverified, then are able to be marked as verified by each party in the audit as they review convergences. When reviewing a specification convergence (comparing definition requirements to containing item purposes), each functional requirement should be reviewed and marked as verified or contradicted independently of each other.
+Functional requirement properties are added to a definition initially as unverified, then are able to be marked as verified by each party in the audit as they review convergences. When reviewing a specification convergence (comparing definition requirements to containing item purposes), each functional requirement should be reviewed and marked as verified or contradicted independently of the others.
 
 Functional requirements have dependencies attached to them. When a functional requirement is added to a subject, it needs to have a reason for that requirement. Whatever depends on that requirement is a dependency. In every place a function is called, if it has to uphold a certain property, it should be listed as a dependency of the requirement. This way, if the requirement is contradicted, we can immediately trace it back through the graph to see how and which invariant is violated.
 
