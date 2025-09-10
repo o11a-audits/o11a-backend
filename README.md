@@ -48,6 +48,16 @@ There are two pairs of source-derived types of topics:
  - Identifiers & Operators
  - Statements & Blocks
 
+## Documentation
+
+Documentation is a first class citizen in the system. It is as interactive as the source code, and is parsed for sections and paragraphs, which become topics for users to comment on and link to other topics.
+
+Relevant documentation may not be included in the source code originally, so there should be a way to add external documentation to be parsed and brought into the system, allowing users to comment on it as well.
+
+## Discussion Comments
+
+Users can leave discussion comments on any topic. These comments are first class citizens in the system, like documentation. They are parsed in the same way, and are given topics within them that users can comment on and link to other topics.
+
 # Checker
 
 The checker is responsible for checking the subjects of convergences across the audit for contradictions in their properties. If the properties at a convergence contradict, that is a potential place for a vulnerability or implementation flaw.
