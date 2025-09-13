@@ -10,6 +10,8 @@ The o11a backend has five modules that form an almost linear processing pipeline
 # Parser
 Audit source files are parsed and compiled by the Foundry compilers, which can output an AST in JSON format that the processor can work with. Most analysis is done with this AST, with few references to the source files. Currently, there are no plans to support audit source files not supported by the Foundry tooling. Markdown files are parsed into an AST similar to source files, with paragraphs becoming declarations and code snippets becoming references. Since most of this work is accomplished through external libraries, it is the simplest part of the o11a processor.
 
+The parser enhances the original AST by adding semantic blocks, which are a grouping of statements based on whitespace in the source code. Semantic blocks are not in the original AST but are added by the parser by analyzing the source files for consecutive newlines between statements in a block. This creates a structure where Block nodes contain SemanticBlock nodes, which contain statement nodes. Each semantic block has optional documentation from comments that appear at the beginning of the semantic block in the source, preserving context from the developers.
+
 # Analyzer
 The analyzer is responsible for traversing the Abstract Syntax Tree and creating a directory of in-scope declarations and declarations used by in-scope members for the audit. Each declaration has many attributes, which are the result of static analysis. The core attributes are the topic ID, name, scope, and declaration kind. Depending on the kind of declaration, other attributes exist that are stored in different directories by topic ID:
 
