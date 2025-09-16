@@ -15,16 +15,20 @@ The parser enhances the original AST by adding semantic blocks, which are a grou
 # Analyzer
 The analyzer is responsible for traversing the Abstract Syntax Tree and creating a directory of in-scope declarations and declarations used by in-scope members for the audit. Each declaration has many attributes, which are the result of static analysis. The core attributes are the topic ID, name, scope, and declaration kind. Depending on the kind of declaration, other attributes exist that are stored in different directories by topic ID:
 
- - Signature directories: store the signatures of source, text, and comment declarations. This is the value to display to the user that represents the declaration. For a function, this is the code for the function without the body. For a text declaration, this is the text itself. Signatures are rendered in the same way as source code, so any info comments or references in them will be rendered.
+ - Signature directories: store the signatures of source, text, and comment declarations. This is the value to display to the user that represents the declaration. For a function, this is the code for the function without the body. For a text declaration, this is the text itself. For a statement or expression, this is the code for the statement or expression. For a variable, it is the declaration for the variable (including its type). Signatures are rendered through the formatter in the same way as source code, so they are stored as HTML strings and any info comments or references in them will be rendered.
  - Calls directories: store the external calls in a function (or contract by association)
 
 Declarations are scoped by three properties: Container, Component, and Member. Using the scope, any identifier/operation or its parent can be linked to.
 
 For contract source files, the container is the source file, the component is a contract, and the member is a function. A contract's scope will only be a container, a function's scope will be a container and a component, and a local variable's scope will be a container, component, and member. For documentation, the container is the source file, the component is a section, and the member is a paragraph. For comments, the container is the comment ID, the component is a section, and the member is a paragraph.
 
+The AST we are given to analyze contains unique IDs for each node, and each time an identifier appears in the AST, its node contains a reference_id property that points to the ID of the node that declared it.
+
+Each audit will contain a scope.txt file in the root project directory. This file contains paths to all files that are in scope of the audit, and will allow us to focus on in-scope contracts, while also providing differentiated support for non-in-scope contracts.
+
 Projects being audited can pull in lots of dependencies, yet only use a few functions from them. Naively processing all contracts/functions from every file in the project leads to excessive processing and bloating in the audit. To avoid this, we can take the following two-pass approach to make sure only in-scope and used by in-scope contracts/functions are processed:
- 1. First read and parse each AST (one at a time, if low on memory), storing its declarations in an accumulating simple declaration dictionary that stores all declarations in the audit, with a list of the other nodes each references in its body and a list of errors and revert statements it calls, making note of whether the node is from an in-scope ast or not. This is the first pass, and is a great place to do processing that needs to check all child nodes recursively.
- 2. Loop over all the publicly (public, external, or internal; NOT private) in-scope declarations gathered, storing them in a new dictionary that stores all publicly in-scope declarations in the audit and the nodes that reference them. When a declaration is found to be publicly in-scope, add it to the in-scope declaration dictionary with the node that referenced it and look up its references in the previously generated dictionary. Add each of its references to the accumulating dictionary, then recursively check them for their references, adding them as needed and so on.
+ 1. First read and parse each AST, storing its declarations (contracts, modifiers, functions, user types, state variables, and local variables) in an accumulating simple declaration dictionary that stores all declarations in the audit by node ID. With the function/modifier declarations, store a list of the other functions called, the require and revert statements with the error types called, and the state variables mutated in its body, making note of whether the function/modifier at hand is from an in-scope ast or not. This is the first pass, and is a great place to do processing that needs to check all child nodes recursively.
+ 2. Loop over all the declarations, storing the publicly (public, external, or internal; NOT private or local) in-scope declarations in a new dictionary that stores all publicly in-scope declarations in the audit and the nodes that reference them. When a declaration is found to be publicly in-scope, add it to the in-scope declaration dictionary and look up its references (functions called, errors called in revert statements, and state variables mutated) in the previously generated dictionary. Add each of these references to the accumulating in-scope dictionary with the node at hand that referenced it, then recursively check these references for their references, adding them as needed and the node that referenced them and so on.
  3. Now with a dictionary of all in-scope and used by in-scope declarations, we can parse each AST in scope into memory one at a time, checking each declaration for inclusion in the in-scope dictionary. If it is, we add it to an accumulating dictionary of detailed declarations. This is the second pass, and it's a great place to perform processing that requires knowledge of a node's references.
 
 # Formatter
@@ -44,11 +48,15 @@ Although the complete source code of a file is not used, clients may want to dis
 
 # Collaborator
 
-The collaborator allows users to comment on topics in the source code.
+The collaborator allows users to comment on topics in the audit. The types of comments users can leave on topics depends on the type of topic. These comments can be collaborative discussions or structured properties of the topics.
 
-There are two pairs of source-derived types of topics:
- - Identifiers & Operators
- - Statements & Blocks
+The types of topics and their suffixes are:
+ - Source code expressions and values (e)
+ - Source code contracts, functions, blocks, and statements (s)
+ - Text Documentation, text comments, and text sections (t)
+ - Attack vectors (a)
+
+ The topic id is a string identifier that uniquely identifies a topic within the audit. Each source code contract, function, block, statement, expression, variable, and literal value has an unique topic id. Each text document/comment and section has an unique topic id. It is sequential number for that topic type preceeded by the topic type prefix. For example, the first added Attack Vector will be `a1`, and the second `a2`.
 
 ## Documentation
 

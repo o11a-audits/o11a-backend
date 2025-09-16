@@ -8,3 +8,5 @@ Before completing any task:
 3. Check your work for best practices, and suggest improvements if any
 4. Do not add tests
 5. Do not run terminal commands
+
+This is a rust project. Prefer standalone functions over methods implmented on types.
