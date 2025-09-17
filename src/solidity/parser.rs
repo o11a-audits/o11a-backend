@@ -4,8 +4,8 @@ use std::path::Path;
 use std::str::FromStr;
 use std::{panic, vec};
 
-pub fn process(root: &Path) -> Result<HashMap<String, Vec<AST>>, String> {
-  let mut ast_map = HashMap::new();
+pub fn process(root: &Path) -> Result<std::collections::BTreeMap<String, Vec<AST>>, String> {
+  let mut ast_map = std::collections::BTreeMap::new();
 
   // Look for the "out" directory in the project root
   let out_dir = root.join("out");
@@ -27,7 +27,10 @@ pub fn process(root: &Path) -> Result<HashMap<String, Vec<AST>>, String> {
   Ok(ast_map)
 }
 
-fn traverse_directory(dir: &Path, ast_map: &mut HashMap<String, Vec<AST>>) -> Result<(), String> {
+fn traverse_directory(
+  dir: &Path,
+  ast_map: &mut std::collections::BTreeMap<String, Vec<AST>>,
+) -> Result<(), String> {
   let entries =
     std::fs::read_dir(dir).map_err(|e| format!("Failed to read directory {:?}: {}", dir, e))?;
 
@@ -136,6 +139,24 @@ pub struct AST {
   source_content: String,
 }
 
+impl AST {
+  pub fn nodes(&self) -> Vec<&ASTNode> {
+    self.nodes.iter().collect()
+  }
+
+  pub fn absolute_path(&self) -> &str {
+    &self.absolute_path
+  }
+
+  pub fn node_id(&self) -> i32 {
+    self.node_id
+  }
+
+  pub fn source_content(&self) -> &str {
+    &self.source_content
+  }
+}
+
 fn read_source_file(json_file_path: &str, absolute_path: &str) -> Result<String, String> {
   // Extract project root from JSON file path
   // JSON files are typically in out/ directory, so go up to find project root
@@ -213,7 +234,7 @@ impl FromStr for SourceLocation {
   }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FunctionKind {
   Constructor,
   Function,
@@ -222,7 +243,7 @@ pub enum FunctionKind {
   FreeFunction,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ContractKind {
   Contract,
   Library,
@@ -230,7 +251,7 @@ pub enum ContractKind {
   Interface,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FunctionStateMutability {
   Pure,
   View,
@@ -238,7 +259,7 @@ pub enum FunctionStateMutability {
   Payable,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FunctionVisibility {
   Public,
   Private,
@@ -246,21 +267,21 @@ pub enum FunctionVisibility {
   External,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum VariableVisibility {
   Public,
   Private,
   Internal,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum VariableMutability {
   Mutable,
   Immutable,
   Constant,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StorageLocation {
   Default,
   Storage,
@@ -268,7 +289,7 @@ pub enum StorageLocation {
   Calldata,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Copy)]
 pub enum LiteralKind {
   Number,
   Bool,
