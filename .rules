@@ -9,4 +9,6 @@ Before completing any task:
 4. Do not add tests
 5. Do not run terminal commands
 
-This is a rust project. Prefer standalone functions over methods implmented on types.
+This is a rust project. Prefer standalone functions over methods implemented on types.
+
+Do not give a summary of changes after completing a task.
