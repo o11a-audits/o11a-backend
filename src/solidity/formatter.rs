@@ -4,30 +4,32 @@ use crate::solidity::parser::{
   VariableVisibility,
 };
 
-/// Converts an AST node to HTML with syntax highlighting and proper indentation
+/// Converts an AST node and all its children to a formatted HTML string with syntax highlighting.
+///
+/// This function recursively processes nodes and uses div-based indentation with padding.
+/// Binary operators are formatted with the left-hand side and operator on one line,
+/// and the right-hand side indented on the next line.
 pub fn node_to_html(node: &ASTNode) -> String {
-  node_to_html_with_indent(node, 0)
+  node_to_html_internal(node, 0)
 }
 
-/// Internal recursive function that handles indentation
-fn node_to_html_with_indent(node: &ASTNode, indent_level: usize) -> String {
-  let indent = create_indent_div(indent_level);
-
+fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
   match node {
-    // Expression nodes
+    // ========== Expression Nodes ==========
     ASTNode::Assignment {
       operator,
       left_hand_side,
       right_and_side,
       ..
     } => {
+      let lhs = node_to_html_internal(left_hand_side, indent_level);
+      let op = assignment_operator_to_string(operator);
+      let rhs = node_to_html_internal(right_and_side, indent_level + 1);
       format!(
-        "{}{}{}\n{}{}",
-        indent,
-        node_to_html_with_indent(left_hand_side, 0),
-        format_assignment_operator(operator),
-        create_indent_div(indent_level + 1),
-        node_to_html_with_indent(right_and_side, 0)
+        "{} <span class=\"operator\">{}</span>\n{}",
+        lhs,
+        html_escape(&op),
+        indent_div(&rhs, indent_level + 1)
       )
     }
 
@@ -37,13 +39,14 @@ fn node_to_html_with_indent(node: &ASTNode, indent_level: usize) -> String {
       right_expression,
       ..
     } => {
+      let lhs = node_to_html_internal(left_expression, indent_level);
+      let op = binary_operator_to_string(operator);
+      let rhs = node_to_html_internal(right_expression, indent_level + 1);
       format!(
-        "{}{} {}\n{}{}",
-        indent,
-        node_to_html_with_indent(left_expression, 0),
-        format_binary_operator(operator),
-        create_indent_div(indent_level + 1),
-        node_to_html_with_indent(right_expression, 0)
+        "{} <span class=\"operator\">{}</span>\n{}",
+        lhs,
+        html_escape(&op),
+        indent_div(&rhs, indent_level + 1)
       )
     }
 
@@ -53,42 +56,77 @@ fn node_to_html_with_indent(node: &ASTNode, indent_level: usize) -> String {
       false_expression,
       ..
     } => {
-      let mut result = format!(
-        "{}{} <span class=\"keyword\">?</span>\n{}{}",
-        indent,
-        node_to_html_with_indent(condition, 0),
-        create_indent_div(indent_level + 1),
-        node_to_html_with_indent(true_expression, 0)
-      );
-      if let Some(false_expr) = false_expression {
-        result.push_str(&format!(
-          "\n{}<span class=\"keyword\">:</span>\n{}{}",
-          create_indent_div(indent_level),
-          create_indent_div(indent_level + 1),
-          node_to_html_with_indent(false_expr, 0)
-        ));
-      }
-      result
+      let cond = node_to_html_internal(condition, indent_level);
+      let true_expr = node_to_html_internal(true_expression, indent_level + 1);
+      let false_part = if let Some(false_expr) = false_expression {
+        format!(
+          "\n{}<span class=\"operator\">:</span>\n{}",
+          indent_str(indent_level),
+          indent_div(
+            &node_to_html_internal(false_expr, indent_level + 1),
+            indent_level + 1
+          )
+        )
+      } else {
+        String::new()
+      };
+      format!(
+        "{} <span class=\"operator\">?</span>\n{}{}",
+        cond,
+        indent_div(&true_expr, indent_level + 1),
+        false_part
+      )
     }
 
     ASTNode::ElementaryTypeNameExpression { type_name, .. } => {
-      format!("{}{}", indent, node_to_html_with_indent(type_name, 0))
+      format!(
+        "<span class=\"type\">{}</span>",
+        node_to_html_internal(type_name, indent_level)
+      )
     }
 
     ASTNode::FunctionCall {
       expression,
       arguments,
+      names,
       ..
     } => {
-      let mut result = format!("{}{}(", indent, node_to_html_with_indent(expression, 0));
-      for (i, arg) in arguments.iter().enumerate() {
-        if i > 0 {
-          result.push_str(", ");
-        }
-        result.push_str(&node_to_html_with_indent(arg, 0));
+      let expr = node_to_html_internal(expression, indent_level);
+      let args = if !names.is_empty() {
+        // Named arguments
+        arguments
+          .iter()
+          .zip(names.iter())
+          .map(|(arg, name)| {
+            format!(
+              "{}<span class=\"parameter\">{}</span>: {}",
+              indent_str(indent_level + 1),
+              html_escape(name),
+              node_to_html_internal(arg, indent_level + 1)
+            )
+          })
+          .collect::<Vec<_>>()
+          .join(",\n")
+      } else {
+        // Positional arguments
+        arguments
+          .iter()
+          .map(|arg| {
+            format!(
+              "{}{}",
+              indent_str(indent_level + 1),
+              node_to_html_internal(arg, indent_level + 1)
+            )
+          })
+          .collect::<Vec<_>>()
+          .join(",\n")
+      };
+
+      if arguments.is_empty() {
+        format!("{}()", expr)
+      } else {
+        format!("{}(\n{}\n{})", expr, args, indent_str(indent_level))
       }
-      result.push(')');
-      result
     }
 
     ASTNode::FunctionCallOptions {
@@ -96,31 +134,21 @@ fn node_to_html_with_indent(node: &ASTNode, indent_level: usize) -> String {
       options,
       ..
     } => {
-      let mut result = format!("{}{}{{", indent, node_to_html_with_indent(expression, 0));
-      for (i, option) in options.iter().enumerate() {
-        if i > 0 {
-          result.push_str(", ");
-        }
-        result.push_str(&node_to_html_with_indent(option, 0));
-      }
-      result.push('}');
-      result
+      let expr = node_to_html_internal(expression, indent_level);
+      let opts = options
+        .iter()
+        .map(|opt| node_to_html_internal(opt, indent_level + 1))
+        .collect::<Vec<_>>()
+        .join(", ");
+      format!("{}{{{}}}", expr, opts)
     }
 
     ASTNode::Identifier { name, .. } => {
-      format!(
-        "{}<span class=\"identifier\">{}</span>",
-        indent,
-        escape_html(name)
-      )
+      format!("<span class=\"identifier\">{}</span>", html_escape(name))
     }
 
     ASTNode::IdentifierPath { name, .. } => {
-      format!(
-        "{}<span class=\"identifier\">{}</span>",
-        indent,
-        escape_html(name)
-      )
+      format!("<span class=\"identifier\">{}</span>", html_escape(name))
     }
 
     ASTNode::IndexAccess {
@@ -128,48 +156,48 @@ fn node_to_html_with_indent(node: &ASTNode, indent_level: usize) -> String {
       index_expression,
       ..
     } => {
-      let mut result = format!(
-        "{}{}[",
-        indent,
-        node_to_html_with_indent(base_expression, 0)
-      );
-      if let Some(index) = index_expression {
-        result.push_str(&node_to_html_with_indent(index, 0));
-      }
-      result.push(']');
-      result
+      let base = node_to_html_internal(base_expression, indent_level);
+      let index = if let Some(idx) = index_expression {
+        node_to_html_internal(idx, indent_level)
+      } else {
+        String::new()
+      };
+      format!("{}[{}]", base, index)
     }
 
     ASTNode::IndexRangeAccess { nodes, body, .. } => {
-      let mut result = format!("{}[", indent);
-      for (i, node) in nodes.iter().enumerate() {
-        if i > 0 {
-          result.push(':');
-        }
-        result.push_str(&node_to_html_with_indent(node, 0));
+      let nodes_str = nodes
+        .iter()
+        .map(|n| node_to_html_internal(n, indent_level))
+        .collect::<Vec<_>>()
+        .join(":");
+      if let Some(b) = body {
+        format!("[{}:{}", nodes_str, node_to_html_internal(b, indent_level))
+      } else {
+        format!("[{}]", nodes_str)
       }
-      result.push(']');
-      if let Some(body_node) = body {
-        result.push_str(&format!(" {}", node_to_html_with_indent(body_node, 0)));
-      }
-      result
     }
 
-    ASTNode::Literal { value, kind, .. } => {
-      let class = match kind {
-        LiteralKind::Number => "number",
-        LiteralKind::Bool => "boolean",
-        LiteralKind::String => "string",
-        LiteralKind::HexString => "hex-string",
+    ASTNode::Literal {
+      kind,
+      value,
+      hex_value,
+      ..
+    } => {
+      let display_value = match kind {
+        LiteralKind::String => {
+          format!("\"{}\"", html_escape(value.as_ref().unwrap_or(&hex_value)))
+        }
+        LiteralKind::HexString => {
+          format!(
+            "hex\"{}\"",
+            html_escape(value.as_ref().unwrap_or(&hex_value))
+          )
+        }
+        LiteralKind::Number => html_escape(value.as_ref().unwrap_or(&hex_value)),
+        LiteralKind::Bool => html_escape(value.as_ref().unwrap_or(&hex_value)),
       };
-      let default_value = String::new();
-      let display_value = value.as_ref().unwrap_or(&default_value);
-      format!(
-        "{}<span class=\"{}\">{}</span>",
-        indent,
-        class,
-        escape_html(display_value)
-      )
+      format!("<span class=\"literal\">{}</span>", display_value)
     }
 
     ASTNode::MemberAccess {
@@ -177,32 +205,28 @@ fn node_to_html_with_indent(node: &ASTNode, indent_level: usize) -> String {
       member_name,
       ..
     } => {
+      let expr = node_to_html_internal(expression, indent_level);
       format!(
-        "{}{}.{}",
-        indent,
-        node_to_html_with_indent(expression, 0),
-        format!("<span class=\"member\">{}</span>", escape_html(member_name))
+        "{}<span class=\"operator\">.</span><span class=\"member\">{}</span>",
+        expr,
+        html_escape(member_name)
       )
     }
 
     ASTNode::NewExpression { type_name, .. } => {
       format!(
-        "{}<span class=\"keyword\">new</span> {}",
-        indent,
-        node_to_html_with_indent(type_name, 0)
+        "<span class=\"keyword\">new</span> {}",
+        node_to_html_internal(type_name, indent_level)
       )
     }
 
     ASTNode::TupleExpression { components, .. } => {
-      let mut result = format!("{}(", indent);
-      for (i, component) in components.iter().enumerate() {
-        if i > 0 {
-          result.push_str(", ");
-        }
-        result.push_str(&node_to_html_with_indent(component, 0));
-      }
-      result.push(')');
-      result
+      let comps = components
+        .iter()
+        .map(|c| node_to_html_internal(c, indent_level))
+        .collect::<Vec<_>>()
+        .join(", ");
+      format!("({})", comps)
     }
 
     ASTNode::UnaryOperation {
@@ -211,88 +235,129 @@ fn node_to_html_with_indent(node: &ASTNode, indent_level: usize) -> String {
       sub_expression,
       ..
     } => {
+      let op = unary_operator_to_string(operator);
+      let expr = node_to_html_internal(sub_expression, indent_level);
       if *prefix {
         format!(
-          "{}{}{}",
-          indent,
-          format_unary_operator(operator),
-          node_to_html_with_indent(sub_expression, 0)
+          "<span class=\"operator\">{}</span>{}",
+          html_escape(&op),
+          expr
         )
       } else {
         format!(
-          "{}{}{}",
-          indent,
-          node_to_html_with_indent(sub_expression, 0),
-          format_unary_operator(operator)
+          "{}<span class=\"operator\">{}</span>",
+          expr,
+          html_escape(&op)
         )
       }
     }
 
     ASTNode::EnumValue { name, .. } => {
-      format!(
-        "{}<span class=\"enum-value\">{}</span>",
-        indent,
-        escape_html(name)
-      )
+      format!("<span class=\"enum-value\">{}</span>", html_escape(name))
     }
 
-    // Statement nodes
-    ASTNode::Block { statements, .. } => format_block(statements, indent_level),
+    // ========== Statement Nodes ==========
+    ASTNode::Block { statements, .. } => {
+      if statements.is_empty() {
+        format!(
+          "{}<span class=\"brace\">{{}}</span>",
+          indent_str(indent_level)
+        )
+      } else {
+        let stmts = statements
+          .iter()
+          .map(|s| {
+            format!(
+              "{}{}",
+              indent_str(indent_level + 1),
+              node_to_html_internal(s, indent_level + 1)
+            )
+          })
+          .collect::<Vec<_>>()
+          .join("\n");
+        format!(
+          "{}<span class=\"brace\">{{</span>\n{}\n{}<span class=\"brace\">}}</span>",
+          indent_str(indent_level),
+          stmts,
+          indent_str(indent_level)
+        )
+      }
+    }
 
     ASTNode::SemanticBlock {
-      statements,
       documentation,
+      statements,
       ..
     } => {
       let mut result = String::new();
       if let Some(doc) = documentation {
         result.push_str(&format!(
           "{}<span class=\"comment\">{}</span>\n",
-          indent,
-          escape_html(doc)
+          indent_str(indent_level),
+          html_escape(doc)
         ));
       }
-      result.push_str(&format_block(statements, indent_level));
+      if statements.is_empty() {
+        result.push_str(&format!(
+          "{}<span class=\"brace\">{{}}</span>",
+          indent_str(indent_level)
+        ));
+      } else {
+        let stmts = statements
+          .iter()
+          .map(|s| {
+            format!(
+              "{}{}",
+              indent_str(indent_level + 1),
+              node_to_html_internal(s, indent_level + 1)
+            )
+          })
+          .collect::<Vec<_>>()
+          .join("\n");
+        result.push_str(&format!(
+          "{}<span class=\"brace\">{{</span>\n{}\n{}<span class=\"brace\">}}</span>",
+          indent_str(indent_level),
+          stmts,
+          indent_str(indent_level)
+        ));
+      }
       result
     }
 
     ASTNode::Break { .. } => {
-      format!("{}<span class=\"keyword\">break</span>;", indent)
+      format!("<span class=\"keyword\">break</span>;")
     }
 
     ASTNode::Continue { .. } => {
-      format!("{}<span class=\"keyword\">continue</span>;", indent)
+      format!("<span class=\"keyword\">continue</span>;")
     }
 
-    ASTNode::DoWhileStatement { body, nodes, .. } => {
-      let mut result = format!("{}<span class=\"keyword\">do</span>\n", indent);
-      if let Some(body_node) = body {
-        result.push_str(&node_to_html_with_indent(body_node, indent_level + 1));
-      }
-      result.push_str(&format!(
-        "\n{}<span class=\"keyword\">while</span> (",
-        create_indent_div(indent_level)
-      ));
-      for (i, node) in nodes.iter().enumerate() {
-        if i > 0 {
-          result.push_str(", ");
-        }
-        result.push_str(&node_to_html_with_indent(node, 0));
-      }
-      result.push_str(");");
-      result
+    ASTNode::DoWhileStatement { nodes, body, .. } => {
+      let body_str = if let Some(b) = body {
+        node_to_html_internal(b, indent_level)
+      } else {
+        String::new()
+      };
+      let condition = if !nodes.is_empty() {
+        node_to_html_internal(&nodes[0], indent_level)
+      } else {
+        String::new()
+      };
+      format!(
+        "<span class=\"keyword\">do</span> {} <span class=\"keyword\">while</span> ({})",
+        body_str, condition
+      )
     }
 
     ASTNode::EmitStatement { event_call, .. } => {
       format!(
-        "{}<span class=\"keyword\">emit</span> {};",
-        indent,
-        node_to_html_with_indent(event_call, 0)
+        "<span class=\"keyword\">emit</span> {};",
+        node_to_html_internal(event_call, indent_level)
       )
     }
 
     ASTNode::ExpressionStatement { expression, .. } => {
-      format!("{}{};", indent, node_to_html_with_indent(expression, 0))
+      format!("{};", node_to_html_internal(expression, indent_level))
     }
 
     ASTNode::ForStatement {
@@ -302,21 +367,26 @@ fn node_to_html_with_indent(node: &ASTNode, indent_level: usize) -> String {
       body,
       ..
     } => {
-      let mut result = format!("{}<span class=\"keyword\">for</span> (", indent);
-      if let Some(init) = initialization_expression {
-        result.push_str(&node_to_html_with_indent(init, 0));
-      }
-      result.push_str("; ");
-      if let Some(cond) = condition {
-        result.push_str(&node_to_html_with_indent(cond, 0));
-      }
-      result.push_str("; ");
-      if let Some(loop_expr) = loop_expression {
-        result.push_str(&node_to_html_with_indent(loop_expr, 0));
-      }
-      result.push_str(")\n");
-      result.push_str(&node_to_html_with_indent(body, indent_level + 1));
-      result
+      let init = if let Some(init_expr) = initialization_expression {
+        node_to_html_internal(init_expr, indent_level)
+      } else {
+        String::new()
+      };
+      let cond = if let Some(cond_expr) = condition {
+        node_to_html_internal(cond_expr, indent_level)
+      } else {
+        String::new()
+      };
+      let loop_expr = if let Some(l_expr) = loop_expression {
+        node_to_html_internal(l_expr, indent_level)
+      } else {
+        String::new()
+      };
+      let body_str = node_to_html_internal(body, indent_level);
+      format!(
+        "<span class=\"keyword\">for</span> ({}; {}; {}) {}",
+        init, cond, loop_expr, body_str
+      )
     }
 
     ASTNode::IfStatement {
@@ -325,47 +395,45 @@ fn node_to_html_with_indent(node: &ASTNode, indent_level: usize) -> String {
       false_body,
       ..
     } => {
-      let mut result = format!(
-        "{}<span class=\"keyword\">if</span> ({})\n{}",
-        indent,
-        node_to_html_with_indent(condition, 0),
-        node_to_html_with_indent(true_body, indent_level + 1)
-      );
-      if let Some(false_branch) = false_body {
-        result.push_str(&format!(
-          "\n{}<span class=\"keyword\">else</span>\n{}",
-          create_indent_div(indent_level),
-          node_to_html_with_indent(false_branch, indent_level + 1)
-        ));
-      }
-      result
-    }
-
-    ASTNode::InlineAssembly { .. } => {
+      let cond = node_to_html_internal(condition, indent_level);
+      let true_b = node_to_html_internal(true_body, indent_level);
+      let false_part = if let Some(false_b) = false_body {
+        format!(
+          " <span class=\"keyword\">else</span> {}",
+          node_to_html_internal(false_b, indent_level)
+        )
+      } else {
+        String::new()
+      };
       format!(
-        "{}<span class=\"keyword\">assembly</span> {{ /* inline assembly */ }}",
-        indent
+        "<span class=\"keyword\">if</span> ({}) {}{}",
+        cond, true_b, false_part
       )
     }
 
+    ASTNode::InlineAssembly { .. } => {
+      format!("<span class=\"keyword\">assembly</span> <span class=\"brace\">{{}}</span>")
+    }
+
     ASTNode::PlaceholderStatement { .. } => {
-      format!("{}<span class=\"keyword\">_</span>;", indent)
+      format!("<span class=\"keyword\">_</span>;")
     }
 
     ASTNode::Return { expression, .. } => {
-      let mut result = format!("{}<span class=\"keyword\">return</span>", indent);
       if let Some(expr) = expression {
-        result.push_str(&format!(" {}", node_to_html_with_indent(expr, 0)));
+        format!(
+          "<span class=\"keyword\">return</span> {};",
+          node_to_html_internal(expr, indent_level)
+        )
+      } else {
+        format!("<span class=\"keyword\">return</span>;")
       }
-      result.push(';');
-      result
     }
 
     ASTNode::RevertStatement { error_call, .. } => {
       format!(
-        "{}<span class=\"keyword\">revert</span> {};",
-        indent,
-        node_to_html_with_indent(error_call, 0)
+        "<span class=\"keyword\">revert</span> {};",
+        node_to_html_internal(error_call, indent_level)
       )
     }
 
@@ -374,22 +442,39 @@ fn node_to_html_with_indent(node: &ASTNode, indent_level: usize) -> String {
       clauses,
       ..
     } => {
-      let mut result = format!(
-        "{}<span class=\"keyword\">try</span> {}\n",
-        indent,
-        node_to_html_with_indent(external_call, 0)
-      );
-      for clause in clauses {
-        result.push_str(&node_to_html_with_indent(clause, indent_level));
-        result.push('\n');
-      }
-      result
+      let call = node_to_html_internal(external_call, indent_level);
+      let clauses_str = clauses
+        .iter()
+        .map(|c| node_to_html_internal(c, indent_level))
+        .collect::<Vec<_>>()
+        .join(" ");
+      format!(
+        "<span class=\"keyword\">try</span> {} {}",
+        call, clauses_str
+      )
     }
 
     ASTNode::UncheckedBlock { statements, .. } => {
-      let mut result = format!("{}<span class=\"keyword\">unchecked</span> ", indent);
-      result.push_str(&format_block(statements, indent_level));
-      result
+      if statements.is_empty() {
+        format!("<span class=\"keyword\">unchecked</span> <span class=\"brace\">{{}}</span>")
+      } else {
+        let stmts = statements
+          .iter()
+          .map(|s| {
+            format!(
+              "{}{}",
+              indent_str(indent_level + 1),
+              node_to_html_internal(s, indent_level + 1)
+            )
+          })
+          .collect::<Vec<_>>()
+          .join("\n");
+        format!(
+          "<span class=\"keyword\">unchecked</span> <span class=\"brace\">{{</span>\n{}\n{}<span class=\"brace\">}}</span>",
+          stmts,
+          indent_str(indent_level)
+        )
+      }
     }
 
     ASTNode::VariableDeclarationStatement {
@@ -397,391 +482,458 @@ fn node_to_html_with_indent(node: &ASTNode, indent_level: usize) -> String {
       initial_value,
       ..
     } => {
-      let mut result = String::new();
-      for (i, decl) in declarations.iter().enumerate() {
-        if i > 0 {
-          result.push_str(", ");
-        }
-        result.push_str(&node_to_html_with_indent(decl, 0));
+      let decls = declarations
+        .iter()
+        .map(|d| node_to_html_internal(d, indent_level))
+        .collect::<Vec<_>>()
+        .join(", ");
+      if let Some(init) = initial_value {
+        format!(
+          "{} <span class=\"operator\">=</span> {};",
+          decls,
+          node_to_html_internal(init, indent_level)
+        )
+      } else {
+        format!("{};", decls)
       }
-      if let Some(value) = initial_value {
-        result.push_str(&format!(" = {}", node_to_html_with_indent(value, 0)));
-      }
-      result.push(';');
-      format!("{}{}", indent, result)
     }
 
     ASTNode::VariableDeclaration {
       type_name,
+      storage_location,
       name,
       visibility,
       mutability,
-      storage_location,
-      constant,
       value,
       ..
     } => {
-      let mut result = String::new();
+      let type_str = node_to_html_internal(type_name, indent_level);
+      let storage = storage_location_to_string(storage_location);
+      let visibility_str = variable_visibility_to_string(visibility);
+      let mutability_str = variable_mutability_to_string(mutability);
 
-      if *constant {
-        result.push_str("<span class=\"keyword\">constant</span> ");
+      let mut parts = vec![type_str];
+      if !storage.is_empty() {
+        parts.push(format!(
+          "<span class=\"keyword\">{}</span>",
+          html_escape(&storage)
+        ));
       }
-
-      result.push_str(&format_variable_mutability(mutability));
-      result.push_str(&format_storage_location(storage_location));
-      result.push_str(&format_variable_visibility(visibility));
-      result.push_str(&node_to_html_with_indent(type_name, 0));
-      result.push_str(&format!(
-        " <span class=\"variable\">{}</span>",
-        escape_html(name)
+      if !visibility_str.is_empty() {
+        parts.push(format!(
+          "<span class=\"keyword\">{}</span>",
+          html_escape(&visibility_str)
+        ));
+      }
+      if !mutability_str.is_empty() {
+        parts.push(format!(
+          "<span class=\"keyword\">{}</span>",
+          html_escape(&mutability_str)
+        ));
+      }
+      parts.push(format!(
+        "<span class=\"identifier\">{}</span>",
+        html_escape(name)
       ));
 
+      let decl = parts.join(" ");
       if let Some(val) = value {
-        result.push_str(&format!(" = {}", node_to_html_with_indent(val, 0)));
+        format!(
+          "{} <span class=\"operator\">=</span> {}",
+          decl,
+          node_to_html_internal(val, indent_level)
+        )
+      } else {
+        decl
       }
-
-      format!("{}{}", indent, result)
     }
 
     ASTNode::WhileStatement {
       condition, body, ..
     } => {
-      let mut result = format!(
-        "{}<span class=\"keyword\">while</span> ({})",
-        indent,
-        node_to_html_with_indent(condition, 0)
-      );
-      if let Some(body_node) = body {
-        result.push_str(&format!(
-          "\n{}",
-          node_to_html_with_indent(body_node, indent_level + 1)
-        ));
-      }
-      result
+      let cond = node_to_html_internal(condition, indent_level);
+      let body_str = if let Some(b) = body {
+        node_to_html_internal(b, indent_level)
+      } else {
+        format!("<span class=\"brace\">{{}}</span>")
+      };
+      format!(
+        "<span class=\"keyword\">while</span> ({}) {}",
+        cond, body_str
+      )
     }
 
-    // Definition nodes
+    // ========== Definition Nodes ==========
     ASTNode::ContractDefinition {
-      name,
       contract_kind,
-      abstract_,
+      name,
       base_contracts,
       nodes,
+      abstract_,
       ..
     } => {
-      let mut result = String::new();
-      if *abstract_ {
-        result.push_str("<span class=\"keyword\">abstract</span> ");
-      }
-      result.push_str(&format_contract_kind(contract_kind));
-      result.push_str(&format!(
-        " <span class=\"contract\">{}</span>",
-        escape_html(name)
-      ));
+      let kind = contract_kind_to_string(contract_kind);
+      let abstract_str = if *abstract_ {
+        "<span class=\"keyword\">abstract</span> "
+      } else {
+        ""
+      };
+      let bases = if !base_contracts.is_empty() {
+        let base_list = base_contracts
+          .iter()
+          .map(|b| node_to_html_internal(b, indent_level))
+          .collect::<Vec<_>>()
+          .join(", ");
+        format!(" <span class=\"keyword\">is</span> {}", base_list)
+      } else {
+        String::new()
+      };
 
-      if !base_contracts.is_empty() {
-        result.push_str(" <span class=\"keyword\">is</span> ");
-        for (i, base) in base_contracts.iter().enumerate() {
-          if i > 0 {
-            result.push_str(", ");
-          }
-          result.push_str(&node_to_html_with_indent(base, 0));
-        }
+      if nodes.is_empty() {
+        format!(
+          "{}<span class=\"keyword\">{}</span> <span class=\"type\">{}</span>{} <span class=\"brace\">{{}}</span>",
+          abstract_str,
+          html_escape(&kind),
+          html_escape(name),
+          bases
+        )
+      } else {
+        let members = nodes
+          .iter()
+          .map(|n| {
+            format!(
+              "{}{}",
+              indent_str(indent_level + 1),
+              node_to_html_internal(n, indent_level + 1)
+            )
+          })
+          .collect::<Vec<_>>()
+          .join("\n");
+        format!(
+          "{}<span class=\"keyword\">{}</span> <span class=\"type\">{}</span>{} <span class=\"brace\">{{</span>\n{}\n<span class=\"brace\">}}</span>",
+          abstract_str,
+          html_escape(&kind),
+          html_escape(name),
+          bases,
+          members
+        )
       }
-
-      result.push_str(" {\n");
-      for node in nodes {
-        result.push_str(&node_to_html_with_indent(node, indent_level + 1));
-        result.push_str("\n");
-      }
-      result.push('}');
-
-      format!("{}{}", indent, result)
     }
 
     ASTNode::FunctionDefinition {
       kind,
       name,
-      visibility,
-      state_mutability,
-      virtual_,
       parameters,
       return_parameters,
       modifiers,
+      visibility,
+      state_mutability,
+      virtual_,
       body,
       ..
     } => {
-      let mut result = String::new();
-
-      result.push_str(&format_function_kind(kind));
-      if !name.is_empty() {
-        result.push_str(&format!(
-          " <span class=\"function\">{}</span>",
-          escape_html(name)
-        ));
-      }
-
-      result.push_str(&format!("({})", node_to_html_with_indent(parameters, 0)));
-      result.push_str(&format_function_visibility(visibility));
-
-      if *virtual_ {
-        result.push_str(" <span class=\"keyword\">virtual</span>");
-      }
-
-      result.push_str(&format_function_state_mutability(state_mutability));
-
-      for modifier in modifiers {
-        result.push_str(&format!(" {}", node_to_html_with_indent(modifier, 0)));
-      }
-
-      // Check if return_parameters has actual parameters
-      if let ASTNode::ParameterList {
-        parameters: return_params,
-        ..
-      } = return_parameters.as_ref()
-      {
-        if !return_params.is_empty() {
-          result.push_str(&format!(
-            " <span class=\"keyword\">returns</span> ({})",
-            node_to_html_with_indent(return_parameters, 0)
-          ));
-        }
-      }
-
-      if let Some(body_node) = body {
-        result.push_str(" ");
-        result.push_str(&node_to_html_with_indent(body_node, indent_level));
+      let kind_str = function_kind_to_string(kind);
+      let name_str = if name.is_empty() {
+        String::new()
       } else {
-        result.push(';');
-      }
+        format!(
+          " <span class=\"function-name\">{}</span>",
+          html_escape(name)
+        )
+      };
+      let params = node_to_html_internal(parameters, indent_level);
+      let visibility_str = function_visibility_to_string(visibility);
+      let mutability_str = function_mutability_to_string(state_mutability);
+      let virtual_str = if *virtual_ {
+        " <span class=\"keyword\">virtual</span>"
+      } else {
+        ""
+      };
+      let modifiers_str = if !modifiers.is_empty() {
+        let mods = modifiers
+          .iter()
+          .map(|m| node_to_html_internal(m, indent_level))
+          .collect::<Vec<_>>()
+          .join(" ");
+        format!(" {}", mods)
+      } else {
+        String::new()
+      };
+      let returns = node_to_html_internal(return_parameters, indent_level);
+      let returns_str = if returns.contains("()") {
+        String::new()
+      } else {
+        format!(" <span class=\"keyword\">returns</span> {}", returns)
+      };
 
-      format!("{}{}", indent, result)
+      let signature = format!(
+        "<span class=\"keyword\">{}</span>{}{}{}{}{}{}{}",
+        html_escape(&kind_str),
+        name_str,
+        params,
+        if visibility_str.is_empty() {
+          String::new()
+        } else {
+          format!(
+            " <span class=\"keyword\">{}</span>",
+            html_escape(&visibility_str)
+          )
+        },
+        if mutability_str.is_empty() {
+          String::new()
+        } else {
+          format!(
+            " <span class=\"keyword\">{}</span>",
+            html_escape(&mutability_str)
+          )
+        },
+        virtual_str,
+        modifiers_str,
+        returns_str
+      );
+
+      if let Some(b) = body {
+        format!("{} {}", signature, node_to_html_internal(b, indent_level))
+      } else {
+        format!("{};", signature)
+      }
     }
 
     ASTNode::EventDefinition {
       name, parameters, ..
     } => {
+      let params = node_to_html_internal(parameters, indent_level);
       format!(
-        "{}<span class=\"keyword\">event</span> <span class=\"event\">{}</span>({})",
-        indent,
-        escape_html(name),
-        node_to_html_with_indent(parameters, 0)
+        "<span class=\"keyword\">event</span> <span class=\"type\">{}</span>{};",
+        html_escape(name),
+        params
       )
     }
 
     ASTNode::ErrorDefinition {
       name, parameters, ..
     } => {
+      let params = node_to_html_internal(parameters, indent_level);
       format!(
-        "{}<span class=\"keyword\">error</span> <span class=\"error\">{}</span>({})",
-        indent,
-        escape_html(name),
-        node_to_html_with_indent(parameters, 0)
+        "<span class=\"keyword\">error</span> <span class=\"type\">{}</span>{};",
+        html_escape(name),
+        params
       )
     }
 
     ASTNode::ModifierDefinition {
       name,
       parameters,
-      body,
       virtual_,
-      visibility,
+      body,
       ..
     } => {
-      let mut result = format!(
-        "{}<span class=\"keyword\">modifier</span> <span class=\"modifier\">{}</span>({})",
-        indent,
-        escape_html(name),
-        node_to_html_with_indent(parameters, 0)
+      let params = node_to_html_internal(parameters, indent_level);
+      let virtual_str = if *virtual_ {
+        " <span class=\"keyword\">virtual</span>"
+      } else {
+        ""
+      };
+      let signature = format!(
+        "<span class=\"keyword\">modifier</span> <span class=\"function-name\">{}</span>{}{}",
+        html_escape(name),
+        params,
+        virtual_str,
       );
 
-      result.push_str(&format_function_visibility(visibility));
-
-      if *virtual_ {
-        result.push_str(" <span class=\"keyword\">virtual</span>");
-      }
-
-      result.push_str(&format!(
-        " {}",
-        node_to_html_with_indent(body, indent_level)
-      ));
-      result
+      format!(
+        "{} {}",
+        signature,
+        node_to_html_internal(body, indent_level)
+      )
     }
 
-    ASTNode::StructDefinition {
-      name,
-      members,
-      visibility,
-      ..
-    } => {
-      let mut result = format!(
-        "{}<span class=\"keyword\">struct</span> <span class=\"struct\">{}</span>",
-        indent,
-        escape_html(name)
-      );
-      result.push_str(&format_variable_visibility(visibility));
-      result.push_str(" {\n");
-      for member in members {
-        result.push_str(&node_to_html_with_indent(member, indent_level + 1));
-        result.push_str(";\n");
+    ASTNode::StructDefinition { name, members, .. } => {
+      if members.is_empty() {
+        format!(
+          "<span class=\"keyword\">struct</span> <span class=\"type\">{}</span> <span class=\"brace\">{{}}</span>",
+          html_escape(name)
+        )
+      } else {
+        let members_str = members
+          .iter()
+          .map(|m| {
+            format!(
+              "{}{};",
+              indent_str(indent_level + 1),
+              node_to_html_internal(m, indent_level + 1)
+            )
+          })
+          .collect::<Vec<_>>()
+          .join("\n");
+        format!(
+          "<span class=\"keyword\">struct</span> <span class=\"type\">{}</span> <span class=\"brace\">{{</span>\n{}\n{}<span class=\"brace\">}}</span>",
+          html_escape(name),
+          members_str,
+          indent_str(indent_level)
+        )
       }
-      result.push('}');
-      result
     }
 
     ASTNode::EnumDefinition { name, members, .. } => {
-      let mut result = format!(
-        "{}<span class=\"keyword\">enum</span> <span class=\"enum\">{}</span> {{",
-        indent,
-        escape_html(name)
-      );
-      for (i, member) in members.iter().enumerate() {
-        if i > 0 {
-          result.push_str(", ");
-        }
-        result.push_str(&node_to_html_with_indent(member, 0));
+      if members.is_empty() {
+        format!(
+          "<span class=\"keyword\">enum</span> <span class=\"type\">{}</span> <span class=\"brace\">{{}}</span>",
+          html_escape(name)
+        )
+      } else {
+        let members_str = members
+          .iter()
+          .map(|m| {
+            format!(
+              "{}{}",
+              indent_str(indent_level + 1),
+              node_to_html_internal(m, indent_level + 1)
+            )
+          })
+          .collect::<Vec<_>>()
+          .join(",\n");
+        format!(
+          "<span class=\"keyword\">enum</span> <span class=\"type\">{}</span> <span class=\"brace\">{{</span>\n{}\n{}<span class=\"brace\">}}</span>",
+          html_escape(name),
+          members_str,
+          indent_str(indent_level)
+        )
       }
-      result.push('}');
-      result
     }
 
-    ASTNode::UserDefinedValueTypeDefinition { nodes, body, .. } => {
-      let mut result = format!("{}<span class=\"keyword\">type</span> ", indent);
-      for node in nodes {
-        result.push_str(&node_to_html_with_indent(node, 0));
-      }
-      if let Some(body_node) = body {
-        result.push_str(&format!(" {}", node_to_html_with_indent(body_node, 0)));
-      }
-      result
+    ASTNode::UserDefinedValueTypeDefinition { .. } => {
+      "UserDefinedValueTypeDefinition placeholder".to_owned()
     }
 
-    // Directive nodes
+    // ========== Directive Nodes ==========
     ASTNode::PragmaDirective { literals, .. } => {
-      let mut result = format!("{}<span class=\"keyword\">pragma</span>", indent);
-      for literal in literals {
-        result.push_str(&format!(
-          " <span class=\"pragma\">{}</span>",
-          escape_html(literal)
-        ));
-      }
-      result.push(';');
-      result
+      let pragma_str = literals.join(" ");
+      format!(
+        "<span class=\"keyword\">pragma</span> <span class=\"pragma\">{}</span>;",
+        html_escape(&pragma_str)
+      )
     }
 
     ASTNode::ImportDirective { file, .. } => {
       format!(
-        "{}<span class=\"keyword\">import</span> <span class=\"string\">\"{}\"</span>;",
-        indent,
-        escape_html(file)
+        "<span class=\"keyword\">import</span> <span class=\"string\">\"{}\"</span>;",
+        html_escape(file)
       )
     }
 
     ASTNode::UsingForDirective {
       library_name,
       type_name,
-      global,
       ..
     } => {
-      let mut result = format!("{}<span class=\"keyword\">using</span> ", indent);
-      if let Some(lib) = library_name {
-        result.push_str(&node_to_html_with_indent(lib, 0));
-      }
-      result.push_str(" <span class=\"keyword\">for</span> ");
-      if let Some(type_node) = type_name {
-        result.push_str(&node_to_html_with_indent(type_node, 0));
-      }
-      if *global {
-        result.push_str(" <span class=\"keyword\">global</span>");
-      }
-      result.push(';');
-      result
+      let lib = if let Some(lib_node) = library_name {
+        node_to_html_internal(lib_node, indent_level)
+      } else {
+        String::new()
+      };
+      let type_str = if let Some(type_node) = type_name {
+        format!(
+          " <span class=\"keyword\">for</span> {}",
+          node_to_html_internal(type_node, indent_level)
+        )
+      } else {
+        String::new()
+      };
+      format!("<span class=\"keyword\">using</span> {}{};", lib, type_str)
     }
 
-    // Other nodes
-    ASTNode::SourceUnit { nodes, .. } => {
-      let mut result = String::new();
-      for (i, node) in nodes.iter().enumerate() {
-        if i > 0 {
-          result.push_str("\n\n");
-        }
-        result.push_str(&node_to_html_with_indent(node, indent_level));
-      }
-      result
-    }
+    // ========== Other Nodes ==========
+    ASTNode::SourceUnit { nodes, .. } => nodes
+      .iter()
+      .map(|n| node_to_html_internal(n, indent_level))
+      .collect::<Vec<_>>()
+      .join("\n\n"),
 
-    ASTNode::InheritanceSpecifier { base_name, .. } => node_to_html_with_indent(base_name, 0),
+    ASTNode::InheritanceSpecifier { base_name, .. } => {
+      node_to_html_internal(base_name, indent_level)
+    }
 
     ASTNode::ElementaryTypeName { name, .. } => {
-      format!(
-        "{}<span class=\"type\">{}</span>",
-        indent,
-        escape_html(name)
-      )
+      format!("<span class=\"type\">{}</span>", html_escape(name))
     }
 
     ASTNode::FunctionTypeName {
       parameter_types,
       return_parameter_types,
-      state_mutability,
       visibility,
+      state_mutability,
       ..
     } => {
-      let mut result = format!(
-        "{}<span class=\"keyword\">function</span>({})",
-        indent,
-        node_to_html_with_indent(parameter_types, 0)
-      );
-      result.push_str(&format_function_visibility(visibility));
-      result.push_str(&format_function_state_mutability(state_mutability));
-
-      if let ASTNode::ParameterList {
-        parameters: return_params,
-        ..
-      } = return_parameter_types.as_ref()
-      {
-        if !return_params.is_empty() {
-          result.push_str(&format!(
-            " <span class=\"keyword\">returns</span> ({})",
-            node_to_html_with_indent(return_parameter_types, 0)
-          ));
-        }
-      }
-      result
+      let params = node_to_html_internal(parameter_types, indent_level);
+      let visibility_str = function_visibility_to_string(visibility);
+      let mutability_str = function_mutability_to_string(state_mutability);
+      let returns = node_to_html_internal(return_parameter_types, indent_level);
+      let returns_str = if returns.contains("()") {
+        String::new()
+      } else {
+        format!(" <span class=\"keyword\">returns</span> {}", returns)
+      };
+      format!(
+        "<span class=\"keyword\">function</span>{}{}{}{}",
+        params,
+        if visibility_str.is_empty() {
+          String::new()
+        } else {
+          format!(
+            " <span class=\"keyword\">{}</span>",
+            html_escape(&visibility_str)
+          )
+        },
+        if mutability_str.is_empty() {
+          String::new()
+        } else {
+          format!(
+            " <span class=\"keyword\">{}</span>",
+            html_escape(&mutability_str)
+          )
+        },
+        returns_str
+      )
     }
 
     ASTNode::ParameterList { parameters, .. } => {
-      let mut result = String::new();
-      for (i, param) in parameters.iter().enumerate() {
-        if i > 0 {
-          result.push_str(", ");
-        }
-        result.push_str(&node_to_html_with_indent(param, 0));
+      if parameters.is_empty() {
+        String::from("()")
+      } else {
+        let params = parameters
+          .iter()
+          .map(|p| node_to_html_internal(p, indent_level))
+          .collect::<Vec<_>>()
+          .join(", ");
+        format!("({})", params)
       }
-      result
     }
 
     ASTNode::TryCatchClause {
-      error_name,
       block,
+      error_name,
       parameters,
       ..
     } => {
-      let mut result = format!("{}<span class=\"keyword\">catch</span>", indent);
-      if !error_name.is_empty() {
-        result.push_str(&format!(
+      let params = if let Some(p) = parameters {
+        node_to_html_internal(p, indent_level)
+      } else {
+        String::new()
+      };
+      let name_str = if !error_name.is_empty() {
+        format!(
           " <span class=\"identifier\">{}</span>",
-          escape_html(error_name)
-        ));
-      }
-      if let Some(params) = parameters {
-        result.push_str(&format!(" ({})", node_to_html_with_indent(params, 0)));
-      }
-      result.push_str(&format!(
-        " {}",
-        node_to_html_with_indent(block, indent_level)
-      ));
-      result
+          html_escape(error_name)
+        )
+      } else {
+        String::new()
+      };
+      let block_str = node_to_html_internal(block, indent_level);
+      format!(
+        "<span class=\"keyword\">catch</span>{}{} {}",
+        name_str, params, block_str
+      )
     }
 
     ASTNode::ModifierInvocation {
@@ -789,110 +941,83 @@ fn node_to_html_with_indent(node: &ASTNode, indent_level: usize) -> String {
       arguments,
       ..
     } => {
-      let mut result = node_to_html_with_indent(modifier_name, 0);
+      let name = node_to_html_internal(modifier_name, indent_level);
       if let Some(args) = arguments {
-        result.push('(');
-        for (i, arg) in args.iter().enumerate() {
-          if i > 0 {
-            result.push_str(", ");
-          }
-          result.push_str(&node_to_html_with_indent(arg, 0));
+        if args.is_empty() {
+          format!("{}()", name)
+        } else {
+          let args_str = args
+            .iter()
+            .map(|a| node_to_html_internal(a, indent_level))
+            .collect::<Vec<_>>()
+            .join(", ");
+          format!("{}({})", name, args_str)
         }
-        result.push(')');
+      } else {
+        name
       }
-      format!("{}{}", indent, result)
     }
 
     ASTNode::UserDefinedTypeName { path_node, .. } => {
-      format!("{}{}", indent, node_to_html_with_indent(path_node, 0))
+      node_to_html_internal(path_node, indent_level)
     }
 
     ASTNode::ArrayTypeName { base_type, .. } => {
-      format!("{}{}[]", indent, node_to_html_with_indent(base_type, 0))
+      let base = node_to_html_internal(base_type, indent_level);
+      format!("{}[]", base)
     }
 
     ASTNode::Mapping {
       key_type,
       value_type,
-      key_name,
-      value_name,
       ..
     } => {
-      let mut result = format!(
-        "{}<span class=\"keyword\">mapping</span>({} ",
-        indent,
-        node_to_html_with_indent(key_type, 0)
-      );
-      if let Some(key_name_str) = key_name {
-        result.push_str(&format!(
-          "<span class=\"variable\">{}</span> ",
-          escape_html(key_name_str)
-        ));
-      }
-      result.push_str("=> ");
-      result.push_str(&node_to_html_with_indent(value_type, 0));
-      if let Some(value_name_str) = value_name {
-        result.push_str(&format!(
-          " <span class=\"variable\">{}</span>",
-          escape_html(value_name_str)
-        ));
-      }
-      result.push(')');
-      result
-    }
-
-    ASTNode::StructuredDocumentation { text, .. } => {
+      let key = node_to_html_internal(key_type, indent_level);
+      let value = node_to_html_internal(value_type, indent_level);
       format!(
-        "{}<span class=\"comment\">{}</span>",
-        indent,
-        escape_html(text)
+        "<span class=\"keyword\">mapping</span>({} <span class=\"operator\">=&gt;</span> {})",
+        key, value
       )
     }
 
-    ASTNode::Other {
-      node_type,
-      nodes,
-      body,
-      ..
-    } => {
-      let mut result = format!(
-        "{}<span class=\"other\">/* {} */</span>",
-        indent,
-        escape_html(node_type)
-      );
-      for node in nodes {
-        result.push_str(&format!(" {}", node_to_html_with_indent(node, 0)));
-      }
-      if let Some(body_node) = body {
-        result.push_str(&format!(" {}", node_to_html_with_indent(body_node, 0)));
-      }
-      result
+    ASTNode::StructuredDocumentation { text, .. } => {
+      format!("<span class=\"comment\">{}</span>", html_escape(text))
+    }
+
+    ASTNode::Other { .. } => {
+      format!("<span class=\"comment\">/* unknown node */</span>")
     }
   }
 }
 
-// Helper functions for formatting
+// ========== Helper Functions ==========
 
-fn create_indent_div(level: usize) -> String {
-  if level == 0 {
-    String::new()
-  } else {
-    format!("<div class=\"indent-{}\">", level)
-  }
+/// Creates an indentation wrapper div with padding
+fn indent_div(content: &str, indent_level: usize) -> String {
+  format!(
+    "<div class=\"indent indent-level-{}\">{}</div>",
+    indent_level, content
+  )
 }
 
-fn format_block(statements: &[ASTNode], indent_level: usize) -> String {
-  let mut result = String::from("{\n");
-  for statement in statements {
-    result.push_str(&node_to_html_with_indent(statement, indent_level + 1));
-    result.push('\n');
-  }
-  result.push_str(&format!("{}}}", create_indent_div(indent_level)));
-  result
+/// Creates an indentation string using non-breaking spaces
+fn indent_str(indent_level: usize) -> String {
+  "&nbsp;".repeat(indent_level * 2)
 }
 
-fn format_binary_operator(op: &BinaryOperator) -> String {
-  let op_str = match op {
+/// Escapes HTML special characters
+fn html_escape(s: &str) -> String {
+  s.replace('&', "&amp;")
+    .replace('<', "&lt;")
+    .replace('>', "&gt;")
+    .replace('"', "&quot;")
+    .replace('\'', "&#39;")
+}
+
+// ========== Operator and Enum to String Conversions ==========
+
+fn binary_operator_to_string(op: &BinaryOperator) -> String {
+  match op {
     BinaryOperator::Add => "+",
     BinaryOperator::Subtract => "-",
     BinaryOperator::Multiply => "*",
@@ -912,12 +1037,12 @@ fn format_binary_operator(op: &BinaryOperator) -> String {
     BinaryOperator::BitwiseXor => "^",
     BinaryOperator::LeftShift => "<<",
     BinaryOperator::RightShift => ">>",
-  };
-  format!("<span class=\"operator\">{}</span>", op_str)
+  }
+  .to_string()
 }
 
-fn format_assignment_operator(op: &AssignmentOperator) -> String {
-  let op_str = match op {
+fn assignment_operator_to_string(op: &AssignmentOperator) -> String {
+  match op {
     AssignmentOperator::Assign => "=",
     AssignmentOperator::AddAssign => "+=",
     AssignmentOperator::SubtractAssign => "-=",
@@ -929,12 +1054,12 @@ fn format_assignment_operator(op: &AssignmentOperator) -> String {
     AssignmentOperator::BitwiseXorAssign => "^=",
     AssignmentOperator::LeftShiftAssign => "<<=",
     AssignmentOperator::RightShiftAssign => ">>=",
-  };
-  format!(" <span class=\"operator\">{}</span>", op_str)
+  }
+  .to_string()
 }
 
-fn format_unary_operator(op: &UnaryOperator) -> String {
-  let op_str = match op {
+fn unary_operator_to_string(op: &UnaryOperator) -> String {
+  match op {
     UnaryOperator::Increment => "++",
     UnaryOperator::Decrement => "--",
     UnaryOperator::Plus => "+",
@@ -942,79 +1067,75 @@ fn format_unary_operator(op: &UnaryOperator) -> String {
     UnaryOperator::BitwiseNot => "~",
     UnaryOperator::Not => "!",
     UnaryOperator::Delete => "delete",
-  };
-  format!("<span class=\"operator\">{}</span>", op_str)
+  }
+  .to_string()
 }
 
-fn format_function_kind(kind: &FunctionKind) -> String {
+fn contract_kind_to_string(kind: &ContractKind) -> String {
   match kind {
-    FunctionKind::Constructor => "<span class=\"keyword\">constructor</span>".to_string(),
-    FunctionKind::Function => "<span class=\"keyword\">function</span>".to_string(),
-    FunctionKind::Fallback => "<span class=\"keyword\">fallback</span>".to_string(),
-    FunctionKind::Receive => "<span class=\"keyword\">receive</span>".to_string(),
-    FunctionKind::FreeFunction => "<span class=\"keyword\">function</span>".to_string(),
+    ContractKind::Contract => "contract",
+    ContractKind::Library => "library",
+    ContractKind::Abstract => "abstract",
+    ContractKind::Interface => "interface",
   }
+  .to_string()
 }
 
-fn format_contract_kind(kind: &ContractKind) -> String {
+fn function_kind_to_string(kind: &FunctionKind) -> String {
   match kind {
-    ContractKind::Contract => "<span class=\"keyword\">contract</span>".to_string(),
-    ContractKind::Library => "<span class=\"keyword\">library</span>".to_string(),
-    ContractKind::Abstract => "<span class=\"keyword\">abstract contract</span>".to_string(),
-    ContractKind::Interface => "<span class=\"keyword\">interface</span>".to_string(),
+    FunctionKind::Constructor => "constructor",
+    FunctionKind::Function => "function",
+    FunctionKind::Fallback => "fallback",
+    FunctionKind::Receive => "receive",
+    FunctionKind::FreeFunction => "function",
   }
+  .to_string()
 }
 
-fn format_function_visibility(visibility: &FunctionVisibility) -> String {
-  let vis_str = match visibility {
-    FunctionVisibility::Public => " <span class=\"keyword\">public</span>",
-    FunctionVisibility::Private => " <span class=\"keyword\">private</span>",
-    FunctionVisibility::Internal => " <span class=\"keyword\">internal</span>",
-    FunctionVisibility::External => " <span class=\"keyword\">external</span>",
-  };
-  vis_str.to_string()
+fn function_visibility_to_string(visibility: &FunctionVisibility) -> String {
+  match visibility {
+    FunctionVisibility::Public => "public",
+    FunctionVisibility::Private => "private",
+    FunctionVisibility::Internal => "internal",
+    FunctionVisibility::External => "external",
+  }
+  .to_string()
 }
 
-fn format_variable_visibility(visibility: &VariableVisibility) -> String {
-  let vis_str = match visibility {
-    VariableVisibility::Public => " <span class=\"keyword\">public</span>",
-    VariableVisibility::Private => " <span class=\"keyword\">private</span>",
-    VariableVisibility::Internal => " <span class=\"keyword\">internal</span>",
-  };
-  vis_str.to_string()
+fn variable_visibility_to_string(visibility: &VariableVisibility) -> String {
+  match visibility {
+    VariableVisibility::Public => "public",
+    VariableVisibility::Private => "private",
+    VariableVisibility::Internal => "internal",
+  }
+  .to_string()
 }
 
-fn format_function_state_mutability(mutability: &FunctionStateMutability) -> String {
+fn function_mutability_to_string(mutability: &FunctionStateMutability) -> String {
   match mutability {
-    FunctionStateMutability::Pure => " <span class=\"keyword\">pure</span>".to_string(),
-    FunctionStateMutability::View => " <span class=\"keyword\">view</span>".to_string(),
-    FunctionStateMutability::NonPayable => String::new(),
-    FunctionStateMutability::Payable => " <span class=\"keyword\">payable</span>".to_string(),
+    FunctionStateMutability::Pure => "pure",
+    FunctionStateMutability::View => "view",
+    FunctionStateMutability::NonPayable => "",
+    FunctionStateMutability::Payable => "payable",
   }
+  .to_string()
 }
 
-fn format_variable_mutability(mutability: &VariableMutability) -> String {
+fn variable_mutability_to_string(mutability: &VariableMutability) -> String {
   match mutability {
-    VariableMutability::Mutable => String::new(),
-    VariableMutability::Immutable => "<span class=\"keyword\">immutable</span> ".to_string(),
-    VariableMutability::Constant => "<span class=\"keyword\">constant</span> ".to_string(),
+    VariableMutability::Mutable => "",
+    VariableMutability::Immutable => "immutable",
+    VariableMutability::Constant => "constant",
   }
+  .to_string()
 }
 
-fn format_storage_location(location: &StorageLocation) -> String {
+fn storage_location_to_string(location: &StorageLocation) -> String {
   match location {
-    StorageLocation::Default => String::new(),
-    StorageLocation::Storage => "<span class=\"keyword\">storage</span> ".to_string(),
-    StorageLocation::Memory => "<span class=\"keyword\">memory</span> ".to_string(),
-    StorageLocation::Calldata => "<span class=\"keyword\">calldata</span> ".to_string(),
+    StorageLocation::Default => "",
+    StorageLocation::Storage => "storage",
+    StorageLocation::Memory => "memory",
+    StorageLocation::Calldata => "calldata",
   }
-}
-
-fn escape_html(text: &str) -> String {
-  text
-    .replace('&', "&amp;")
-    .replace('<', "&lt;")
-    .replace('>', "&gt;")
-    .replace('"', "&quot;")
-    .replace('\'', "&#39;")
+  .to_string()
 }

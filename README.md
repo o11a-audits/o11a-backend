@@ -32,7 +32,7 @@ Projects being audited can pull in lots of dependencies, yet only use a few func
  3. Now with a dictionary of all in-scope and used by in-scope declarations, we can parse each AST in scope into memory one at a time, checking each declaration for inclusion in the in-scope dictionary. If it is, we add it to an accumulating dictionary of detailed declarations. This is the second pass, and it's a great place to perform processing that requires knowledge of a node's references.
 
 # Formatter
-The formatter takes an AST node and its source file as inputs and returns HTML. This HTML is largely formatted without consideration of the source file; however, the output needs to retain the extra whitespace of the source file. Extra whitespace is often used to group statements and has some semantic meaning that is not reflected in the AST.
+The formatter takes an AST node and its source file as inputs and returns HTML. This HTML is largely formatted without consideration of the source file. The parser provides extra information about the source file not found in the original AST. This allows the formatter to work with only the modified AST provided by the parser, not needing to reference the original source file.
 
 This rendered HTML is designed to be forty characters wide. Forty characters allows for four columns of code to be displayed side-by-side on a typical screen while not being so small that the comments are difficult to read. (Forty characters also allow for two columns of code to be printed on standard paper.)
 

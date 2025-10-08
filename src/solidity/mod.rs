@@ -1,7 +1,9 @@
+pub use formatter::node_to_html;
 pub use parser::{AST, ASTNode};
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
+pub mod formatter;
 pub mod parser;
 
 pub fn analyze(
