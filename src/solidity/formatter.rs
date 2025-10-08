@@ -10,10 +10,10 @@ use crate::solidity::parser::{
 /// Binary operators are formatted with the left-hand side and operator on one line,
 /// and the right-hand side indented on the next line.
 pub fn node_to_html(node: &ASTNode) -> String {
-  node_to_html_internal(node, 0)
+  do_node_to_html(node, 0)
 }
 
-fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
+fn do_node_to_html(node: &ASTNode, indent_level: usize) -> String {
   match node {
     // ========== Expression Nodes ==========
     ASTNode::Assignment {
@@ -22,9 +22,9 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
       right_and_side,
       ..
     } => {
-      let lhs = node_to_html_internal(left_hand_side, indent_level);
+      let lhs = do_node_to_html(left_hand_side, indent_level);
       let op = assignment_operator_to_string(operator);
-      let rhs = node_to_html_internal(right_and_side, indent_level + 1);
+      let rhs = do_node_to_html(right_and_side, indent_level + 1);
       format!(
         "{} <span class=\"operator\">{}</span>\n{}",
         lhs,
@@ -39,9 +39,9 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
       right_expression,
       ..
     } => {
-      let lhs = node_to_html_internal(left_expression, indent_level);
+      let lhs = do_node_to_html(left_expression, indent_level);
       let op = binary_operator_to_string(operator);
-      let rhs = node_to_html_internal(right_expression, indent_level + 1);
+      let rhs = do_node_to_html(right_expression, indent_level + 1);
       format!(
         "{} <span class=\"operator\">{}</span>\n{}",
         lhs,
@@ -56,14 +56,14 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
       false_expression,
       ..
     } => {
-      let cond = node_to_html_internal(condition, indent_level);
-      let true_expr = node_to_html_internal(true_expression, indent_level + 1);
+      let cond = do_node_to_html(condition, indent_level);
+      let true_expr = do_node_to_html(true_expression, indent_level + 1);
       let false_part = if let Some(false_expr) = false_expression {
         format!(
           "\n{}<span class=\"operator\">:</span>\n{}",
           indent_str(indent_level),
           indent_div(
-            &node_to_html_internal(false_expr, indent_level + 1),
+            &do_node_to_html(false_expr, indent_level + 1),
             indent_level + 1
           )
         )
@@ -81,7 +81,7 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
     ASTNode::ElementaryTypeNameExpression { type_name, .. } => {
       format!(
         "<span class=\"type\">{}</span>",
-        node_to_html_internal(type_name, indent_level)
+        do_node_to_html(type_name, indent_level)
       )
     }
 
@@ -91,7 +91,7 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
       names,
       ..
     } => {
-      let expr = node_to_html_internal(expression, indent_level);
+      let expr = do_node_to_html(expression, indent_level);
       let args = if !names.is_empty() {
         // Named arguments
         arguments
@@ -102,7 +102,7 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
               "{}<span class=\"parameter\">{}</span>: {}",
               indent_str(indent_level + 1),
               html_escape(name),
-              node_to_html_internal(arg, indent_level + 1)
+              do_node_to_html(arg, indent_level + 1)
             )
           })
           .collect::<Vec<_>>()
@@ -115,7 +115,7 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
             format!(
               "{}{}",
               indent_str(indent_level + 1),
-              node_to_html_internal(arg, indent_level + 1)
+              do_node_to_html(arg, indent_level + 1)
             )
           })
           .collect::<Vec<_>>()
@@ -134,10 +134,10 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
       options,
       ..
     } => {
-      let expr = node_to_html_internal(expression, indent_level);
+      let expr = do_node_to_html(expression, indent_level);
       let opts = options
         .iter()
-        .map(|opt| node_to_html_internal(opt, indent_level + 1))
+        .map(|opt| do_node_to_html(opt, indent_level + 1))
         .collect::<Vec<_>>()
         .join(", ");
       format!("{}{{{}}}", expr, opts)
@@ -156,9 +156,9 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
       index_expression,
       ..
     } => {
-      let base = node_to_html_internal(base_expression, indent_level);
+      let base = do_node_to_html(base_expression, indent_level);
       let index = if let Some(idx) = index_expression {
-        node_to_html_internal(idx, indent_level)
+        do_node_to_html(idx, indent_level)
       } else {
         String::new()
       };
@@ -168,11 +168,11 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
     ASTNode::IndexRangeAccess { nodes, body, .. } => {
       let nodes_str = nodes
         .iter()
-        .map(|n| node_to_html_internal(n, indent_level))
+        .map(|n| do_node_to_html(n, indent_level))
         .collect::<Vec<_>>()
         .join(":");
       if let Some(b) = body {
-        format!("[{}:{}", nodes_str, node_to_html_internal(b, indent_level))
+        format!("[{}:{}", nodes_str, do_node_to_html(b, indent_level))
       } else {
         format!("[{}]", nodes_str)
       }
@@ -205,7 +205,7 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
       member_name,
       ..
     } => {
-      let expr = node_to_html_internal(expression, indent_level);
+      let expr = do_node_to_html(expression, indent_level);
       format!(
         "{}<span class=\"operator\">.</span><span class=\"member\">{}</span>",
         expr,
@@ -216,14 +216,14 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
     ASTNode::NewExpression { type_name, .. } => {
       format!(
         "<span class=\"keyword\">new</span> {}",
-        node_to_html_internal(type_name, indent_level)
+        do_node_to_html(type_name, indent_level)
       )
     }
 
     ASTNode::TupleExpression { components, .. } => {
       let comps = components
         .iter()
-        .map(|c| node_to_html_internal(c, indent_level))
+        .map(|c| do_node_to_html(c, indent_level))
         .collect::<Vec<_>>()
         .join(", ");
       format!("({})", comps)
@@ -236,7 +236,7 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
       ..
     } => {
       let op = unary_operator_to_string(operator);
-      let expr = node_to_html_internal(sub_expression, indent_level);
+      let expr = do_node_to_html(sub_expression, indent_level);
       if *prefix {
         format!(
           "<span class=\"operator\">{}</span>{}",
@@ -270,7 +270,7 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
             format!(
               "{}{}",
               indent_str(indent_level + 1),
-              node_to_html_internal(s, indent_level + 1)
+              do_node_to_html(s, indent_level + 1)
             )
           })
           .collect::<Vec<_>>()
@@ -309,7 +309,7 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
             format!(
               "{}{}",
               indent_str(indent_level + 1),
-              node_to_html_internal(s, indent_level + 1)
+              do_node_to_html(s, indent_level + 1)
             )
           })
           .collect::<Vec<_>>()
@@ -334,12 +334,12 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
 
     ASTNode::DoWhileStatement { nodes, body, .. } => {
       let body_str = if let Some(b) = body {
-        node_to_html_internal(b, indent_level)
+        do_node_to_html(b, indent_level)
       } else {
         String::new()
       };
       let condition = if !nodes.is_empty() {
-        node_to_html_internal(&nodes[0], indent_level)
+        do_node_to_html(&nodes[0], indent_level)
       } else {
         String::new()
       };
@@ -352,12 +352,12 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
     ASTNode::EmitStatement { event_call, .. } => {
       format!(
         "<span class=\"keyword\">emit</span> {};",
-        node_to_html_internal(event_call, indent_level)
+        do_node_to_html(event_call, indent_level)
       )
     }
 
     ASTNode::ExpressionStatement { expression, .. } => {
-      format!("{};", node_to_html_internal(expression, indent_level))
+      format!("{};", do_node_to_html(expression, indent_level))
     }
 
     ASTNode::ForStatement {
@@ -368,21 +368,21 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
       ..
     } => {
       let init = if let Some(init_expr) = initialization_expression {
-        node_to_html_internal(init_expr, indent_level)
+        do_node_to_html(init_expr, indent_level)
       } else {
         String::new()
       };
       let cond = if let Some(cond_expr) = condition {
-        node_to_html_internal(cond_expr, indent_level)
+        do_node_to_html(cond_expr, indent_level)
       } else {
         String::new()
       };
       let loop_expr = if let Some(l_expr) = loop_expression {
-        node_to_html_internal(l_expr, indent_level)
+        do_node_to_html(l_expr, indent_level)
       } else {
         String::new()
       };
-      let body_str = node_to_html_internal(body, indent_level);
+      let body_str = do_node_to_html(body, indent_level);
       format!(
         "<span class=\"keyword\">for</span> ({}; {}; {}) {}",
         init, cond, loop_expr, body_str
@@ -395,12 +395,12 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
       false_body,
       ..
     } => {
-      let cond = node_to_html_internal(condition, indent_level);
-      let true_b = node_to_html_internal(true_body, indent_level);
+      let cond = do_node_to_html(condition, indent_level);
+      let true_b = do_node_to_html(true_body, indent_level);
       let false_part = if let Some(false_b) = false_body {
         format!(
           " <span class=\"keyword\">else</span> {}",
-          node_to_html_internal(false_b, indent_level)
+          do_node_to_html(false_b, indent_level)
         )
       } else {
         String::new()
@@ -423,7 +423,7 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
       if let Some(expr) = expression {
         format!(
           "<span class=\"keyword\">return</span> {};",
-          node_to_html_internal(expr, indent_level)
+          do_node_to_html(expr, indent_level)
         )
       } else {
         format!("<span class=\"keyword\">return</span>;")
@@ -433,7 +433,7 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
     ASTNode::RevertStatement { error_call, .. } => {
       format!(
         "<span class=\"keyword\">revert</span> {};",
-        node_to_html_internal(error_call, indent_level)
+        do_node_to_html(error_call, indent_level)
       )
     }
 
@@ -442,10 +442,10 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
       clauses,
       ..
     } => {
-      let call = node_to_html_internal(external_call, indent_level);
+      let call = do_node_to_html(external_call, indent_level);
       let clauses_str = clauses
         .iter()
-        .map(|c| node_to_html_internal(c, indent_level))
+        .map(|c| do_node_to_html(c, indent_level))
         .collect::<Vec<_>>()
         .join(" ");
       format!(
@@ -464,7 +464,7 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
             format!(
               "{}{}",
               indent_str(indent_level + 1),
-              node_to_html_internal(s, indent_level + 1)
+              do_node_to_html(s, indent_level + 1)
             )
           })
           .collect::<Vec<_>>()
@@ -484,14 +484,14 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
     } => {
       let decls = declarations
         .iter()
-        .map(|d| node_to_html_internal(d, indent_level))
+        .map(|d| do_node_to_html(d, indent_level))
         .collect::<Vec<_>>()
         .join(", ");
       if let Some(init) = initial_value {
         format!(
           "{} <span class=\"operator\">=</span> {};",
           decls,
-          node_to_html_internal(init, indent_level)
+          do_node_to_html(init, indent_level)
         )
       } else {
         format!("{};", decls)
@@ -507,7 +507,7 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
       value,
       ..
     } => {
-      let type_str = node_to_html_internal(type_name, indent_level);
+      let type_str = do_node_to_html(type_name, indent_level);
       let storage = storage_location_to_string(storage_location);
       let visibility_str = variable_visibility_to_string(visibility);
       let mutability_str = variable_mutability_to_string(mutability);
@@ -541,7 +541,7 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
         format!(
           "{} <span class=\"operator\">=</span> {}",
           decl,
-          node_to_html_internal(val, indent_level)
+          do_node_to_html(val, indent_level)
         )
       } else {
         decl
@@ -551,9 +551,9 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
     ASTNode::WhileStatement {
       condition, body, ..
     } => {
-      let cond = node_to_html_internal(condition, indent_level);
+      let cond = do_node_to_html(condition, indent_level);
       let body_str = if let Some(b) = body {
-        node_to_html_internal(b, indent_level)
+        do_node_to_html(b, indent_level)
       } else {
         format!("<span class=\"brace\">{{}}</span>")
       };
@@ -581,7 +581,7 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
       let bases = if !base_contracts.is_empty() {
         let base_list = base_contracts
           .iter()
-          .map(|b| node_to_html_internal(b, indent_level))
+          .map(|b| do_node_to_html(b, indent_level))
           .collect::<Vec<_>>()
           .join(", ");
         format!(" <span class=\"keyword\">is</span> {}", base_list)
@@ -604,7 +604,7 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
             format!(
               "{}{}",
               indent_str(indent_level + 1),
-              node_to_html_internal(n, indent_level + 1)
+              do_node_to_html(n, indent_level + 1)
             )
           })
           .collect::<Vec<_>>()
@@ -641,7 +641,7 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
           html_escape(name)
         )
       };
-      let params = node_to_html_internal(parameters, indent_level);
+      let params = do_node_to_html(parameters, indent_level);
       let visibility_str = function_visibility_to_string(visibility);
       let mutability_str = function_mutability_to_string(state_mutability);
       let virtual_str = if *virtual_ {
@@ -652,14 +652,14 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
       let modifiers_str = if !modifiers.is_empty() {
         let mods = modifiers
           .iter()
-          .map(|m| node_to_html_internal(m, indent_level))
+          .map(|m| do_node_to_html(m, indent_level))
           .collect::<Vec<_>>()
           .join(" ");
         format!(" {}", mods)
       } else {
         String::new()
       };
-      let returns = node_to_html_internal(return_parameters, indent_level);
+      let returns = do_node_to_html(return_parameters, indent_level);
       let returns_str = if returns.contains("()") {
         String::new()
       } else {
@@ -693,7 +693,7 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
       );
 
       if let Some(b) = body {
-        format!("{} {}", signature, node_to_html_internal(b, indent_level))
+        format!("{} {}", signature, do_node_to_html(b, indent_level))
       } else {
         format!("{};", signature)
       }
@@ -702,7 +702,7 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
     ASTNode::EventDefinition {
       name, parameters, ..
     } => {
-      let params = node_to_html_internal(parameters, indent_level);
+      let params = do_node_to_html(parameters, indent_level);
       format!(
         "<span class=\"keyword\">event</span> <span class=\"type\">{}</span>{};",
         html_escape(name),
@@ -713,7 +713,7 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
     ASTNode::ErrorDefinition {
       name, parameters, ..
     } => {
-      let params = node_to_html_internal(parameters, indent_level);
+      let params = do_node_to_html(parameters, indent_level);
       format!(
         "<span class=\"keyword\">error</span> <span class=\"type\">{}</span>{};",
         html_escape(name),
@@ -728,7 +728,7 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
       body,
       ..
     } => {
-      let params = node_to_html_internal(parameters, indent_level);
+      let params = do_node_to_html(parameters, indent_level);
       let virtual_str = if *virtual_ {
         " <span class=\"keyword\">virtual</span>"
       } else {
@@ -741,11 +741,7 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
         virtual_str,
       );
 
-      format!(
-        "{} {}",
-        signature,
-        node_to_html_internal(body, indent_level)
-      )
+      format!("{} {}", signature, do_node_to_html(body, indent_level))
     }
 
     ASTNode::StructDefinition { name, members, .. } => {
@@ -761,7 +757,7 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
             format!(
               "{}{};",
               indent_str(indent_level + 1),
-              node_to_html_internal(m, indent_level + 1)
+              do_node_to_html(m, indent_level + 1)
             )
           })
           .collect::<Vec<_>>()
@@ -788,7 +784,7 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
             format!(
               "{}{}",
               indent_str(indent_level + 1),
-              node_to_html_internal(m, indent_level + 1)
+              do_node_to_html(m, indent_level + 1)
             )
           })
           .collect::<Vec<_>>()
@@ -828,14 +824,14 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
       ..
     } => {
       let lib = if let Some(lib_node) = library_name {
-        node_to_html_internal(lib_node, indent_level)
+        do_node_to_html(lib_node, indent_level)
       } else {
         String::new()
       };
       let type_str = if let Some(type_node) = type_name {
         format!(
           " <span class=\"keyword\">for</span> {}",
-          node_to_html_internal(type_node, indent_level)
+          do_node_to_html(type_node, indent_level)
         )
       } else {
         String::new()
@@ -846,13 +842,11 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
     // ========== Other Nodes ==========
     ASTNode::SourceUnit { nodes, .. } => nodes
       .iter()
-      .map(|n| node_to_html_internal(n, indent_level))
+      .map(|n| do_node_to_html(n, indent_level))
       .collect::<Vec<_>>()
       .join("\n\n"),
 
-    ASTNode::InheritanceSpecifier { base_name, .. } => {
-      node_to_html_internal(base_name, indent_level)
-    }
+    ASTNode::InheritanceSpecifier { base_name, .. } => do_node_to_html(base_name, indent_level),
 
     ASTNode::ElementaryTypeName { name, .. } => {
       format!("<span class=\"type\">{}</span>", html_escape(name))
@@ -865,10 +859,10 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
       state_mutability,
       ..
     } => {
-      let params = node_to_html_internal(parameter_types, indent_level);
+      let params = do_node_to_html(parameter_types, indent_level);
       let visibility_str = function_visibility_to_string(visibility);
       let mutability_str = function_mutability_to_string(state_mutability);
-      let returns = node_to_html_internal(return_parameter_types, indent_level);
+      let returns = do_node_to_html(return_parameter_types, indent_level);
       let returns_str = if returns.contains("()") {
         String::new()
       } else {
@@ -903,7 +897,7 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
       } else {
         let params = parameters
           .iter()
-          .map(|p| node_to_html_internal(p, indent_level))
+          .map(|p| do_node_to_html(p, indent_level))
           .collect::<Vec<_>>()
           .join(", ");
         format!("({})", params)
@@ -917,7 +911,7 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
       ..
     } => {
       let params = if let Some(p) = parameters {
-        node_to_html_internal(p, indent_level)
+        do_node_to_html(p, indent_level)
       } else {
         String::new()
       };
@@ -929,7 +923,7 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
       } else {
         String::new()
       };
-      let block_str = node_to_html_internal(block, indent_level);
+      let block_str = do_node_to_html(block, indent_level);
       format!(
         "<span class=\"keyword\">catch</span>{}{} {}",
         name_str, params, block_str
@@ -941,14 +935,14 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
       arguments,
       ..
     } => {
-      let name = node_to_html_internal(modifier_name, indent_level);
+      let name = do_node_to_html(modifier_name, indent_level);
       if let Some(args) = arguments {
         if args.is_empty() {
           format!("{}()", name)
         } else {
           let args_str = args
             .iter()
-            .map(|a| node_to_html_internal(a, indent_level))
+            .map(|a| do_node_to_html(a, indent_level))
             .collect::<Vec<_>>()
             .join(", ");
           format!("{}({})", name, args_str)
@@ -958,12 +952,10 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
       }
     }
 
-    ASTNode::UserDefinedTypeName { path_node, .. } => {
-      node_to_html_internal(path_node, indent_level)
-    }
+    ASTNode::UserDefinedTypeName { path_node, .. } => do_node_to_html(path_node, indent_level),
 
     ASTNode::ArrayTypeName { base_type, .. } => {
-      let base = node_to_html_internal(base_type, indent_level);
+      let base = do_node_to_html(base_type, indent_level);
       format!("{}[]", base)
     }
 
@@ -972,8 +964,8 @@ fn node_to_html_internal(node: &ASTNode, indent_level: usize) -> String {
       value_type,
       ..
     } => {
-      let key = node_to_html_internal(key_type, indent_level);
-      let value = node_to_html_internal(value_type, indent_level);
+      let key = do_node_to_html(key_type, indent_level);
+      let value = do_node_to_html(value_type, indent_level);
       format!(
         "<span class=\"keyword\">mapping</span>({} <span class=\"operator\">=&gt;</span> {})",
         key, value
