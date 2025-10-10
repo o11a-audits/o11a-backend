@@ -4,6 +4,10 @@ use crate::solidity::parser::{
   VariableVisibility,
 };
 
+pub fn main() {
+  println!("Hello, world!");
+}
+
 /// Converts an AST node and all its children to a formatted HTML string with syntax highlighting.
 ///
 /// This function recursively processes nodes and uses div-based indentation with padding.
@@ -43,7 +47,7 @@ fn do_node_to_html(node: &ASTNode, indent_level: usize) -> String {
       let op = binary_operator_to_string(operator);
       let rhs = do_node_to_html(right_expression, indent_level + 1);
       format!(
-        "{} <span class=\"operator\">{}</span>\n{}",
+        "{} <span class=\"operator\">{}</span>{}",
         lhs,
         html_escape(&op),
         indent_div(&rhs, indent_level + 1)
@@ -60,7 +64,7 @@ fn do_node_to_html(node: &ASTNode, indent_level: usize) -> String {
       let true_expr = do_node_to_html(true_expression, indent_level + 1);
       let false_part = if let Some(false_expr) = false_expression {
         format!(
-          "\n{}<span class=\"operator\">:</span>\n{}",
+          "{}<span class=\"operator\">:</span>{}",
           indent_str(indent_level),
           indent_div(
             &do_node_to_html(false_expr, indent_level + 1),
@@ -71,7 +75,7 @@ fn do_node_to_html(node: &ASTNode, indent_level: usize) -> String {
         String::new()
       };
       format!(
-        "{} <span class=\"operator\">?</span>\n{}{}",
+        "{} <span class=\"operator\">?</span>{}{}",
         cond,
         indent_div(&true_expr, indent_level + 1),
         false_part
