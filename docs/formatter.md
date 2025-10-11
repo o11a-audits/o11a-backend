@@ -1,32 +1,32 @@
 Example of the formatter output from a solidity file:
 ``` rust
-pub const NATIVE_TOKEN;
+pub const NATIVE_TOKEN
 
-pub immut factory;
+pub immut factory
 
-pub immut holdingPeriodInSeconds;
+pub immut holdingPeriodInSeconds
 
-pub mut pID;
-pub mut pendingRewards;
-pub mut totalReallocatedAmount;
-pub mut accumulatedFees;
-pub mut distributedRewards;
+pub mut pID
+pub mut pendingRewards
+pub mut totalReallocatedAmount
+pub mut accumulatedFees
+pub mut distributedRewards
 
-mut _manuallyDeactivated;
+mut _manuallyDeactivated
 
 pub mut map(
   uint256 pID => Participation
-) participations;
+) participations
 
 constructor(
-  holdingPeriodInSeconds_,
-  targetToken_,
-  rewardToken_,
-  rewardPPQ_,
-  campaignAdmin,
-  startTimestamp_,
-  feeBps_,
-  alternativeWithdrawalAddress_,
+  holdingPeriodInSeconds_
+  targetToken_
+  rewardToken_
+  rewardPPQ_
+  campaignAdmin
+  startTimestamp_
+  feeBps_
+  alternativeWithdrawalAddress_
   campaignId_
 ) {
   if (
@@ -124,7 +124,7 @@ constructor(
     alternativeWithdrawalAddress_;
 }
 
-modifier whenNotPaused() {
+mod whenNotPaused() {
   if (
     factory
       .isCampaignPaused(
@@ -137,14 +137,15 @@ modifier whenNotPaused() {
   _;
 }
 
-function handleReallocation(
+ext payable fn handleReallocation(
   campaignId_,
   userAddress,
   toToken,
   toAmount,
   memory data
-) external payable
-whenNotPaused {
+)
+  whenNotPaused
+returns () {
   // Check if campaign is active or can be activated
   _validateAndActivateCampaignIfReady();
 
@@ -153,7 +154,7 @@ whenNotPaused {
       .hasRole(
         role:
           factory
-            .SWAP_CALLER_ROLE(),
+            .SWAP_CALLER_ROLE()
         addr:
           msg.sender
       )

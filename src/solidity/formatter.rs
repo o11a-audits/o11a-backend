@@ -1,16 +1,8 @@
-use std::fmt::format;
-
-use foundry_compilers_artifacts::Visibility;
-
 use crate::solidity::parser::{
   ASTNode, AssignmentOperator, BinaryOperator, ContractKind, FunctionKind,
   FunctionStateMutability, FunctionVisibility, LiteralKind, StorageLocation,
   UnaryOperator, VariableMutability, VariableVisibility,
 };
-
-pub fn main() {
-  println!("Hello, world!");
-}
 
 /// Converts an AST node and all its children to a formatted HTML string with syntax highlighting.
 ///
@@ -54,14 +46,21 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       let lhs = do_node_to_source_text(left_expression, indent_level);
       let op = binary_operator_to_string(operator);
 
-      let indent_level = indent_level + 1;
-      let rhs = do_node_to_source_text(right_expression, indent_level);
-      format!(
-        "{} {}{}",
-        lhs,
-        format_operator(&op),
-        indent(&rhs, indent_level)
-      )
+      if is_boolean_and_or_operator(operator) || is_math_operator(operator) {
+        // Boolean &&, ||, and math operators do not indent, but place the
+        // operator and rhs on the next line with the same indentation level
+        // of the lhs
+        let rhs = do_node_to_source_text(right_expression, indent_level);
+        format!("{}\n{}", lhs, format!("{} {}", format_operator(&op), &rhs),)
+      } else {
+        let indent_level = indent_level + 1;
+        let rhs = do_node_to_source_text(right_expression, indent_level);
+        format!(
+          "{}{}",
+          lhs,
+          indent(&format!("{} {}", format_operator(&op), &rhs), indent_level)
+        )
+      }
     }
 
     ASTNode::Conditional {
@@ -89,7 +88,7 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
         )
       };
 
-      format!("{}{}", cond, indent(&part, indent_level),)
+      format!("{}{}", cond, part)
     }
 
     ASTNode::ElementaryTypeNameExpression { type_name, .. } => {
@@ -99,7 +98,6 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
     ASTNode::FunctionCall {
       expression,
       arguments,
-      kind,
       ..
     } => {
       let expr = do_node_to_source_text(expression, indent_level);
