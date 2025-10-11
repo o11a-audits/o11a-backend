@@ -134,9 +134,7 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       format!("{}{{{}}}", expr, indent(&opts, indent_level))
     }
 
-    ASTNode::Identifier { name, .. } => {
-      format!("<span class=\"identifier\">{}</span>", html_escape(name))
-    }
+    ASTNode::Identifier { name, .. } => format_identifier(name),
 
     ASTNode::IdentifierPath {
       name,
@@ -144,9 +142,9 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       ..
     } => {
       if referenced_declaration < &0 {
-        format!("<span class=\"global\">{}</span>", html_escape(name))
+        format_global(&name)
       } else {
-        format!("<span class=\"identifier\">{}</span>", html_escape(name))
+        format_identifier(name)
       }
     }
 
@@ -173,23 +171,15 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       hex_value,
       ..
     } => match kind {
-      LiteralKind::String => {
-        format!(
-          "<span class=\"string\">\"{}\"</span>",
-          html_escape(value.as_ref().unwrap_or(&hex_value))
-        )
-      }
+      LiteralKind::String => format_string(&format!(
+        "\"{}\"",
+        html_escape(value.as_ref().unwrap_or(&hex_value))
+      )),
       LiteralKind::HexString => {
-        format!(
-          "<span class=\"number\">0x{}</span>",
-          html_escape(value.as_ref().unwrap_or(&hex_value))
-        )
+        format_number(&format!("0x{}", value.as_ref().unwrap_or(&hex_value)))
       }
       LiteralKind::Number | LiteralKind::Bool => {
-        format!(
-          "<span class=\"number\">{}</span>",
-          html_escape(value.as_ref().unwrap_or(&hex_value))
-        )
+        format_number(&value.as_ref().unwrap_or(&hex_value))
       }
     },
 
@@ -201,10 +191,8 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       let expr = do_node_to_source_text(expression, indent_level);
 
       let indent_level = indent_level + 1;
-      let member = format!(
-        "<span class=\"operator\">.</span><span class=\"member\">{}</span>",
-        html_escape(member_name)
-      );
+      let member =
+        format!("{}{}", format_operator("."), format_member(&member_name));
       format!("{}{}", expr, indent(&member, indent_level),)
     }
 
@@ -246,9 +234,7 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       }
     }
 
-    ASTNode::EnumValue { name, .. } => {
-      format!("<span class=\"enum-value\">{}</span>", html_escape(name))
-    }
+    ASTNode::EnumValue { name, .. } => format_enum_value(&html_escape(name)),
 
     ASTNode::Block { statements, .. } => {
       if statements.is_empty() {
@@ -291,14 +277,18 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
         String::new()
       };
       format!(
-        "<span class=\"keyword\">do</span> {} <span class=\"keyword\">while</span> ({})",
-        body_str, condition
+        "{} {} {} ({})",
+        format_keyword("do"),
+        body_str,
+        format_keyword("while"),
+        condition
       )
     }
 
     ASTNode::EmitStatement { event_call, .. } => {
       format!(
-        "<span class=\"keyword\">emit</span> {};",
+        "{} {}",
+        format_keyword("emit"),
         do_node_to_source_text(event_call, indent_level)
       )
     }
@@ -331,8 +321,12 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       };
       let body_str = do_node_to_source_text(body, indent_level);
       format!(
-        "<span class=\"keyword\">for</span> ({}; {}; {}) {}",
-        init, cond, loop_expr, body_str
+        "{} ({}; {}; {}) {}",
+        format_keyword("for"),
+        init,
+        cond,
+        loop_expr,
+        body_str
       )
     }
 
@@ -346,14 +340,16 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       let true_b = do_node_to_source_text(true_body, indent_level);
       let false_part = if let Some(false_b) = false_body {
         format!(
-          " <span class=\"keyword\">else</span> {}",
+          " {} {}",
+          format_keyword("else"),
           do_node_to_source_text(false_b, indent_level)
         )
       } else {
         String::new()
       };
       format!(
-        "<span class=\"keyword\">if</span> ({}) {}{}",
+        "{} ({}) {}{}",
+        format_keyword("if"),
         indent(&cond, indent_level + 1),
         true_b,
         false_part
@@ -517,11 +513,12 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
 
       if nodes.is_empty() {
         format!(
-          "{}<span class=\"keyword\">{}</span> <span class=\"type\">{}</span>{} <span class=\"brace\">{{}}</span>",
+          "{}{} {}{} {}",
           abstract_str,
-          html_escape(&kind),
-          html_escape(name),
-          bases
+          format_keyword(&html_escape(&kind)),
+          format_type(&html_escape(name)),
+          bases,
+          format_brace("{}", indent_level)
         )
       } else {
         let members = nodes
@@ -530,12 +527,14 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
           .collect::<Vec<_>>()
           .join("\n\n");
         format!(
-          "{}<span class=\"keyword\">{}</span> <span class=\"type\">{}</span>{} <span class=\"brace\">{{</span>{}<span class=\"brace\">}}</span>",
+          "{}{} {}{} {}{}{}",
           abstract_str,
-          html_escape(&kind),
-          html_escape(name),
+          format_keyword(&html_escape(&kind)),
+          format_type(&html_escape(name)),
           bases,
-          indent(&members, indent_level + 1)
+          format_brace("{", indent_level),
+          indent(&members, indent_level + 1),
+          format_brace("}", indent_level)
         )
       }
     }
@@ -848,9 +847,7 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
 
     ASTNode::StructuredDocumentation { .. } => String::new(),
 
-    ASTNode::Other { .. } => {
-      format!("<span class=\"comment\">/* unknown node */</span>")
-    }
+    ASTNode::Other { .. } => format_comment("/* unknown node */"),
   };
 
   format_node(&node_str, node.node_id(), "node")
@@ -882,6 +879,22 @@ fn format_user_defined_type(type_name: &String) -> String {
 
 fn format_type(type_name: &String) -> String {
   format_token(type_name, "type")
+}
+
+fn format_member(name: &str) -> String {
+  format_token(name, "member")
+}
+
+fn format_global(name: &str) -> String {
+  format_token(name, "global")
+}
+
+fn format_enum_value(name: &str) -> String {
+  format_token(name, "enum-value")
+}
+
+fn format_comment(text: &str) -> String {
+  format_token(text, "comment")
 }
 
 fn format_number(val: &str) -> String {
