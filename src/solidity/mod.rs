@@ -1,4 +1,4 @@
-pub use formatter::node_to_html;
+pub use formatter::node_to_source_text;
 pub use parser::{AST, ASTNode};
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
@@ -109,7 +109,7 @@ pub struct SecondPassDeclaration {
   // For functions and modifiers
   pub referenced_nodes: Vec<i32>, // Node IDs of all referenced nodes
   pub require_revert_statements: Vec<i32>, // Node IDs of require/revert statements
-                                  // Additional fields for detailed analysis will be added here
+                                           // Additional fields for detailed analysis will be added here
 }
 
 /// Analyzer implementing the two-pass architecture described in the README:
@@ -135,8 +135,8 @@ fn load_scope_file(project_root: &Path) -> Result<HashSet<String>, String> {
     return Err("scope.txt file not found in project root".to_string());
   }
 
-  let content =
-    std::fs::read_to_string(&scope_file).map_err(|e| format!("Failed to read scope.txt: {}", e))?;
+  let content = std::fs::read_to_string(&scope_file)
+    .map_err(|e| format!("Failed to read scope.txt: {}", e))?;
 
   let mut in_scope_files = HashSet::new();
   for line in content.lines() {
@@ -237,10 +237,12 @@ fn process_ast_nodes(
             parser::FunctionKind::Constructor
             | parser::FunctionKind::Fallback
             | parser::FunctionKind::Receive => true,
-            parser::FunctionKind::Function | parser::FunctionKind::FreeFunction => {
+            parser::FunctionKind::Function
+            | parser::FunctionKind::FreeFunction => {
               matches!(
                 visibility,
-                parser::FunctionVisibility::Public | parser::FunctionVisibility::External
+                parser::FunctionVisibility::Public
+                  | parser::FunctionVisibility::External
               )
             }
           }
@@ -285,7 +287,8 @@ fn process_ast_nodes(
         let is_publicly_visible = is_file_in_scope
           && matches!(
             visibility,
-            parser::FunctionVisibility::Public | parser::FunctionVisibility::External
+            parser::FunctionVisibility::Public
+              | parser::FunctionVisibility::External
           );
 
         // Process entire modifier node to find references and require/revert statements
@@ -328,8 +331,8 @@ fn process_ast_nodes(
         mutability,
         ..
       } => {
-        let is_publicly_visible =
-          is_file_in_scope && matches!(visibility, parser::VariableVisibility::Public);
+        let is_publicly_visible = is_file_in_scope
+          && matches!(visibility, parser::VariableVisibility::Public);
 
         let declaration_kind = if *state_variable {
           if matches!(mutability, parser::VariableMutability::Constant) {
@@ -694,7 +697,9 @@ fn process_declaration_recursive(
       if let Some(called_decl) = first_pass_declarations.get(&call_id) {
         !matches!(
           called_decl.declaration_kind(),
-          DeclarationKind::Event | DeclarationKind::Error | DeclarationKind::Modifier
+          DeclarationKind::Event
+            | DeclarationKind::Error
+            | DeclarationKind::Modifier
         )
       } else {
         true // Keep calls to declarations not in our map (external references)
@@ -721,7 +726,9 @@ fn process_declaration_recursive(
     node_id,
     InScopeDeclaration {
       references,
-      require_revert_statements: first_pass_decl.require_revert_statements().to_vec(),
+      require_revert_statements: first_pass_decl
+        .require_revert_statements()
+        .to_vec(),
       function_calls: filtered_function_calls,
       variable_mutations: filtered_variable_mutations,
       declaration_kind: first_pass_decl.declaration_kind().clone(),

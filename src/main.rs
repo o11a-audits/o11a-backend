@@ -1,14 +1,14 @@
 use std::{path::Path, vec};
 
 use crate::solidity::{
-  ASTNode, node_to_html,
+  ASTNode, node_to_source_text,
   parser::{LiteralKind, SourceLocation, TypeDescriptions},
 };
 
 mod solidity;
 
 fn main() {
-  let html = node_to_html(&ASTNode::Assignment {
+  let html = node_to_source_text(&ASTNode::Assignment {
     node_id: 1532,
     src_location: SourceLocation {
       start: None,
@@ -100,8 +100,12 @@ fn maind() {
           "Flat"
         };
         let kind_str = match decl.declaration_kind() {
-          solidity::DeclarationKind::Contract(kind) => format!("Contract({:?})", kind),
-          solidity::DeclarationKind::Function(kind) => format!("Function({:?})", kind),
+          solidity::DeclarationKind::Contract(kind) => {
+            format!("Contract({:?})", kind)
+          }
+          solidity::DeclarationKind::Function(kind) => {
+            format!("Function({:?})", kind)
+          }
           other => format!("{:?}", other),
         };
         println!(
@@ -120,8 +124,12 @@ fn maind() {
       println!("\nFirst 5 in-scope declarations:");
       for (node_id, in_scope_decl) in in_scope_declarations.iter().take(5) {
         let kind_str = match &in_scope_decl.declaration_kind {
-          solidity::DeclarationKind::Contract(kind) => format!("Contract({:?})", kind),
-          solidity::DeclarationKind::Function(kind) => format!("Function({:?})", kind),
+          solidity::DeclarationKind::Contract(kind) => {
+            format!("Contract({:?})", kind)
+          }
+          solidity::DeclarationKind::Function(kind) => {
+            format!("Function({:?})", kind)
+          }
           other => format!("{:?}", other),
         };
         println!(
