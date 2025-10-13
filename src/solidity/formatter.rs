@@ -845,6 +845,8 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
 
     ASTNode::StructuredDocumentation { .. } => String::new(),
 
+    ASTNode::Stub { .. } => String::from("Node Stub"),
+
     ASTNode::Other { .. } => format_comment("/* unknown node */"),
   };
 

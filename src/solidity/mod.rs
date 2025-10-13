@@ -85,11 +85,11 @@ pub enum FirstPassDeclaration {
 }
 
 pub struct InScopeDeclaration {
+  pub declaration_kind: DeclarationKind,
   pub references: Vec<i32>,
   pub require_revert_statements: Vec<i32>,
   pub function_calls: Vec<i32>,
   pub variable_mutations: Vec<i32>,
-  pub declaration_kind: DeclarationKind,
 }
 
 /// Second pass declaration structure for detailed analysis (TODO: to be implemented).

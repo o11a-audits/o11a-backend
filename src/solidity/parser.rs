@@ -1,10 +1,11 @@
 use serde_json;
-use std::collections::HashMap;
 use std::path::Path;
 use std::str::FromStr;
 use std::{panic, vec};
 
-pub fn process(root: &Path) -> Result<std::collections::BTreeMap<String, Vec<AST>>, String> {
+pub fn process(
+  root: &Path,
+) -> Result<std::collections::BTreeMap<String, Vec<AST>>, String> {
   let mut ast_map = std::collections::BTreeMap::new();
 
   // Look for the "out" directory in the project root
@@ -31,11 +32,12 @@ fn traverse_directory(
   dir: &Path,
   ast_map: &mut std::collections::BTreeMap<String, Vec<AST>>,
 ) -> Result<(), String> {
-  let entries =
-    std::fs::read_dir(dir).map_err(|e| format!("Failed to read directory {:?}: {}", dir, e))?;
+  let entries = std::fs::read_dir(dir)
+    .map_err(|e| format!("Failed to read directory {:?}: {}", dir, e))?;
 
   for entry in entries {
-    let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
+    let entry =
+      entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
     let path = entry.path();
 
     if path.is_dir() {
@@ -51,8 +53,10 @@ fn traverse_directory(
       if let Some(extension) = path.extension() {
         if extension == "json" {
           println!("Processing JSON file: {:?}", path);
-          let ast = ast_from_json_file(&path.to_string_lossy())
-            .map_err(|e| format!("Failed to parse JSON file {:?}: {}", path, e))?;
+          let ast =
+            ast_from_json_file(&path.to_string_lossy()).map_err(|e| {
+              format!("Failed to parse JSON file {:?}: {}", path, e)
+            })?;
 
           ast_map
             .entry(ast.absolute_path.clone())
@@ -83,12 +87,12 @@ where
 }
 
 pub fn ast_from_json_file(file_path: &str) -> Result<AST, String> {
-  let json =
-    std::fs::read_to_string(file_path).map_err(|e| format!("Failed to read file: {}", e))?;
+  let json = std::fs::read_to_string(file_path)
+    .map_err(|e| format!("Failed to read file: {}", e))?;
 
   // Parse the JSON string
-  let parsed: serde_json::Value =
-    serde_json::from_str(&json).map_err(|e| format!("Failed to parse JSON: {}", e))?;
+  let parsed: serde_json::Value = serde_json::from_str(&json)
+    .map_err(|e| format!("Failed to parse JSON: {}", e))?;
 
   // Extract the "ast" object from the root
   let ast_obj = parsed
@@ -106,7 +110,9 @@ pub fn ast_from_json_file(file_path: &str) -> Result<AST, String> {
     .get("absolutePath")
     .and_then(|v| v.as_str())
     .map(|s| s.to_string())
-    .ok_or_else(|| "Missing or invalid 'absolutePath' field in ast object".to_string())?;
+    .ok_or_else(|| {
+      "Missing or invalid 'absolutePath' field in ast object".to_string()
+    })?;
 
   // Read the original source file content
   let source_content = read_source_file(&file_path, &absolute_path)?;
@@ -114,7 +120,9 @@ pub fn ast_from_json_file(file_path: &str) -> Result<AST, String> {
   let nodes_array = ast_obj
     .get("nodes")
     .and_then(|v| v.as_array())
-    .ok_or_else(|| "Missing or invalid 'nodes' field in ast object".to_string())?;
+    .ok_or_else(|| {
+      "Missing or invalid 'nodes' field in ast object".to_string()
+    })?;
 
   // Parse each node in the nodes array
   let nodes: Result<Vec<ASTNode>, String> = nodes_array
@@ -157,7 +165,10 @@ impl AST {
   }
 }
 
-fn read_source_file(json_file_path: &str, absolute_path: &str) -> Result<String, String> {
+fn read_source_file(
+  json_file_path: &str,
+  absolute_path: &str,
+) -> Result<String, String> {
   // Extract project root from JSON file path
   // JSON files are typically in out/ directory, so go up to find project root
   let json_path = std::path::Path::new(json_file_path);
@@ -173,11 +184,13 @@ fn read_source_file(json_file_path: &str, absolute_path: &str) -> Result<String,
   }
 
   // Combine project root with absolute path to get source file path
-  let source_file_path = project_root.join(absolute_path.trim_start_matches('/'));
+  let source_file_path =
+    project_root.join(absolute_path.trim_start_matches('/'));
 
   // Read the source file
-  std::fs::read_to_string(&source_file_path)
-    .map_err(|e| format!("Failed to read source file {:?}: {}", source_file_path, e))
+  std::fs::read_to_string(&source_file_path).map_err(|e| {
+    format!("Failed to read source file {:?}: {}", source_file_path, e)
+  })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
@@ -581,12 +594,16 @@ impl TypeDescriptions {
     let type_identifier = value
       .get("typeIdentifier")
       .and_then(|v| v.as_str())
-      .ok_or_else(|| format!("TypeDescriptions missing typeIdentifier: {:?}", value))?
+      .ok_or_else(|| {
+        format!("TypeDescriptions missing typeIdentifier: {:?}", value)
+      })?
       .to_string();
     let type_string = value
       .get("typeString")
       .and_then(|v| v.as_str())
-      .ok_or_else(|| format!("TypeDescriptions missing typeString: {:?}", value))?
+      .ok_or_else(|| {
+        format!("TypeDescriptions missing typeString: {:?}", value)
+      })?
       .to_string();
 
     Ok(TypeDescriptions {
@@ -1067,6 +1084,14 @@ pub enum ASTNode {
     text: String,
   },
 
+  // Placeholder for another type of node. This node is just used for
+  // optimizations, so that a node can hold a placeholder for its children
+  // instead of all of its real children (which can be expensive)
+  Stub {
+    node_id: i32,
+    src_location: SourceLocation,
+  },
+
   // Catch-all for unknown node types
   Other {
     node_id: i32,
@@ -1136,6 +1161,7 @@ impl ASTNode {
       ASTNode::ArrayTypeName { node_id, .. } => *node_id,
       ASTNode::Mapping { node_id, .. } => *node_id,
       ASTNode::StructuredDocumentation { node_id, .. } => *node_id,
+      ASTNode::Stub { node_id, .. } => *node_id,
       ASTNode::Other { node_id, .. } => *node_id,
     }
   }
@@ -1145,7 +1171,9 @@ impl ASTNode {
       ASTNode::Assignment { src_location, .. } => src_location,
       ASTNode::BinaryOperation { src_location, .. } => src_location,
       ASTNode::Conditional { src_location, .. } => src_location,
-      ASTNode::ElementaryTypeNameExpression { src_location, .. } => src_location,
+      ASTNode::ElementaryTypeNameExpression { src_location, .. } => {
+        src_location
+      }
       ASTNode::FunctionCall { src_location, .. } => src_location,
       ASTNode::FunctionCallOptions { src_location, .. } => src_location,
       ASTNode::Identifier { src_location, .. } => src_location,
@@ -1173,7 +1201,9 @@ impl ASTNode {
       ASTNode::RevertStatement { src_location, .. } => src_location,
       ASTNode::TryStatement { src_location, .. } => src_location,
       ASTNode::UncheckedBlock { src_location, .. } => src_location,
-      ASTNode::VariableDeclarationStatement { src_location, .. } => src_location,
+      ASTNode::VariableDeclarationStatement { src_location, .. } => {
+        src_location
+      }
       ASTNode::VariableDeclaration { src_location, .. } => src_location,
       ASTNode::WhileStatement { src_location, .. } => src_location,
       ASTNode::ContractDefinition { src_location, .. } => src_location,
@@ -1183,7 +1213,9 @@ impl ASTNode {
       ASTNode::ModifierDefinition { src_location, .. } => src_location,
       ASTNode::StructDefinition { src_location, .. } => src_location,
       ASTNode::EnumDefinition { src_location, .. } => src_location,
-      ASTNode::UserDefinedValueTypeDefinition { src_location, .. } => src_location,
+      ASTNode::UserDefinedValueTypeDefinition { src_location, .. } => {
+        src_location
+      }
       ASTNode::PragmaDirective { src_location, .. } => src_location,
       ASTNode::ImportDirective { src_location, .. } => src_location,
       ASTNode::UsingForDirective { src_location, .. } => src_location,
@@ -1198,6 +1230,7 @@ impl ASTNode {
       ASTNode::ArrayTypeName { src_location, .. } => src_location,
       ASTNode::Mapping { src_location, .. } => src_location,
       ASTNode::StructuredDocumentation { src_location, .. } => src_location,
+      ASTNode::Stub { src_location, .. } => src_location,
       ASTNode::Other { src_location, .. } => src_location,
     }
   }
@@ -1259,7 +1292,9 @@ impl ASTNode {
         }
         result
       }
-      ASTNode::IndexRangeAccess { .. } => panic!("IndexRangeAccess not implemented"),
+      ASTNode::IndexRangeAccess { .. } => {
+        panic!("IndexRangeAccess not implemented")
+      }
       ASTNode::Literal { .. } => vec![],
       ASTNode::MemberAccess { expression, .. } => vec![expression],
       ASTNode::NewExpression { type_name, .. } => vec![type_name],
@@ -1288,7 +1323,9 @@ impl ASTNode {
       }
       ASTNode::Break { .. } => vec![],
       ASTNode::Continue { .. } => vec![],
-      ASTNode::DoWhileStatement { .. } => panic!("DoWhileStatement not implemented"),
+      ASTNode::DoWhileStatement { .. } => {
+        panic!("DoWhileStatement not implemented")
+      }
       ASTNode::EmitStatement { event_call, .. } => vec![event_call],
       ASTNode::ExpressionStatement { expression, .. } => vec![expression],
       ASTNode::ForStatement {
@@ -1464,7 +1501,9 @@ impl ASTNode {
       }
       ASTNode::InheritanceSpecifier { base_name, .. } => vec![base_name],
       ASTNode::ElementaryTypeName { .. } => vec![],
-      ASTNode::FunctionTypeName { .. } => panic!("FunctionTypeName not implemented"),
+      ASTNode::FunctionTypeName { .. } => {
+        panic!("FunctionTypeName not implemented")
+      }
       ASTNode::ParameterList { parameters, .. } => {
         let mut result = vec![];
         for item in parameters {
@@ -1502,6 +1541,7 @@ impl ASTNode {
         ..
       } => vec![key_type, value_type],
       ASTNode::StructuredDocumentation { .. } => vec![],
+      ASTNode::Stub { .. } => vec![],
       ASTNode::Other { nodes, body, .. } => {
         let mut result = vec![];
         for item in nodes {
@@ -1518,7 +1558,10 @@ impl ASTNode {
 }
 
 // Helper functions for JSON parsing
-fn get_required_i32(val: &serde_json::Value, field_name: &str) -> Result<i32, String> {
+fn get_required_i32(
+  val: &serde_json::Value,
+  field_name: &str,
+) -> Result<i32, String> {
   val
     .get(field_name)
     .and_then(|v| v.as_i64())
@@ -1541,7 +1584,8 @@ fn get_required_i32_with_context(
   field_name: &str,
   node_type: &str,
 ) -> Result<i32, String> {
-  get_required_i32(val, field_name).map_err(|e| format!("Error parsing {} node: {}", node_type, e))
+  get_required_i32(val, field_name)
+    .map_err(|e| format!("Error parsing {} node: {}", node_type, e))
 }
 
 fn get_required_string_with_context(
@@ -1580,7 +1624,8 @@ fn get_required_bool_with_context(
   field_name: &str,
   node_type: &str,
 ) -> Result<bool, String> {
-  get_required_bool(val, field_name).map_err(|e| format!("Error parsing {} node: {}", node_type, e))
+  get_required_bool(val, field_name)
+    .map_err(|e| format!("Error parsing {} node: {}", node_type, e))
 }
 
 fn get_required_source_location_with_context(
@@ -1600,7 +1645,8 @@ fn get_required_enum_with_context<T: FromStr>(
 where
   T::Err: std::fmt::Debug,
 {
-  get_required_enum(val, field_name).map_err(|e| format!("Error parsing {} node: {}", node_type, e))
+  get_required_enum(val, field_name)
+    .map_err(|e| format!("Error parsing {} node: {}", node_type, e))
 }
 
 fn get_required_node_vec_with_context(
@@ -1689,7 +1735,10 @@ fn get_required_type_descriptions_with_context(
     .map_err(|e| format!("Error parsing {} node: {}", node_type, e))
 }
 
-fn get_required_string(val: &serde_json::Value, field_name: &str) -> Result<String, String> {
+fn get_required_string(
+  val: &serde_json::Value,
+  field_name: &str,
+) -> Result<String, String> {
   val
     .get(field_name)
     .and_then(|v| v.as_str())
@@ -1706,14 +1755,20 @@ fn get_required_string(val: &serde_json::Value, field_name: &str) -> Result<Stri
     })
 }
 
-fn get_optional_string(val: &serde_json::Value, field_name: &str) -> Option<String> {
+fn get_optional_string(
+  val: &serde_json::Value,
+  field_name: &str,
+) -> Option<String> {
   val
     .get(field_name)
     .and_then(|v| v.as_str())
     .map(|s| s.to_string())
 }
 
-fn get_required_bool(val: &serde_json::Value, field_name: &str) -> Result<bool, String> {
+fn get_required_bool(
+  val: &serde_json::Value,
+  field_name: &str,
+) -> Result<bool, String> {
   val
     .get(field_name)
     .and_then(|v| v.as_bool())
@@ -1740,7 +1795,10 @@ fn get_required_source_location(
     .and_then(|v| SourceLocation::from_str(v))
 }
 
-fn get_required_enum<T: FromStr>(val: &serde_json::Value, field_name: &str) -> Result<T, String>
+fn get_required_enum<T: FromStr>(
+  val: &serde_json::Value,
+  field_name: &str,
+) -> Result<T, String>
 where
   T::Err: std::fmt::Debug,
 {
@@ -1771,9 +1829,12 @@ fn get_required_node_vec(
   val
     .get(field_name)
     .and_then(|v| v.as_array())
-    .ok_or_else(|| format!("Missing or invalid {} field: {:?}", field_name, val))
+    .ok_or_else(|| {
+      format!("Missing or invalid {} field: {:?}", field_name, val)
+    })
     .and_then(|arr| {
-      let filtered: Vec<_> = arr.iter().filter(|item| !item.is_null()).collect();
+      let filtered: Vec<_> =
+        arr.iter().filter(|item| !item.is_null()).collect();
 
       filtered
         .into_iter()
@@ -1795,7 +1856,8 @@ fn get_optional_node_vec(
         v.as_array()
           .ok_or_else(|| format!("Field '{}' is not an array", field_name))
           .and_then(|arr| {
-            let filtered: Vec<_> = arr.iter().filter(|item| !item.is_null()).collect();
+            let filtered: Vec<_> =
+              arr.iter().filter(|item| !item.is_null()).collect();
 
             filtered
               .into_iter()
@@ -1857,33 +1919,38 @@ fn get_required_string_vec(
   val
     .get(field_name)
     .and_then(|v| v.as_array())
-    .ok_or_else(|| format!("Missing or invalid {} field: {:?}", field_name, val))
+    .ok_or_else(|| {
+      format!("Missing or invalid {} field: {:?}", field_name, val)
+    })
     .and_then(|arr| {
       arr
         .iter()
         .map(|item| {
-          item
-            .as_str()
-            .map(|s| s.to_string())
-            .ok_or_else(|| format!("Invalid string in {} array: {:?}", field_name, item))
+          item.as_str().map(|s| s.to_string()).ok_or_else(|| {
+            format!("Invalid string in {} array: {:?}", field_name, item)
+          })
         })
         .collect::<Result<Vec<String>, String>>()
     })
 }
 
-fn get_required_i32_vec(val: &serde_json::Value, field_name: &str) -> Result<Vec<i32>, String> {
+fn get_required_i32_vec(
+  val: &serde_json::Value,
+  field_name: &str,
+) -> Result<Vec<i32>, String> {
   val
     .get(field_name)
     .and_then(|v| v.as_array())
-    .ok_or_else(|| format!("Missing or invalid {} field: {:?}", field_name, val))
+    .ok_or_else(|| {
+      format!("Missing or invalid {} field: {:?}", field_name, val)
+    })
     .and_then(|arr| {
       arr
         .iter()
         .map(|item| {
-          item
-            .as_i64()
-            .map(|i| i as i32)
-            .ok_or_else(|| format!("Invalid integer in {} array: {:?}", field_name, item))
+          item.as_i64().map(|i| i as i32).ok_or_else(|| {
+            format!("Invalid integer in {} array: {:?}", field_name, item)
+          })
         })
         .collect::<Result<Vec<i32>, String>>()
     })
@@ -1896,7 +1963,9 @@ fn get_required_source_location_vec(
   val
     .get(field_name)
     .and_then(|v| v.as_array())
-    .ok_or_else(|| format!("Missing or invalid {} field: {:?}", field_name, val))
+    .ok_or_else(|| {
+      format!("Missing or invalid {} field: {:?}", field_name, val)
+    })
     .and_then(|arr| {
       arr
         .iter()
@@ -2011,13 +2080,15 @@ fn group_statements_into_semantic_blocks(
   let mut current_group_start = 0;
 
   for &break_index in &breaks {
-    let group_statements = statements[current_group_start..break_index].to_vec();
+    let group_statements =
+      statements[current_group_start..break_index].to_vec();
 
     if !group_statements.is_empty() {
-      let first_stmt_start = group_statements[0].src_location().start.unwrap_or(0);
+      let first_stmt_start =
+        group_statements[0].src_location().start.unwrap_or(0);
       let last_stmt = &group_statements[group_statements.len() - 1];
-      let last_stmt_end =
-        last_stmt.src_location().start.unwrap_or(0) + last_stmt.src_location().length.unwrap_or(0);
+      let last_stmt_end = last_stmt.src_location().start.unwrap_or(0)
+        + last_stmt.src_location().length.unwrap_or(0);
 
       let group_start_pos = if current_group_start == 0 {
         block_src_location.start.unwrap_or(0)
@@ -2032,7 +2103,8 @@ fn group_statements_into_semantic_blocks(
             .unwrap_or(0)
       };
 
-      let documentation = extract_block_documentation(source, group_start_pos, first_stmt_start);
+      let documentation =
+        extract_block_documentation(source, group_start_pos, first_stmt_start);
 
       let semantic_block = ASTNode::SemanticBlock {
         node_id: generate_semantic_block_id(),
@@ -2056,10 +2128,11 @@ fn group_statements_into_semantic_blocks(
     let group_statements = statements[current_group_start..].to_vec();
 
     if !group_statements.is_empty() {
-      let first_stmt_start = group_statements[0].src_location().start.unwrap_or(0);
+      let first_stmt_start =
+        group_statements[0].src_location().start.unwrap_or(0);
       let last_stmt = &group_statements[group_statements.len() - 1];
-      let last_stmt_end =
-        last_stmt.src_location().start.unwrap_or(0) + last_stmt.src_location().length.unwrap_or(0);
+      let last_stmt_end = last_stmt.src_location().start.unwrap_or(0)
+        + last_stmt.src_location().length.unwrap_or(0);
 
       let group_start_pos = if current_group_start == 0 {
         block_src_location.start.unwrap_or(0)
@@ -2074,7 +2147,8 @@ fn group_statements_into_semantic_blocks(
             .unwrap_or(0)
       };
 
-      let documentation = extract_block_documentation(source, group_start_pos, first_stmt_start);
+      let documentation =
+        extract_block_documentation(source, group_start_pos, first_stmt_start);
 
       let semantic_block = ASTNode::SemanticBlock {
         node_id: generate_semantic_block_id(),
@@ -2095,8 +2169,8 @@ fn group_statements_into_semantic_blocks(
   if semantic_blocks.is_empty() && !statements.is_empty() {
     let first_stmt_start = statements[0].src_location().start.unwrap_or(0);
     let last_stmt = &statements[statements.len() - 1];
-    let last_stmt_end =
-      last_stmt.src_location().start.unwrap_or(0) + last_stmt.src_location().length.unwrap_or(0);
+    let last_stmt_end = last_stmt.src_location().start.unwrap_or(0)
+      + last_stmt.src_location().length.unwrap_or(0);
 
     let documentation = extract_block_documentation(
       source,
@@ -2121,12 +2195,16 @@ fn group_statements_into_semantic_blocks(
   Ok(semantic_blocks)
 }
 
-pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<ASTNode, String> {
+pub fn node_from_json(
+  val: &serde_json::Value,
+  source_content: &str,
+) -> Result<ASTNode, String> {
   // Handle null values - they should not reach here for required fields
   // but this provides a clear error if they do
   if val.is_null() {
     return Err(
-      "Cannot parse null node value - this indicates a required field is null".to_string(),
+      "Cannot parse null node value - this indicates a required field is null"
+        .to_string(),
     );
   }
 
@@ -2140,17 +2218,28 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
   let src_location = val
     .get("src")
     .and_then(|v| v.as_str())
-    .ok_or_else(|| format!("Missing src field in {} node: {:?}", node_type_str, val))
+    .ok_or_else(|| {
+      format!("Missing src field in {} node: {:?}", node_type_str, val)
+    })
     .and_then(|v| SourceLocation::from_str(v))
     .map_err(|e| format!("Error parsing {} node: {}", node_type_str, e))?;
 
   match node_type_str {
     "Assignment" => {
-      let operator = get_required_enum_with_context(val, "operator", node_type_str)?;
-      let right_and_side =
-        get_required_node_with_context(val, "rightHandSide", node_type_str, source_content)?;
-      let left_hand_side =
-        get_required_node_with_context(val, "leftHandSide", node_type_str, source_content)?;
+      let operator =
+        get_required_enum_with_context(val, "operator", node_type_str)?;
+      let right_and_side = get_required_node_with_context(
+        val,
+        "rightHandSide",
+        node_type_str,
+        source_content,
+      )?;
+      let left_hand_side = get_required_node_with_context(
+        val,
+        "leftHandSide",
+        node_type_str,
+        source_content,
+      )?;
 
       Ok(ASTNode::Assignment {
         node_id,
@@ -2161,13 +2250,25 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "BinaryOperation" => {
-      let left_expression =
-        get_required_node_with_context(val, "leftExpression", node_type_str, source_content)?;
-      let operator = get_required_enum_with_context(val, "operator", node_type_str)?;
-      let right_expression =
-        get_required_node_with_context(val, "rightExpression", node_type_str, source_content)?;
-      let type_descriptions =
-        get_required_type_descriptions_with_context(val, "typeDescriptions", "BinaryOperation")?;
+      let left_expression = get_required_node_with_context(
+        val,
+        "leftExpression",
+        node_type_str,
+        source_content,
+      )?;
+      let operator =
+        get_required_enum_with_context(val, "operator", node_type_str)?;
+      let right_expression = get_required_node_with_context(
+        val,
+        "rightExpression",
+        node_type_str,
+        source_content,
+      )?;
+      let type_descriptions = get_required_type_descriptions_with_context(
+        val,
+        "typeDescriptions",
+        "BinaryOperation",
+      )?;
 
       Ok(ASTNode::BinaryOperation {
         node_id,
@@ -2179,12 +2280,24 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "Conditional" => {
-      let condition =
-        get_required_node_with_context(val, "condition", node_type_str, source_content)?;
-      let true_expression =
-        get_required_node_with_context(val, "trueExpression", node_type_str, source_content)?;
-      let false_expression =
-        get_optional_node_with_context(val, "falseExpression", node_type_str, source_content)?;
+      let condition = get_required_node_with_context(
+        val,
+        "condition",
+        node_type_str,
+        source_content,
+      )?;
+      let true_expression = get_required_node_with_context(
+        val,
+        "trueExpression",
+        node_type_str,
+        source_content,
+      )?;
+      let false_expression = get_optional_node_with_context(
+        val,
+        "falseExpression",
+        node_type_str,
+        source_content,
+      )?;
 
       Ok(ASTNode::Conditional {
         node_id,
@@ -2195,10 +2308,17 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "ElementaryTypeNameExpression" => {
-      let type_descriptions =
-        get_required_type_descriptions_with_context(val, "typeDescriptions", node_type_str)?;
-      let type_name =
-        get_required_node_with_context(val, "typeName", node_type_str, source_content)?;
+      let type_descriptions = get_required_type_descriptions_with_context(
+        val,
+        "typeDescriptions",
+        node_type_str,
+      )?;
+      let type_name = get_required_node_with_context(
+        val,
+        "typeName",
+        node_type_str,
+        source_content,
+      )?;
 
       Ok(ASTNode::ElementaryTypeNameExpression {
         node_id,
@@ -2208,17 +2328,33 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "FunctionCall" => {
-      let arguments =
-        get_required_node_vec_with_context(val, "arguments", node_type_str, source_content)?;
-      let expression =
-        get_required_node_with_context(val, "expression", node_type_str, source_content)?;
+      let arguments = get_required_node_vec_with_context(
+        val,
+        "arguments",
+        node_type_str,
+        source_content,
+      )?;
+      let expression = get_required_node_with_context(
+        val,
+        "expression",
+        node_type_str,
+        source_content,
+      )?;
       let kind = get_required_enum_with_context(val, "kind", node_type_str)?;
-      let name_locations =
-        get_required_source_location_vec_with_context(val, "nameLocations", node_type_str)?;
-      let names = get_required_string_vec_with_context(val, "names", node_type_str)?;
-      let try_call = get_required_bool_with_context(val, "tryCall", node_type_str)?;
-      let type_descriptions =
-        get_required_type_descriptions_with_context(val, "typeDescriptions", node_type_str)?;
+      let name_locations = get_required_source_location_vec_with_context(
+        val,
+        "nameLocations",
+        node_type_str,
+      )?;
+      let names =
+        get_required_string_vec_with_context(val, "names", node_type_str)?;
+      let try_call =
+        get_required_bool_with_context(val, "tryCall", node_type_str)?;
+      let type_descriptions = get_required_type_descriptions_with_context(
+        val,
+        "typeDescriptions",
+        node_type_str,
+      )?;
 
       Ok(ASTNode::FunctionCall {
         node_id,
@@ -2233,10 +2369,18 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "FunctionCallOptions" => {
-      let expression =
-        get_required_node_with_context(val, "expression", node_type_str, source_content)?;
-      let options =
-        get_required_node_vec_with_context(val, "options", node_type_str, source_content)?;
+      let expression = get_required_node_with_context(
+        val,
+        "expression",
+        node_type_str,
+        source_content,
+      )?;
+      let options = get_required_node_vec_with_context(
+        val,
+        "options",
+        node_type_str,
+        source_content,
+      )?;
 
       Ok(ASTNode::FunctionCallOptions {
         node_id,
@@ -2247,12 +2391,21 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
     }
     "Identifier" => {
       let name = get_required_string_with_context(val, "name", node_type_str)?;
-      let overloaded_declarations =
-        get_required_i32_vec_with_context(val, "overloadedDeclarations", node_type_str)?;
-      let referenced_declaration =
-        get_required_i32_with_context(val, "referencedDeclaration", node_type_str)?;
-      let type_descriptions =
-        get_required_type_descriptions_with_context(val, "typeDescriptions", node_type_str)?;
+      let overloaded_declarations = get_required_i32_vec_with_context(
+        val,
+        "overloadedDeclarations",
+        node_type_str,
+      )?;
+      let referenced_declaration = get_required_i32_with_context(
+        val,
+        "referencedDeclaration",
+        node_type_str,
+      )?;
+      let type_descriptions = get_required_type_descriptions_with_context(
+        val,
+        "typeDescriptions",
+        node_type_str,
+      )?;
 
       Ok(ASTNode::Identifier {
         node_id,
@@ -2265,10 +2418,16 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
     }
     "IdentifierPath" => {
       let name = get_required_string_with_context(val, "name", node_type_str)?;
-      let name_locations =
-        get_required_source_location_vec_with_context(val, "nameLocations", node_type_str)?;
-      let referenced_declaration =
-        get_required_i32_with_context(val, "referencedDeclaration", node_type_str)?;
+      let name_locations = get_required_source_location_vec_with_context(
+        val,
+        "nameLocations",
+        node_type_str,
+      )?;
+      let referenced_declaration = get_required_i32_with_context(
+        val,
+        "referencedDeclaration",
+        node_type_str,
+      )?;
 
       Ok(ASTNode::IdentifierPath {
         node_id,
@@ -2279,10 +2438,18 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "IndexAccess" => {
-      let base_expression =
-        get_required_node_with_context(val, "baseExpression", node_type_str, source_content)?;
-      let index_expression =
-        get_optional_node_with_context(val, "indexExpression", node_type_str, source_content)?;
+      let base_expression = get_required_node_with_context(
+        val,
+        "baseExpression",
+        node_type_str,
+        source_content,
+      )?;
+      let index_expression = get_optional_node_with_context(
+        val,
+        "indexExpression",
+        node_type_str,
+        source_content,
+      )?;
 
       Ok(ASTNode::IndexAccess {
         node_id,
@@ -2292,8 +2459,18 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "IndexRangeAccess" => {
-      let nodes = get_required_node_vec_with_context(val, "nodes", node_type_str, source_content)?;
-      let body = get_optional_node_with_context(val, "body", node_type_str, source_content)?;
+      let nodes = get_required_node_vec_with_context(
+        val,
+        "nodes",
+        node_type_str,
+        source_content,
+      )?;
+      let body = get_optional_node_with_context(
+        val,
+        "body",
+        node_type_str,
+        source_content,
+      )?;
 
       Ok(ASTNode::IndexRangeAccess {
         node_id,
@@ -2303,11 +2480,16 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "Literal" => {
-      let hex_value = get_required_string_with_context(val, "hexValue", node_type_str)?;
+      let hex_value =
+        get_required_string_with_context(val, "hexValue", node_type_str)?;
       let kind = get_required_enum_with_context(val, "kind", node_type_str)?;
-      let type_descriptions =
-        get_required_type_descriptions_with_context(val, "typeDescriptions", node_type_str)?;
-      let value = get_optional_string_with_context(val, "value", node_type_str)?;
+      let type_descriptions = get_required_type_descriptions_with_context(
+        val,
+        "typeDescriptions",
+        node_type_str,
+      )?;
+      let value =
+        get_optional_string_with_context(val, "value", node_type_str)?;
 
       Ok(ASTNode::Literal {
         node_id,
@@ -2319,11 +2501,19 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "MemberAccess" => {
-      let expression =
-        get_required_node_with_context(val, "expression", node_type_str, source_content)?;
-      let member_location =
-        get_required_source_location_with_context(val, "memberLocation", node_type_str)?;
-      let member_name = get_required_string_with_context(val, "memberName", node_type_str)?;
+      let expression = get_required_node_with_context(
+        val,
+        "expression",
+        node_type_str,
+        source_content,
+      )?;
+      let member_location = get_required_source_location_with_context(
+        val,
+        "memberLocation",
+        node_type_str,
+      )?;
+      let member_name =
+        get_required_string_with_context(val, "memberName", node_type_str)?;
 
       Ok(ASTNode::MemberAccess {
         node_id,
@@ -2334,8 +2524,12 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "NewExpression" => {
-      let type_name =
-        get_required_node_with_context(val, "typeName", node_type_str, source_content)?;
+      let type_name = get_required_node_with_context(
+        val,
+        "typeName",
+        node_type_str,
+        source_content,
+      )?;
 
       Ok(ASTNode::NewExpression {
         node_id,
@@ -2344,8 +2538,12 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "TupleExpression" => {
-      let components =
-        get_required_node_vec_with_context(val, "components", node_type_str, source_content)?;
+      let components = get_required_node_vec_with_context(
+        val,
+        "components",
+        node_type_str,
+        source_content,
+      )?;
 
       Ok(ASTNode::TupleExpression {
         node_id,
@@ -2354,10 +2552,16 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "UnaryOperation" => {
-      let prefix = get_required_bool_with_context(val, "prefix", node_type_str)?;
-      let operator = get_required_enum_with_context(val, "operator", node_type_str)?;
-      let sub_expression =
-        get_required_node_with_context(val, "subExpression", node_type_str, source_content)?;
+      let prefix =
+        get_required_bool_with_context(val, "prefix", node_type_str)?;
+      let operator =
+        get_required_enum_with_context(val, "operator", node_type_str)?;
+      let sub_expression = get_required_node_with_context(
+        val,
+        "subExpression",
+        node_type_str,
+        source_content,
+      )?;
 
       Ok(ASTNode::UnaryOperation {
         node_id,
@@ -2369,8 +2573,11 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
     }
     "EnumValue" => {
       let name = get_required_string_with_context(val, "name", node_type_str)?;
-      let name_location =
-        get_required_source_location_with_context(val, "nameLocation", node_type_str)?;
+      let name_location = get_required_source_location_with_context(
+        val,
+        "nameLocation",
+        node_type_str,
+      )?;
 
       Ok(ASTNode::EnumValue {
         node_id,
@@ -2380,12 +2587,20 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "Block" => {
-      let statements =
-        get_required_node_vec_with_context(val, "statements", node_type_str, source_content)?;
+      let statements = get_required_node_vec_with_context(
+        val,
+        "statements",
+        node_type_str,
+        source_content,
+      )?;
 
       // Transform statements into semantic blocks
       let semantic_blocks = if !statements.is_empty() {
-        group_statements_into_semantic_blocks(statements, source_content, &src_location)?
+        group_statements_into_semantic_blocks(
+          statements,
+          source_content,
+          &src_location,
+        )?
       } else {
         vec![]
       };
@@ -2405,8 +2620,18 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       src_location,
     }),
     "DoWhileStatement" => {
-      let nodes = get_required_node_vec_with_context(val, "nodes", node_type_str, source_content)?;
-      let body = get_optional_node_with_context(val, "body", node_type_str, source_content)?;
+      let nodes = get_required_node_vec_with_context(
+        val,
+        "nodes",
+        node_type_str,
+        source_content,
+      )?;
+      let body = get_optional_node_with_context(
+        val,
+        "body",
+        node_type_str,
+        source_content,
+      )?;
 
       Ok(ASTNode::DoWhileStatement {
         node_id,
@@ -2416,8 +2641,12 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "EmitStatement" => {
-      let event_call =
-        get_required_node_with_context(val, "eventCall", node_type_str, source_content)?;
+      let event_call = get_required_node_with_context(
+        val,
+        "eventCall",
+        node_type_str,
+        source_content,
+      )?;
 
       Ok(ASTNode::EmitStatement {
         node_id,
@@ -2426,8 +2655,12 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "ExpressionStatement" => {
-      let expression =
-        get_required_node_with_context(val, "expression", node_type_str, source_content)?;
+      let expression = get_required_node_with_context(
+        val,
+        "expression",
+        node_type_str,
+        source_content,
+      )?;
 
       Ok(ASTNode::ExpressionStatement {
         node_id,
@@ -2436,19 +2669,35 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "ForStatement" => {
-      let body = get_required_node_with_context(val, "body", node_type_str, source_content)?;
-      let condition =
-        get_optional_node_with_context(val, "condition", node_type_str, source_content)?;
+      let body = get_required_node_with_context(
+        val,
+        "body",
+        node_type_str,
+        source_content,
+      )?;
+      let condition = get_optional_node_with_context(
+        val,
+        "condition",
+        node_type_str,
+        source_content,
+      )?;
       let initialization_expression = get_optional_node_with_context(
         val,
         "initializationExpression",
         node_type_str,
         source_content,
       )?;
-      let is_simple_counter_loop =
-        get_required_bool_with_context(val, "isSimpleCounterLoop", node_type_str)?;
-      let loop_expression =
-        get_optional_node_with_context(val, "loopExpression", node_type_str, source_content)?;
+      let is_simple_counter_loop = get_required_bool_with_context(
+        val,
+        "isSimpleCounterLoop",
+        node_type_str,
+      )?;
+      let loop_expression = get_optional_node_with_context(
+        val,
+        "loopExpression",
+        node_type_str,
+        source_content,
+      )?;
 
       Ok(ASTNode::ForStatement {
         node_id,
@@ -2461,12 +2710,24 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "IfStatement" => {
-      let condition =
-        get_required_node_with_context(val, "condition", node_type_str, source_content)?;
-      let true_body =
-        get_required_node_with_context(val, "trueBody", node_type_str, source_content)?;
-      let false_body =
-        get_optional_node_with_context(val, "falseBody", node_type_str, source_content)?;
+      let condition = get_required_node_with_context(
+        val,
+        "condition",
+        node_type_str,
+        source_content,
+      )?;
+      let true_body = get_required_node_with_context(
+        val,
+        "trueBody",
+        node_type_str,
+        source_content,
+      )?;
+      let false_body = get_optional_node_with_context(
+        val,
+        "falseBody",
+        node_type_str,
+        source_content,
+      )?;
 
       Ok(ASTNode::IfStatement {
         node_id,
@@ -2485,10 +2746,17 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       src_location,
     }),
     "Return" => {
-      let expression =
-        get_optional_node_with_context(val, "expression", node_type_str, source_content)?;
-      let function_return_parameters =
-        get_required_i32_with_context(val, "functionReturnParameters", node_type_str)?;
+      let expression = get_optional_node_with_context(
+        val,
+        "expression",
+        node_type_str,
+        source_content,
+      )?;
+      let function_return_parameters = get_required_i32_with_context(
+        val,
+        "functionReturnParameters",
+        node_type_str,
+      )?;
 
       Ok(ASTNode::Return {
         node_id,
@@ -2498,8 +2766,12 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "RevertStatement" => {
-      let error_call =
-        get_required_node_with_context(val, "errorCall", node_type_str, source_content)?;
+      let error_call = get_required_node_with_context(
+        val,
+        "errorCall",
+        node_type_str,
+        source_content,
+      )?;
 
       Ok(ASTNode::RevertStatement {
         node_id,
@@ -2508,10 +2780,18 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "TryStatement" => {
-      let clauses =
-        get_required_node_vec_with_context(val, "clauses", node_type_str, source_content)?;
-      let external_call =
-        get_required_node_with_context(val, "externalCall", node_type_str, source_content)?;
+      let clauses = get_required_node_vec_with_context(
+        val,
+        "clauses",
+        node_type_str,
+        source_content,
+      )?;
+      let external_call = get_required_node_with_context(
+        val,
+        "externalCall",
+        node_type_str,
+        source_content,
+      )?;
 
       Ok(ASTNode::TryStatement {
         node_id,
@@ -2521,8 +2801,12 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "UncheckedBlock" => {
-      let statements =
-        get_required_node_vec_with_context(val, "statements", node_type_str, source_content)?;
+      let statements = get_required_node_vec_with_context(
+        val,
+        "statements",
+        node_type_str,
+        source_content,
+      )?;
 
       Ok(ASTNode::UncheckedBlock {
         node_id,
@@ -2531,10 +2815,18 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "VariableDeclarationStatement" => {
-      let declarations =
-        get_required_node_vec_with_context(val, "declarations", node_type_str, source_content)?;
-      let initial_value =
-        get_optional_node_with_context(val, "initialValue", node_type_str, source_content)?;
+      let declarations = get_required_node_vec_with_context(
+        val,
+        "declarations",
+        node_type_str,
+        source_content,
+      )?;
+      let initial_value = get_optional_node_with_context(
+        val,
+        "initialValue",
+        node_type_str,
+        source_content,
+      )?;
 
       Ok(ASTNode::VariableDeclarationStatement {
         node_id,
@@ -2544,20 +2836,40 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "VariableDeclaration" => {
-      let constant = get_required_bool_with_context(val, "constant", node_type_str)?;
-      let function_selector =
-        get_optional_string_with_context(val, "functionSelector", node_type_str)?;
-      let mutability = get_required_enum_with_context(val, "mutability", node_type_str)?;
+      let constant =
+        get_required_bool_with_context(val, "constant", node_type_str)?;
+      let function_selector = get_optional_string_with_context(
+        val,
+        "functionSelector",
+        node_type_str,
+      )?;
+      let mutability =
+        get_required_enum_with_context(val, "mutability", node_type_str)?;
       let name = get_required_string_with_context(val, "name", node_type_str)?;
-      let name_location =
-        get_required_source_location_with_context(val, "nameLocation", node_type_str)?;
+      let name_location = get_required_source_location_with_context(
+        val,
+        "nameLocation",
+        node_type_str,
+      )?;
       let scope = get_required_i32_with_context(val, "scope", node_type_str)?;
-      let state_variable = get_required_bool_with_context(val, "stateVariable", node_type_str)?;
-      let storage_location = get_required_enum_with_context(val, "storageLocation", node_type_str)?;
-      let type_name =
-        get_required_node_with_context(val, "typeName", node_type_str, source_content)?;
-      let value = get_optional_node_with_context(val, "value", node_type_str, source_content)?;
-      let visibility = get_required_enum_with_context(val, "visibility", node_type_str)?;
+      let state_variable =
+        get_required_bool_with_context(val, "stateVariable", node_type_str)?;
+      let storage_location =
+        get_required_enum_with_context(val, "storageLocation", node_type_str)?;
+      let type_name = get_required_node_with_context(
+        val,
+        "typeName",
+        node_type_str,
+        source_content,
+      )?;
+      let value = get_optional_node_with_context(
+        val,
+        "value",
+        node_type_str,
+        source_content,
+      )?;
+      let visibility =
+        get_required_enum_with_context(val, "visibility", node_type_str)?;
 
       Ok(ASTNode::VariableDeclaration {
         node_id,
@@ -2576,9 +2888,18 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "WhileStatement" => {
-      let condition =
-        get_required_node_with_context(val, "condition", node_type_str, source_content)?;
-      let body = get_optional_node_with_context(val, "body", node_type_str, source_content)?;
+      let condition = get_required_node_with_context(
+        val,
+        "condition",
+        node_type_str,
+        source_content,
+      )?;
+      let body = get_optional_node_with_context(
+        val,
+        "body",
+        node_type_str,
+        source_content,
+      )?;
 
       Ok(ASTNode::WhileStatement {
         node_id,
@@ -2588,14 +2909,28 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "ContractDefinition" => {
-      let nodes = get_required_node_vec_with_context(val, "nodes", node_type_str, source_content)?;
-      let abstract_ = get_required_bool_with_context(val, "abstract", node_type_str)?;
-      let base_contracts =
-        get_required_node_vec_with_context(val, "baseContracts", node_type_str, source_content)?;
+      let nodes = get_required_node_vec_with_context(
+        val,
+        "nodes",
+        node_type_str,
+        source_content,
+      )?;
+      let abstract_ =
+        get_required_bool_with_context(val, "abstract", node_type_str)?;
+      let base_contracts = get_required_node_vec_with_context(
+        val,
+        "baseContracts",
+        node_type_str,
+        source_content,
+      )?;
       let name = get_required_string_with_context(val, "name", node_type_str)?;
-      let name_location =
-        get_required_source_location_with_context(val, "nameLocation", node_type_str)?;
-      let contract_kind = get_required_enum_with_context(val, "contractKind", node_type_str)?;
+      let name_location = get_required_source_location_with_context(
+        val,
+        "nameLocation",
+        node_type_str,
+      )?;
+      let contract_kind =
+        get_required_enum_with_context(val, "contractKind", node_type_str)?;
 
       Ok(ASTNode::ContractDefinition {
         node_id,
@@ -2609,24 +2944,52 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "FunctionDefinition" => {
-      let body = get_optional_node_with_context(val, "body", node_type_str, source_content)?;
-      let documentation =
-        get_optional_node_with_context(val, "documentation", node_type_str, source_content)?;
-      let implemented = get_required_bool_with_context(val, "implemented", node_type_str)?;
+      let body = get_optional_node_with_context(
+        val,
+        "body",
+        node_type_str,
+        source_content,
+      )?;
+      let documentation = get_optional_node_with_context(
+        val,
+        "documentation",
+        node_type_str,
+        source_content,
+      )?;
+      let implemented =
+        get_required_bool_with_context(val, "implemented", node_type_str)?;
       let kind = get_required_enum_with_context(val, "kind", node_type_str)?;
-      let modifiers =
-        get_required_node_vec_with_context(val, "modifiers", node_type_str, source_content)?;
+      let modifiers = get_required_node_vec_with_context(
+        val,
+        "modifiers",
+        node_type_str,
+        source_content,
+      )?;
       let name = get_required_string_with_context(val, "name", node_type_str)?;
-      let name_location =
-        get_required_source_location_with_context(val, "nameLocation", node_type_str)?;
-      let parameters =
-        get_required_node_with_context(val, "parameters", node_type_str, source_content)?;
-      let return_parameters =
-        get_required_node_with_context(val, "returnParameters", node_type_str, source_content)?;
+      let name_location = get_required_source_location_with_context(
+        val,
+        "nameLocation",
+        node_type_str,
+      )?;
+      let parameters = get_required_node_with_context(
+        val,
+        "parameters",
+        node_type_str,
+        source_content,
+      )?;
+      let return_parameters = get_required_node_with_context(
+        val,
+        "returnParameters",
+        node_type_str,
+        source_content,
+      )?;
       let scope = get_required_i32_with_context(val, "scope", node_type_str)?;
-      let state_mutability = get_required_enum_with_context(val, "stateMutability", node_type_str)?;
-      let virtual_ = get_required_bool_with_context(val, "virtual", node_type_str)?;
-      let visibility = get_required_enum_with_context(val, "visibility", node_type_str)?;
+      let state_mutability =
+        get_required_enum_with_context(val, "stateMutability", node_type_str)?;
+      let virtual_ =
+        get_required_bool_with_context(val, "virtual", node_type_str)?;
+      let visibility =
+        get_required_enum_with_context(val, "visibility", node_type_str)?;
 
       Ok(ASTNode::FunctionDefinition {
         node_id,
@@ -2648,10 +3011,17 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
     }
     "EventDefinition" => {
       let name = get_required_string_with_context(val, "name", node_type_str)?;
-      let name_location =
-        get_required_source_location_with_context(val, "nameLocation", node_type_str)?;
-      let parameters =
-        get_required_node_with_context(val, "parameters", node_type_str, source_content)?;
+      let name_location = get_required_source_location_with_context(
+        val,
+        "nameLocation",
+        node_type_str,
+      )?;
+      let parameters = get_required_node_with_context(
+        val,
+        "parameters",
+        node_type_str,
+        source_content,
+      )?;
 
       Ok(ASTNode::EventDefinition {
         node_id,
@@ -2663,10 +3033,17 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
     }
     "ErrorDefinition" => {
       let name = get_required_string_with_context(val, "name", node_type_str)?;
-      let name_location =
-        get_required_source_location_with_context(val, "nameLocation", node_type_str)?;
-      let parameters =
-        get_required_node_with_context(val, "parameters", node_type_str, source_content)?;
+      let name_location = get_required_source_location_with_context(
+        val,
+        "nameLocation",
+        node_type_str,
+      )?;
+      let parameters = get_required_node_with_context(
+        val,
+        "parameters",
+        node_type_str,
+        source_content,
+      )?;
 
       Ok(ASTNode::ErrorDefinition {
         node_id,
@@ -2677,16 +3054,34 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "ModifierDefinition" => {
-      let body = get_required_node_with_context(val, "body", node_type_str, source_content)?;
-      let documentation =
-        get_optional_node_with_context(val, "documentation", node_type_str, source_content)?;
+      let body = get_required_node_with_context(
+        val,
+        "body",
+        node_type_str,
+        source_content,
+      )?;
+      let documentation = get_optional_node_with_context(
+        val,
+        "documentation",
+        node_type_str,
+        source_content,
+      )?;
       let name = get_required_string_with_context(val, "name", node_type_str)?;
-      let name_location =
-        get_required_source_location_with_context(val, "nameLocation", node_type_str)?;
-      let parameters =
-        get_required_node_with_context(val, "parameters", node_type_str, source_content)?;
-      let virtual_ = get_required_bool_with_context(val, "virtual", node_type_str)?;
-      let visibility = get_required_enum_with_context(val, "visibility", node_type_str)?;
+      let name_location = get_required_source_location_with_context(
+        val,
+        "nameLocation",
+        node_type_str,
+      )?;
+      let parameters = get_required_node_with_context(
+        val,
+        "parameters",
+        node_type_str,
+        source_content,
+      )?;
+      let virtual_ =
+        get_required_bool_with_context(val, "virtual", node_type_str)?;
+      let visibility =
+        get_required_enum_with_context(val, "visibility", node_type_str)?;
 
       Ok(ASTNode::ModifierDefinition {
         node_id,
@@ -2701,13 +3096,22 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "StructDefinition" => {
-      let members =
-        get_required_node_vec_with_context(val, "members", node_type_str, source_content)?;
-      let canonical_name = get_required_string_with_context(val, "canonicalName", node_type_str)?;
+      let members = get_required_node_vec_with_context(
+        val,
+        "members",
+        node_type_str,
+        source_content,
+      )?;
+      let canonical_name =
+        get_required_string_with_context(val, "canonicalName", node_type_str)?;
       let name = get_required_string_with_context(val, "name", node_type_str)?;
-      let name_location =
-        get_required_source_location_with_context(val, "nameLocation", node_type_str)?;
-      let visibility = get_required_enum_with_context(val, "visibility", node_type_str)?;
+      let name_location = get_required_source_location_with_context(
+        val,
+        "nameLocation",
+        node_type_str,
+      )?;
+      let visibility =
+        get_required_enum_with_context(val, "visibility", node_type_str)?;
 
       Ok(ASTNode::StructDefinition {
         node_id,
@@ -2720,12 +3124,20 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "EnumDefinition" => {
-      let members =
-        get_required_node_vec_with_context(val, "members", node_type_str, source_content)?;
-      let canonical_name = get_required_string_with_context(val, "canonicalName", node_type_str)?;
+      let members = get_required_node_vec_with_context(
+        val,
+        "members",
+        node_type_str,
+        source_content,
+      )?;
+      let canonical_name =
+        get_required_string_with_context(val, "canonicalName", node_type_str)?;
       let name = get_required_string_with_context(val, "name", node_type_str)?;
-      let name_location =
-        get_required_source_location_with_context(val, "nameLocation", node_type_str)?;
+      let name_location = get_required_source_location_with_context(
+        val,
+        "nameLocation",
+        node_type_str,
+      )?;
 
       Ok(ASTNode::EnumDefinition {
         node_id,
@@ -2758,7 +3170,8 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "PragmaDirective" => {
-      let literals = get_required_string_vec_with_context(val, "literals", node_type_str)?;
+      let literals =
+        get_required_string_vec_with_context(val, "literals", node_type_str)?;
 
       Ok(ASTNode::PragmaDirective {
         node_id,
@@ -2767,9 +3180,11 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "ImportDirective" => {
-      let absolute_path = get_required_string_with_context(val, "absolutePath", node_type_str)?;
+      let absolute_path =
+        get_required_string_with_context(val, "absolutePath", node_type_str)?;
       let file = get_required_string_with_context(val, "file", node_type_str)?;
-      let source_unit = get_required_i32_with_context(val, "sourceUnit", node_type_str)?;
+      let source_unit =
+        get_required_i32_with_context(val, "sourceUnit", node_type_str)?;
 
       Ok(ASTNode::ImportDirective {
         node_id,
@@ -2780,11 +3195,20 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "UsingForDirective" => {
-      let global = get_required_bool_with_context(val, "global", node_type_str)?;
-      let library_name =
-        get_optional_node_with_context(val, "libraryName", node_type_str, source_content)?;
-      let type_name =
-        get_optional_node_with_context(val, "typeName", node_type_str, source_content)?;
+      let global =
+        get_required_bool_with_context(val, "global", node_type_str)?;
+      let library_name = get_optional_node_with_context(
+        val,
+        "libraryName",
+        node_type_str,
+        source_content,
+      )?;
+      let type_name = get_optional_node_with_context(
+        val,
+        "typeName",
+        node_type_str,
+        source_content,
+      )?;
 
       Ok(ASTNode::UsingForDirective {
         node_id,
@@ -2795,7 +3219,12 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "SourceUnit" => {
-      let nodes = get_required_node_vec_with_context(val, "nodes", node_type_str, source_content)?;
+      let nodes = get_required_node_vec_with_context(
+        val,
+        "nodes",
+        node_type_str,
+        source_content,
+      )?;
 
       Ok(ASTNode::SourceUnit {
         node_id,
@@ -2804,8 +3233,12 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "InheritanceSpecifier" => {
-      let base_name =
-        get_required_node_with_context(val, "baseName", node_type_str, source_content)?;
+      let base_name = get_required_node_with_context(
+        val,
+        "baseName",
+        node_type_str,
+        source_content,
+      )?;
 
       Ok(ASTNode::InheritanceSpecifier {
         node_id,
@@ -2823,12 +3256,22 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "FunctionTypeName" => {
-      let parameter_types =
-        get_required_node_with_context(val, "parameterTypes", node_type_str, source_content)?;
-      let return_parameter_types =
-        get_required_node_with_context(val, "returnParameterTypes", node_type_str, source_content)?;
-      let state_mutability = get_required_enum_with_context(val, "stateMutability", node_type_str)?;
-      let visibility = get_required_enum_with_context(val, "visibility", node_type_str)?;
+      let parameter_types = get_required_node_with_context(
+        val,
+        "parameterTypes",
+        node_type_str,
+        source_content,
+      )?;
+      let return_parameter_types = get_required_node_with_context(
+        val,
+        "returnParameterTypes",
+        node_type_str,
+        source_content,
+      )?;
+      let state_mutability =
+        get_required_enum_with_context(val, "stateMutability", node_type_str)?;
+      let visibility =
+        get_required_enum_with_context(val, "visibility", node_type_str)?;
 
       Ok(ASTNode::FunctionTypeName {
         node_id,
@@ -2840,8 +3283,12 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "ParameterList" => {
-      let parameters =
-        get_required_node_vec_with_context(val, "parameters", node_type_str, source_content)?;
+      let parameters = get_required_node_vec_with_context(
+        val,
+        "parameters",
+        node_type_str,
+        source_content,
+      )?;
 
       Ok(ASTNode::ParameterList {
         node_id,
@@ -2850,10 +3297,20 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "TryCatchClause" => {
-      let error_name = get_required_string_with_context(val, "errorName", node_type_str)?;
-      let block = get_required_node_with_context(val, "block", node_type_str, source_content)?;
-      let parameters =
-        get_optional_node_with_context(val, "parameters", node_type_str, source_content)?;
+      let error_name =
+        get_required_string_with_context(val, "errorName", node_type_str)?;
+      let block = get_required_node_with_context(
+        val,
+        "block",
+        node_type_str,
+        source_content,
+      )?;
+      let parameters = get_optional_node_with_context(
+        val,
+        "parameters",
+        node_type_str,
+        source_content,
+      )?;
 
       Ok(ASTNode::TryCatchClause {
         node_id,
@@ -2864,10 +3321,18 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "ModifierInvocation" => {
-      let modifier_name =
-        get_required_node_with_context(val, "modifierName", node_type_str, source_content)?;
-      let arguments =
-        get_optional_node_vec_with_context(val, "arguments", node_type_str, source_content)?;
+      let modifier_name = get_required_node_with_context(
+        val,
+        "modifierName",
+        node_type_str,
+        source_content,
+      )?;
+      let arguments = get_optional_node_vec_with_context(
+        val,
+        "arguments",
+        node_type_str,
+        source_content,
+      )?;
 
       Ok(ASTNode::ModifierInvocation {
         node_id,
@@ -2877,10 +3342,17 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "UserDefinedTypeName" => {
-      let path_node =
-        get_required_node_with_context(val, "pathNode", node_type_str, source_content)?;
-      let referenced_declaration =
-        get_required_i32_with_context(val, "referencedDeclaration", node_type_str)?;
+      let path_node = get_required_node_with_context(
+        val,
+        "pathNode",
+        node_type_str,
+        source_content,
+      )?;
+      let referenced_declaration = get_required_i32_with_context(
+        val,
+        "referencedDeclaration",
+        node_type_str,
+      )?;
 
       Ok(ASTNode::UserDefinedTypeName {
         node_id,
@@ -2890,8 +3362,12 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "ArrayTypeName" => {
-      let base_type =
-        get_required_node_with_context(val, "baseType", node_type_str, source_content)?;
+      let base_type = get_required_node_with_context(
+        val,
+        "baseType",
+        node_type_str,
+        source_content,
+      )?;
 
       Ok(ASTNode::ArrayTypeName {
         node_id,
@@ -2900,15 +3376,32 @@ pub fn node_from_json(val: &serde_json::Value, source_content: &str) -> Result<A
       })
     }
     "Mapping" => {
-      let key_name = get_optional_string_with_context(val, "keyName", node_type_str)?;
-      let key_name_location =
-        get_required_source_location_with_context(val, "keyNameLocation", node_type_str)?;
-      let key_type = get_required_node_with_context(val, "keyType", node_type_str, source_content)?;
-      let value_name = get_optional_string_with_context(val, "valueName", node_type_str)?;
-      let value_name_location =
-        get_required_source_location_with_context(val, "valueNameLocation", node_type_str)?;
-      let value_type =
-        get_required_node_with_context(val, "valueType", node_type_str, source_content)?;
+      let key_name =
+        get_optional_string_with_context(val, "keyName", node_type_str)?;
+      let key_name_location = get_required_source_location_with_context(
+        val,
+        "keyNameLocation",
+        node_type_str,
+      )?;
+      let key_type = get_required_node_with_context(
+        val,
+        "keyType",
+        node_type_str,
+        source_content,
+      )?;
+      let value_name =
+        get_optional_string_with_context(val, "valueName", node_type_str)?;
+      let value_name_location = get_required_source_location_with_context(
+        val,
+        "valueNameLocation",
+        node_type_str,
+      )?;
+      let value_type = get_required_node_with_context(
+        val,
+        "valueType",
+        node_type_str,
+        source_content,
+      )?;
 
       Ok(ASTNode::Mapping {
         node_id,
