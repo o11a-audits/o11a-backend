@@ -13,7 +13,12 @@ Audit source files are parsed and compiled by the Foundry compilers, which can o
 The parser enhances the original AST by adding semantic blocks, which are a grouping of statements based on whitespace in the source code. Semantic blocks are not in the original AST but are added by the parser by analyzing the source files for consecutive newlines between statements in a block. This creates a structure where Block nodes contain SemanticBlock nodes, which contain statement nodes. Each semantic block has optional documentation from comments that appear at the beginning of the semantic block in the source, preserving context from the developers.
 
 # Analyzer
-The analyzer is responsible for traversing the Abstract Syntax Tree and creating a directory of in-scope declarations and declarations used by in-scope members for the audit. Each declaration has many attributes, which are the result of static analysis. The core attributes are the topic ID, name, scope, and declaration kind. Depending on the kind of declaration, other attributes exist that are stored in different directories by topic ID:
+The analyzer is responsible for traversing the Abstract Syntax Tree and performing static analysis on it. It notably creates in order:
+ 1. A directory of contracts by contract node id, containing if it is in scope
+ 2. A directory of in-scope and used by in-scope declarations by node id
+ 3. A directory of nodes by id, where each node's children are stored as node stubs
+
+Each declaration has many attributes, which are the result of static analysis. The core attributes are the topic ID, name, scope, and declaration kind. Depending on the kind of declaration, other attributes exist that are stored in different directories by topic ID:
 
  - Signature directories: store the signatures of source, text, and comment declarations. This is the value to display to the user that represents the declaration. For a function, this is the code for the function without the body. For a text declaration, this is the text itself. For a statement or expression, this is the code for the statement or expression. For a variable, it is the declaration for the variable (including its type). Signatures are rendered through the formatter in the same way as source code, so they are stored as HTML strings and any info comments or references in them will be rendered.
  - Calls directories: store the external calls in a function (or contract by association)

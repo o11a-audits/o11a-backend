@@ -24,7 +24,8 @@ pub fn analyze(
   let ast_map = parser::process(project_root)?;
   let first_pass_declarations = first_pass(&ast_map, &in_scope_files)?;
 
-  // Tree shaking: Build in-scope dictionary by following references from publicly visible declarations
+  // Tree shaking: Build in-scope dictionary by following references from
+  // publicly visible declarations
   let in_scope_declarations = tree_shake(&first_pass_declarations)?;
 
   Ok((
@@ -70,7 +71,7 @@ pub enum DeclarationKind {
 ///   These only track basic declaration information
 #[derive(Debug, Clone)]
 pub enum FirstPassDeclaration {
-  Block {
+  FunctionMod {
     is_publicly_in_scope: bool,
     declaration_kind: DeclarationKind,
     referenced_nodes: Vec<i32>,
@@ -84,12 +85,32 @@ pub enum FirstPassDeclaration {
   },
 }
 
-pub struct InScopeDeclaration {
-  pub declaration_kind: DeclarationKind,
-  pub references: Vec<i32>,
-  pub require_revert_statements: Vec<i32>,
-  pub function_calls: Vec<i32>,
-  pub variable_mutations: Vec<i32>,
+pub enum InScopeDeclaration {
+  // Functions and Modifiers
+  FunctionMod {
+    declaration_kind: DeclarationKind,
+    references: Vec<i32>,
+    require_revert_statements: Vec<i32>,
+    function_calls: Vec<i32>,
+    variable_mutations: Vec<i32>,
+  },
+  Flat {
+    declaration_kind: DeclarationKind,
+    references: Vec<i32>,
+  },
+}
+
+impl InScopeDeclaration {
+  fn add_reference_if_not_present(&mut self, reference: i32) {
+    match self {
+      InScopeDeclaration::FunctionMod { references, .. }
+      | InScopeDeclaration::Flat { references, .. } => {
+        if !references.contains(&reference) {
+          references.push(reference);
+        }
+      }
+    }
+  }
 }
 
 /// Second pass declaration structure for detailed analysis (TODO: to be implemented).
@@ -252,7 +273,7 @@ fn process_ast_nodes(
 
         first_pass_declarations.insert(
           *node_id,
-          FirstPassDeclaration::Block {
+          FirstPassDeclaration::FunctionMod {
             is_publicly_in_scope: is_publicly_visible,
             declaration_kind: DeclarationKind::Function(*kind),
             referenced_nodes,
@@ -302,7 +323,7 @@ fn process_ast_nodes(
 
         first_pass_declarations.insert(
           *node_id,
-          FirstPassDeclaration::Block {
+          FirstPassDeclaration::FunctionMod {
             is_publicly_in_scope: is_publicly_visible,
             declaration_kind: DeclarationKind::Modifier,
             referenced_nodes,
@@ -543,7 +564,7 @@ impl FirstPassDeclaration {
   /// Get the publicly in-scope status for any declaration variant
   pub fn is_publicly_in_scope(&self) -> bool {
     match self {
-      FirstPassDeclaration::Block {
+      FirstPassDeclaration::FunctionMod {
         is_publicly_in_scope,
         ..
       } => *is_publicly_in_scope,
@@ -557,7 +578,7 @@ impl FirstPassDeclaration {
   /// Get the declaration kind for any declaration variant
   pub fn declaration_kind(&self) -> &DeclarationKind {
     match self {
-      FirstPassDeclaration::Block {
+      FirstPassDeclaration::FunctionMod {
         declaration_kind, ..
       } => declaration_kind,
       FirstPassDeclaration::Flat {
@@ -569,45 +590,11 @@ impl FirstPassDeclaration {
   /// Get referenced nodes if this is a Block variant, otherwise empty slice
   pub fn referenced_nodes(&self) -> &[i32] {
     match self {
-      FirstPassDeclaration::Block {
+      FirstPassDeclaration::FunctionMod {
         referenced_nodes, ..
       } => referenced_nodes,
       FirstPassDeclaration::Flat { .. } => &[],
     }
-  }
-
-  /// Get require/revert statements if this is a Block variant, otherwise empty slice
-  pub fn require_revert_statements(&self) -> &[i32] {
-    match self {
-      FirstPassDeclaration::Block {
-        require_revert_statements,
-        ..
-      } => require_revert_statements,
-      FirstPassDeclaration::Flat { .. } => &[],
-    }
-  }
-
-  /// Get function calls if this is a Block variant, otherwise empty slice
-  pub fn function_calls(&self) -> &[i32] {
-    match self {
-      FirstPassDeclaration::Block { function_calls, .. } => function_calls,
-      FirstPassDeclaration::Flat { .. } => &[],
-    }
-  }
-
-  /// Get variable mutations if this is a Block variant, otherwise empty slice
-  pub fn variable_mutations(&self) -> &[i32] {
-    match self {
-      FirstPassDeclaration::Block {
-        variable_mutations, ..
-      } => variable_mutations,
-      FirstPassDeclaration::Flat { .. } => &[],
-    }
-  }
-
-  /// Check if this declaration has executable code (Block variant)
-  pub fn has_executable_code(&self) -> bool {
-    matches!(self, FirstPassDeclaration::Block { .. })
   }
 }
 
@@ -617,7 +604,6 @@ fn tree_shake(
   first_pass_declarations: &BTreeMap<i32, FirstPassDeclaration>,
 ) -> Result<BTreeMap<i32, InScopeDeclaration>, String> {
   let mut in_scope_declarations = BTreeMap::new();
-  let mut visited = HashSet::new();
   let mut visiting = HashSet::new(); // For cycle detection
 
   // First, collect all publicly in-scope declarations as starting points
@@ -634,7 +620,6 @@ fn tree_shake(
       None, // No referencing node for root declarations
       first_pass_declarations,
       &mut in_scope_declarations,
-      &mut visited,
       &mut visiting,
     )?;
   }
@@ -648,7 +633,6 @@ fn process_declaration_recursive(
   referencing_node: Option<i32>, // The node that references this declaration
   first_pass_declarations: &BTreeMap<i32, FirstPassDeclaration>,
   in_scope_declarations: &mut BTreeMap<i32, InScopeDeclaration>,
-  visited: &mut HashSet<i32>,
   visiting: &mut HashSet<i32>,
 ) -> Result<(), String> {
   // Cycle detection
@@ -659,14 +643,9 @@ fn process_declaration_recursive(
   }
 
   // If already processed, add this reference and return
-  if visited.contains(&node_id) {
-    if let Some(in_scope_decl) = in_scope_declarations.get_mut(&node_id) {
-      // Add the direct referencing node if it exists and isn't already in the list
-      if let Some(ref_node) = referencing_node {
-        if !in_scope_decl.references.contains(&ref_node) {
-          in_scope_decl.references.push(ref_node);
-        }
-      }
+  if let Some(in_scope_decl) = in_scope_declarations.get_mut(&node_id) {
+    if let Some(ref_node) = referencing_node {
+      in_scope_decl.add_reference_if_not_present(ref_node)
     }
     return Ok(());
   }
@@ -675,7 +654,8 @@ fn process_declaration_recursive(
   let first_pass_decl = match first_pass_declarations.get(&node_id) {
     Some(decl) => decl,
     None => {
-      // Ignore references not found in our dictionary (external libraries, built-ins, etc.)
+      // Ignore references not found in our dictionary (external libraries,
+      // built-ins, etc.)
       return Ok(());
     }
   };
@@ -689,51 +669,67 @@ fn process_declaration_recursive(
     references.push(ref_node);
   }
 
-  // Filter function calls to exclude events, errors, and modifiers
-  let filtered_function_calls = first_pass_decl
-    .function_calls()
-    .iter()
-    .filter(|&&call_id| {
-      if let Some(called_decl) = first_pass_declarations.get(&call_id) {
-        !matches!(
-          called_decl.declaration_kind(),
-          DeclarationKind::Event
-            | DeclarationKind::Error
-            | DeclarationKind::Modifier
-        )
-      } else {
-        true // Keep calls to declarations not in our map (external references)
-      }
-    })
-    .cloned()
-    .collect();
+  let in_scope_decl = match first_pass_decl {
+    FirstPassDeclaration::FunctionMod {
+      declaration_kind,
+      require_revert_statements,
+      function_calls,
+      variable_mutations,
+      ..
+    } => {
+      // Filter function calls to exclude events, errors, and modifiers
+      let filtered_function_calls = function_calls
+        .iter()
+        .filter(|&&call_id| {
+          if let Some(called_decl) = first_pass_declarations.get(&call_id) {
+            !matches!(
+              called_decl.declaration_kind(),
+              DeclarationKind::Event
+                | DeclarationKind::Error
+                | DeclarationKind::Modifier
+            )
+          } else {
+            // Keep calls to declarations not in our map (external references)
+            true
+          }
+        })
+        .cloned()
+        .collect();
 
-  // Filter variable mutations to exclude local variables
-  let filtered_variable_mutations = first_pass_decl
-    .variable_mutations()
-    .iter()
-    .filter(|&&var_id| {
-      if let Some(var_decl) = first_pass_declarations.get(&var_id) {
-        !matches!(var_decl.declaration_kind(), DeclarationKind::LocalVariable)
-      } else {
-        true // Keep mutations of variables not in our map (external references)
-      }
-    })
-    .cloned()
-    .collect();
+      // Filter variable mutations to exclude local variables
+      let filtered_variable_mutations = variable_mutations
+        .iter()
+        .filter(|&&var_id| {
+          if let Some(var_decl) = first_pass_declarations.get(&var_id) {
+            !matches!(
+              var_decl.declaration_kind(),
+              DeclarationKind::LocalVariable
+            )
+          } else {
+            // Keep mutations of variables not in our map (external references)
+            true
+          }
+        })
+        .cloned()
+        .collect();
 
-  in_scope_declarations.insert(
-    node_id,
-    InScopeDeclaration {
-      references,
-      require_revert_statements: first_pass_decl
-        .require_revert_statements()
-        .to_vec(),
-      function_calls: filtered_function_calls,
-      variable_mutations: filtered_variable_mutations,
-      declaration_kind: first_pass_decl.declaration_kind().clone(),
+      InScopeDeclaration::FunctionMod {
+        declaration_kind: declaration_kind.clone(),
+        references: references,
+        require_revert_statements: require_revert_statements.clone(),
+        function_calls: filtered_function_calls,
+        variable_mutations: filtered_variable_mutations,
+      }
+    }
+    FirstPassDeclaration::Flat {
+      declaration_kind, ..
+    } => InScopeDeclaration::Flat {
+      declaration_kind: declaration_kind.clone(),
+      references: references,
     },
-  );
+  };
+
+  in_scope_declarations.insert(node_id, in_scope_decl);
 
   // Process all referenced nodes from this declaration
   let referenced_nodes = first_pass_decl.referenced_nodes();
@@ -744,14 +740,12 @@ fn process_declaration_recursive(
       Some(node_id), // This node is the one referencing the next node
       first_pass_declarations,
       in_scope_declarations,
-      visited,
       visiting,
     )?;
   }
 
   // Mark as fully processed
   visiting.remove(&node_id);
-  visited.insert(node_id);
 
   Ok(())
 }

@@ -1501,8 +1501,15 @@ impl ASTNode {
       }
       ASTNode::InheritanceSpecifier { base_name, .. } => vec![base_name],
       ASTNode::ElementaryTypeName { .. } => vec![],
-      ASTNode::FunctionTypeName { .. } => {
-        panic!("FunctionTypeName not implemented")
+      ASTNode::FunctionTypeName {
+        parameter_types,
+        return_parameter_types,
+        ..
+      } => {
+        let mut result = vec![];
+        result.push(&**parameter_types);
+        result.push(&**return_parameter_types);
+        result
       }
       ASTNode::ParameterList { parameters, .. } => {
         let mut result = vec![];
@@ -1554,6 +1561,1089 @@ impl ASTNode {
         result
       }
     }
+  }
+}
+
+pub fn children_to_stubs(node: ASTNode) -> ASTNode {
+  match node {
+    ASTNode::Assignment {
+      node_id,
+      src_location,
+      operator,
+      right_and_side,
+      left_hand_side,
+    } => ASTNode::Assignment {
+      node_id: node_id,
+      src_location: src_location,
+      operator: operator,
+      right_and_side: Box::new(ASTNode::Stub {
+        node_id: right_and_side.node_id(),
+        src_location: right_and_side.src_location().clone(),
+      }),
+      left_hand_side: Box::new(ASTNode::Stub {
+        node_id: left_hand_side.node_id(),
+        src_location: left_hand_side.src_location().clone(),
+      }),
+    },
+    ASTNode::BinaryOperation {
+      node_id,
+      src_location,
+      left_expression,
+      operator,
+      right_expression,
+      type_descriptions,
+    } => ASTNode::BinaryOperation {
+      node_id: node_id,
+      src_location: src_location,
+      left_expression: Box::new(ASTNode::Stub {
+        node_id: left_expression.node_id(),
+        src_location: left_expression.src_location().clone(),
+      }),
+      operator: operator,
+      right_expression: Box::new(ASTNode::Stub {
+        node_id: right_expression.node_id(),
+        src_location: right_expression.src_location().clone(),
+      }),
+      type_descriptions: type_descriptions,
+    },
+    ASTNode::Conditional {
+      node_id,
+      src_location,
+      condition,
+      true_expression,
+      false_expression,
+    } => ASTNode::Conditional {
+      node_id: node_id,
+      src_location: src_location,
+      condition: Box::new(ASTNode::Stub {
+        node_id: condition.node_id(),
+        src_location: condition.src_location().clone(),
+      }),
+      true_expression: Box::new(ASTNode::Stub {
+        node_id: true_expression.node_id(),
+        src_location: true_expression.src_location().clone(),
+      }),
+      false_expression: match false_expression {
+        Some(expr) => Some(Box::new(ASTNode::Stub {
+          node_id: expr.node_id(),
+          src_location: expr.src_location().clone(),
+        })),
+        None => None,
+      },
+    },
+    ASTNode::ElementaryTypeNameExpression {
+      node_id,
+      src_location,
+      type_descriptions,
+      type_name,
+    } => ASTNode::ElementaryTypeNameExpression {
+      node_id: node_id,
+      src_location: src_location,
+      type_descriptions: type_descriptions,
+      type_name: Box::new(ASTNode::Stub {
+        node_id: type_name.node_id(),
+        src_location: type_name.src_location().clone(),
+      }),
+    },
+    ASTNode::FunctionCall {
+      node_id,
+      src_location,
+      arguments,
+      expression,
+      kind,
+      name_locations,
+      names,
+      try_call,
+      type_descriptions,
+    } => ASTNode::FunctionCall {
+      node_id: node_id,
+      src_location: src_location,
+      arguments: arguments
+        .iter()
+        .map(|n| ASTNode::Stub {
+          node_id: n.node_id(),
+          src_location: n.src_location().clone(),
+        })
+        .collect(),
+      expression: Box::new(ASTNode::Stub {
+        node_id: expression.node_id(),
+        src_location: expression.src_location().clone(),
+      }),
+      kind: kind,
+      name_locations: name_locations,
+      names: names,
+      try_call: try_call,
+      type_descriptions: type_descriptions,
+    },
+    ASTNode::FunctionCallOptions {
+      node_id,
+      src_location,
+      expression,
+      options,
+    } => ASTNode::FunctionCallOptions {
+      node_id: node_id,
+      src_location: src_location,
+      expression: Box::new(ASTNode::Stub {
+        node_id: expression.node_id(),
+        src_location: expression.src_location().clone(),
+      }),
+      options: options
+        .iter()
+        .map(|n| ASTNode::Stub {
+          node_id: n.node_id(),
+          src_location: n.src_location().clone(),
+        })
+        .collect(),
+    },
+    ASTNode::Identifier {
+      node_id,
+      src_location,
+      name,
+      overloaded_declarations,
+      referenced_declaration,
+      type_descriptions,
+    } => ASTNode::Identifier {
+      node_id: node_id,
+      src_location: src_location,
+      name: name,
+      overloaded_declarations: overloaded_declarations,
+      referenced_declaration: referenced_declaration,
+      type_descriptions: type_descriptions,
+    },
+    ASTNode::IdentifierPath {
+      node_id,
+      src_location,
+      name,
+      name_locations,
+      referenced_declaration,
+    } => ASTNode::IdentifierPath {
+      node_id: node_id,
+      src_location: src_location,
+      name: name,
+      name_locations: name_locations,
+      referenced_declaration: referenced_declaration,
+    },
+    ASTNode::IndexAccess {
+      node_id,
+      src_location,
+      base_expression,
+      index_expression,
+    } => ASTNode::IndexAccess {
+      node_id: node_id,
+      src_location: src_location,
+      base_expression: Box::new(ASTNode::Stub {
+        node_id: base_expression.node_id(),
+        src_location: base_expression.src_location().clone(),
+      }),
+      index_expression: match index_expression {
+        Some(expr) => Some(Box::new(ASTNode::Stub {
+          node_id: expr.node_id(),
+          src_location: expr.src_location().clone(),
+        })),
+        None => None,
+      },
+    },
+    ASTNode::IndexRangeAccess {
+      node_id,
+      src_location,
+      nodes,
+      body,
+    } => ASTNode::IndexRangeAccess {
+      node_id: node_id,
+      src_location: src_location,
+      nodes: nodes
+        .iter()
+        .map(|n| ASTNode::Stub {
+          node_id: n.node_id(),
+          src_location: n.src_location().clone(),
+        })
+        .collect(),
+      body: match body {
+        Some(b) => Some(Box::new(ASTNode::Stub {
+          node_id: b.node_id(),
+          src_location: b.src_location().clone(),
+        })),
+        None => None,
+      },
+    },
+    ASTNode::Literal {
+      node_id,
+      src_location,
+      hex_value,
+      kind,
+      type_descriptions,
+      value,
+    } => ASTNode::Literal {
+      node_id: node_id,
+      src_location: src_location,
+      hex_value: hex_value,
+      kind: kind,
+      type_descriptions: type_descriptions,
+      value: value,
+    },
+    ASTNode::MemberAccess {
+      node_id,
+      src_location,
+      expression,
+      member_location,
+      member_name,
+    } => ASTNode::MemberAccess {
+      node_id: node_id,
+      src_location: src_location,
+      expression: Box::new(ASTNode::Stub {
+        node_id: expression.node_id(),
+        src_location: expression.src_location().clone(),
+      }),
+      member_location: member_location,
+      member_name: member_name,
+    },
+    ASTNode::NewExpression {
+      node_id,
+      src_location,
+      type_name,
+    } => ASTNode::NewExpression {
+      node_id: node_id,
+      src_location: src_location,
+      type_name: Box::new(ASTNode::Stub {
+        node_id: type_name.node_id(),
+        src_location: type_name.src_location().clone(),
+      }),
+    },
+    ASTNode::TupleExpression {
+      node_id,
+      src_location,
+      components,
+    } => ASTNode::TupleExpression {
+      node_id: node_id,
+      src_location: src_location,
+      components: components
+        .iter()
+        .map(|n| ASTNode::Stub {
+          node_id: n.node_id(),
+          src_location: n.src_location().clone(),
+        })
+        .collect(),
+    },
+    ASTNode::UnaryOperation {
+      node_id,
+      src_location,
+      prefix,
+      operator,
+      sub_expression,
+    } => ASTNode::UnaryOperation {
+      node_id: node_id,
+      src_location: src_location,
+      prefix: prefix,
+      operator: operator,
+      sub_expression: Box::new(ASTNode::Stub {
+        node_id: sub_expression.node_id(),
+        src_location: sub_expression.src_location().clone(),
+      }),
+    },
+    ASTNode::EnumValue {
+      node_id,
+      src_location,
+      name,
+      name_location,
+    } => ASTNode::EnumValue {
+      node_id: node_id,
+      src_location: src_location,
+      name: name,
+      name_location: name_location,
+    },
+    ASTNode::Block {
+      node_id,
+      src_location,
+      statements,
+    } => ASTNode::Block {
+      node_id: node_id,
+      src_location: src_location,
+      statements: statements
+        .iter()
+        .map(|n| ASTNode::Stub {
+          node_id: n.node_id(),
+          src_location: n.src_location().clone(),
+        })
+        .collect(),
+    },
+    ASTNode::SemanticBlock {
+      node_id,
+      src_location,
+      documentation,
+      statements,
+    } => ASTNode::SemanticBlock {
+      node_id: node_id,
+      src_location: src_location,
+      documentation: documentation,
+      statements: statements
+        .iter()
+        .map(|n| ASTNode::Stub {
+          node_id: n.node_id(),
+          src_location: n.src_location().clone(),
+        })
+        .collect(),
+    },
+    ASTNode::Break {
+      node_id,
+      src_location,
+    } => ASTNode::Break {
+      node_id: node_id,
+      src_location: src_location,
+    },
+    ASTNode::Continue {
+      node_id,
+      src_location,
+    } => ASTNode::Continue {
+      node_id: node_id,
+      src_location: src_location,
+    },
+    ASTNode::DoWhileStatement {
+      node_id,
+      src_location,
+      nodes,
+      body,
+    } => ASTNode::DoWhileStatement {
+      node_id: node_id,
+      src_location: src_location,
+      nodes: nodes
+        .iter()
+        .map(|n| ASTNode::Stub {
+          node_id: n.node_id(),
+          src_location: n.src_location().clone(),
+        })
+        .collect(),
+      body: match body {
+        Some(b) => Some(Box::new(ASTNode::Stub {
+          node_id: b.node_id(),
+          src_location: b.src_location().clone(),
+        })),
+        None => None,
+      },
+    },
+    ASTNode::EmitStatement {
+      node_id,
+      src_location,
+      event_call,
+    } => ASTNode::EmitStatement {
+      node_id: node_id,
+      src_location: src_location,
+      event_call: Box::new(ASTNode::Stub {
+        node_id: event_call.node_id(),
+        src_location: event_call.src_location().clone(),
+      }),
+    },
+    ASTNode::ExpressionStatement {
+      node_id,
+      src_location,
+      expression,
+    } => ASTNode::ExpressionStatement {
+      node_id: node_id,
+      src_location: src_location,
+      expression: Box::new(ASTNode::Stub {
+        node_id: expression.node_id(),
+        src_location: expression.src_location().clone(),
+      }),
+    },
+    ASTNode::ForStatement {
+      node_id,
+      src_location,
+      body,
+      condition,
+      initialization_expression,
+      is_simple_counter_loop,
+      loop_expression,
+    } => ASTNode::ForStatement {
+      node_id: node_id,
+      src_location: src_location,
+      body: Box::new(ASTNode::Stub {
+        node_id: body.node_id(),
+        src_location: body.src_location().clone(),
+      }),
+      condition: match condition {
+        Some(c) => Some(Box::new(ASTNode::Stub {
+          node_id: c.node_id(),
+          src_location: c.src_location().clone(),
+        })),
+        None => None,
+      },
+      initialization_expression: match initialization_expression {
+        Some(ie) => Some(Box::new(ASTNode::Stub {
+          node_id: ie.node_id(),
+          src_location: ie.src_location().clone(),
+        })),
+        None => None,
+      },
+      is_simple_counter_loop: is_simple_counter_loop,
+      loop_expression: match loop_expression {
+        Some(le) => Some(Box::new(ASTNode::Stub {
+          node_id: le.node_id(),
+          src_location: le.src_location().clone(),
+        })),
+        None => None,
+      },
+    },
+    ASTNode::IfStatement {
+      node_id,
+      src_location,
+      condition,
+      true_body,
+      false_body,
+    } => ASTNode::IfStatement {
+      node_id: node_id,
+      src_location: src_location,
+      condition: Box::new(ASTNode::Stub {
+        node_id: condition.node_id(),
+        src_location: condition.src_location().clone(),
+      }),
+      true_body: Box::new(ASTNode::Stub {
+        node_id: true_body.node_id(),
+        src_location: true_body.src_location().clone(),
+      }),
+      false_body: match false_body {
+        Some(fb) => Some(Box::new(ASTNode::Stub {
+          node_id: fb.node_id(),
+          src_location: fb.src_location().clone(),
+        })),
+        None => None,
+      },
+    },
+    ASTNode::InlineAssembly {
+      node_id,
+      src_location,
+    } => ASTNode::InlineAssembly {
+      node_id: node_id,
+      src_location: src_location,
+    },
+    ASTNode::PlaceholderStatement {
+      node_id,
+      src_location,
+    } => ASTNode::PlaceholderStatement {
+      node_id: node_id,
+      src_location: src_location,
+    },
+    ASTNode::Return {
+      node_id,
+      src_location,
+      expression,
+      function_return_parameters,
+    } => ASTNode::Return {
+      node_id: node_id,
+      src_location: src_location,
+      expression: match expression {
+        Some(e) => Some(Box::new(ASTNode::Stub {
+          node_id: e.node_id(),
+          src_location: e.src_location().clone(),
+        })),
+        None => None,
+      },
+      function_return_parameters: function_return_parameters,
+    },
+    ASTNode::RevertStatement {
+      node_id,
+      src_location,
+      error_call,
+    } => ASTNode::RevertStatement {
+      node_id: node_id,
+      src_location: src_location,
+      error_call: Box::new(ASTNode::Stub {
+        node_id: error_call.node_id(),
+        src_location: error_call.src_location().clone(),
+      }),
+    },
+    ASTNode::TryStatement {
+      node_id,
+      src_location,
+      clauses,
+      external_call,
+    } => ASTNode::TryStatement {
+      node_id: node_id,
+      src_location: src_location,
+      clauses: clauses
+        .iter()
+        .map(|n| ASTNode::Stub {
+          node_id: n.node_id(),
+          src_location: n.src_location().clone(),
+        })
+        .collect(),
+      external_call: Box::new(ASTNode::Stub {
+        node_id: external_call.node_id(),
+        src_location: external_call.src_location().clone(),
+      }),
+    },
+    ASTNode::UncheckedBlock {
+      node_id,
+      src_location,
+      statements,
+    } => ASTNode::UncheckedBlock {
+      node_id: node_id,
+      src_location: src_location,
+      statements: statements
+        .iter()
+        .map(|n| ASTNode::Stub {
+          node_id: n.node_id(),
+          src_location: n.src_location().clone(),
+        })
+        .collect(),
+    },
+    ASTNode::VariableDeclarationStatement {
+      node_id,
+      src_location,
+      declarations,
+      initial_value,
+    } => ASTNode::VariableDeclarationStatement {
+      node_id: node_id,
+      src_location: src_location,
+      declarations: declarations
+        .iter()
+        .map(|n| ASTNode::Stub {
+          node_id: n.node_id(),
+          src_location: n.src_location().clone(),
+        })
+        .collect(),
+      initial_value: match initial_value {
+        Some(iv) => Some(Box::new(ASTNode::Stub {
+          node_id: iv.node_id(),
+          src_location: iv.src_location().clone(),
+        })),
+        None => None,
+      },
+    },
+    ASTNode::VariableDeclaration {
+      node_id,
+      src_location,
+      constant,
+      function_selector,
+      mutability,
+      name,
+      name_location,
+      scope,
+      state_variable,
+      storage_location,
+      type_name,
+      value,
+      visibility,
+    } => ASTNode::VariableDeclaration {
+      node_id: node_id,
+      src_location: src_location,
+      constant: constant,
+      function_selector: function_selector,
+      mutability: mutability,
+      name: name,
+      name_location: name_location,
+      scope: scope,
+      state_variable: state_variable,
+      storage_location: storage_location,
+      type_name: Box::new(ASTNode::Stub {
+        node_id: type_name.node_id(),
+        src_location: type_name.src_location().clone(),
+      }),
+      value: match value {
+        Some(v) => Some(Box::new(ASTNode::Stub {
+          node_id: v.node_id(),
+          src_location: v.src_location().clone(),
+        })),
+        None => None,
+      },
+      visibility: visibility,
+    },
+    ASTNode::WhileStatement {
+      node_id,
+      src_location,
+      condition,
+      body,
+    } => ASTNode::WhileStatement {
+      node_id: node_id,
+      src_location: src_location,
+      condition: Box::new(ASTNode::Stub {
+        node_id: condition.node_id(),
+        src_location: condition.src_location().clone(),
+      }),
+      body: match body {
+        Some(b) => Some(Box::new(ASTNode::Stub {
+          node_id: b.node_id(),
+          src_location: b.src_location().clone(),
+        })),
+        None => None,
+      },
+    },
+    ASTNode::ContractDefinition {
+      node_id,
+      src_location,
+      nodes,
+      abstract_,
+      base_contracts,
+      name,
+      name_location,
+      contract_kind,
+    } => ASTNode::ContractDefinition {
+      node_id: node_id,
+      src_location: src_location,
+      nodes: nodes
+        .iter()
+        .map(|n| ASTNode::Stub {
+          node_id: n.node_id(),
+          src_location: n.src_location().clone(),
+        })
+        .collect(),
+      abstract_: abstract_,
+      base_contracts: base_contracts
+        .iter()
+        .map(|n| ASTNode::Stub {
+          node_id: n.node_id(),
+          src_location: n.src_location().clone(),
+        })
+        .collect(),
+      name: name,
+      name_location: name_location,
+      contract_kind: contract_kind,
+    },
+    ASTNode::FunctionDefinition {
+      node_id,
+      src_location,
+      body,
+      documentation,
+      implemented,
+      kind,
+      modifiers,
+      name,
+      name_location,
+      parameters,
+      return_parameters,
+      scope,
+      state_mutability,
+      virtual_,
+      visibility,
+    } => ASTNode::FunctionDefinition {
+      node_id: node_id,
+      src_location: src_location,
+      body: match body {
+        Some(b) => Some(Box::new(ASTNode::Stub {
+          node_id: b.node_id(),
+          src_location: b.src_location().clone(),
+        })),
+        None => None,
+      },
+      documentation: match documentation {
+        Some(d) => Some(Box::new(ASTNode::Stub {
+          node_id: d.node_id(),
+          src_location: d.src_location().clone(),
+        })),
+        None => None,
+      },
+      implemented: implemented,
+      kind: kind,
+      modifiers: modifiers
+        .iter()
+        .map(|n| ASTNode::Stub {
+          node_id: n.node_id(),
+          src_location: n.src_location().clone(),
+        })
+        .collect(),
+      name: name,
+      name_location: name_location,
+      parameters: Box::new(ASTNode::Stub {
+        node_id: parameters.node_id(),
+        src_location: parameters.src_location().clone(),
+      }),
+      return_parameters: Box::new(ASTNode::Stub {
+        node_id: return_parameters.node_id(),
+        src_location: return_parameters.src_location().clone(),
+      }),
+      scope: scope,
+      state_mutability: state_mutability,
+      virtual_: virtual_,
+      visibility: visibility,
+    },
+    ASTNode::EventDefinition {
+      node_id,
+      src_location,
+      name,
+      name_location,
+      parameters,
+    } => ASTNode::EventDefinition {
+      node_id: node_id,
+      src_location: src_location,
+      name: name,
+      name_location: name_location,
+      parameters: Box::new(ASTNode::Stub {
+        node_id: parameters.node_id(),
+        src_location: parameters.src_location().clone(),
+      }),
+    },
+    ASTNode::ErrorDefinition {
+      node_id,
+      src_location,
+      name,
+      name_location,
+      parameters,
+    } => ASTNode::ErrorDefinition {
+      node_id: node_id,
+      src_location: src_location,
+      name: name,
+      name_location: name_location,
+      parameters: Box::new(ASTNode::Stub {
+        node_id: parameters.node_id(),
+        src_location: parameters.src_location().clone(),
+      }),
+    },
+    ASTNode::ModifierDefinition {
+      node_id,
+      src_location,
+      body,
+      documentation,
+      name,
+      name_location,
+      parameters,
+      virtual_,
+      visibility,
+    } => ASTNode::ModifierDefinition {
+      node_id: node_id,
+      src_location: src_location,
+      body: Box::new(ASTNode::Stub {
+        node_id: body.node_id(),
+        src_location: body.src_location().clone(),
+      }),
+      documentation: match documentation {
+        Some(d) => Some(Box::new(ASTNode::Stub {
+          node_id: d.node_id(),
+          src_location: d.src_location().clone(),
+        })),
+        None => None,
+      },
+      name: name,
+      name_location: name_location,
+      parameters: Box::new(ASTNode::Stub {
+        node_id: parameters.node_id(),
+        src_location: parameters.src_location().clone(),
+      }),
+      virtual_: virtual_,
+      visibility: visibility,
+    },
+    ASTNode::StructDefinition {
+      node_id,
+      src_location,
+      members,
+      canonical_name,
+      name,
+      name_location,
+      visibility,
+    } => ASTNode::StructDefinition {
+      node_id: node_id,
+      src_location: src_location,
+      members: members
+        .iter()
+        .map(|n| ASTNode::Stub {
+          node_id: n.node_id(),
+          src_location: n.src_location().clone(),
+        })
+        .collect(),
+      canonical_name: canonical_name,
+      name: name,
+      name_location: name_location,
+      visibility: visibility,
+    },
+    ASTNode::EnumDefinition {
+      node_id,
+      src_location,
+      members,
+      canonical_name,
+      name,
+      name_location,
+    } => ASTNode::EnumDefinition {
+      node_id: node_id,
+      src_location: src_location,
+      members: members
+        .iter()
+        .map(|n| ASTNode::Stub {
+          node_id: n.node_id(),
+          src_location: n.src_location().clone(),
+        })
+        .collect(),
+      canonical_name: canonical_name,
+      name: name,
+      name_location: name_location,
+    },
+    ASTNode::UserDefinedValueTypeDefinition {
+      node_id,
+      src_location,
+      nodes,
+      body,
+    } => ASTNode::UserDefinedValueTypeDefinition {
+      node_id: node_id,
+      src_location: src_location,
+      nodes: nodes
+        .iter()
+        .map(|n| ASTNode::Stub {
+          node_id: n.node_id(),
+          src_location: n.src_location().clone(),
+        })
+        .collect(),
+      body: match body {
+        Some(b) => Some(Box::new(ASTNode::Stub {
+          node_id: b.node_id(),
+          src_location: b.src_location().clone(),
+        })),
+        None => None,
+      },
+    },
+    ASTNode::PragmaDirective {
+      node_id,
+      src_location,
+      literals,
+    } => ASTNode::PragmaDirective {
+      node_id: node_id,
+      src_location: src_location,
+      literals: literals,
+    },
+    ASTNode::ImportDirective {
+      node_id,
+      src_location,
+      absolute_path,
+      file,
+      source_unit,
+    } => ASTNode::ImportDirective {
+      node_id: node_id,
+      src_location: src_location,
+      absolute_path: absolute_path,
+      file: file,
+      source_unit: source_unit,
+    },
+    ASTNode::UsingForDirective {
+      node_id,
+      src_location,
+      global,
+      library_name,
+      type_name,
+    } => ASTNode::UsingForDirective {
+      node_id: node_id,
+      src_location: src_location,
+      global: global,
+      library_name: match library_name {
+        Some(ln) => Some(Box::new(ASTNode::Stub {
+          node_id: ln.node_id(),
+          src_location: ln.src_location().clone(),
+        })),
+        None => None,
+      },
+      type_name: match type_name {
+        Some(tn) => Some(Box::new(ASTNode::Stub {
+          node_id: tn.node_id(),
+          src_location: tn.src_location().clone(),
+        })),
+        None => None,
+      },
+    },
+    ASTNode::SourceUnit {
+      node_id,
+      src_location,
+      nodes,
+    } => ASTNode::SourceUnit {
+      node_id: node_id,
+      src_location: src_location,
+      nodes: nodes
+        .iter()
+        .map(|n| ASTNode::Stub {
+          node_id: n.node_id(),
+          src_location: n.src_location().clone(),
+        })
+        .collect(),
+    },
+    ASTNode::InheritanceSpecifier {
+      node_id,
+      src_location,
+      base_name,
+    } => ASTNode::InheritanceSpecifier {
+      node_id: node_id,
+      src_location: src_location,
+      base_name: Box::new(ASTNode::Stub {
+        node_id: base_name.node_id(),
+        src_location: base_name.src_location().clone(),
+      }),
+    },
+    ASTNode::ElementaryTypeName {
+      node_id,
+      src_location,
+      name,
+    } => ASTNode::ElementaryTypeName {
+      node_id: node_id,
+      src_location: src_location,
+      name: name,
+    },
+    ASTNode::FunctionTypeName {
+      node_id,
+      src_location,
+      parameter_types,
+      return_parameter_types,
+      state_mutability,
+      visibility,
+    } => ASTNode::FunctionTypeName {
+      node_id: node_id,
+      src_location: src_location,
+      parameter_types: Box::new(ASTNode::Stub {
+        node_id: parameter_types.node_id(),
+        src_location: parameter_types.src_location().clone(),
+      }),
+      return_parameter_types: Box::new(ASTNode::Stub {
+        node_id: return_parameter_types.node_id(),
+        src_location: return_parameter_types.src_location().clone(),
+      }),
+      state_mutability: state_mutability,
+      visibility: visibility,
+    },
+    ASTNode::ParameterList {
+      node_id,
+      src_location,
+      parameters,
+    } => ASTNode::ParameterList {
+      node_id: node_id,
+      src_location: src_location,
+      parameters: parameters
+        .iter()
+        .map(|n| ASTNode::Stub {
+          node_id: n.node_id(),
+          src_location: n.src_location().clone(),
+        })
+        .collect(),
+    },
+    ASTNode::TryCatchClause {
+      node_id,
+      src_location,
+      error_name,
+      block,
+      parameters,
+    } => ASTNode::TryCatchClause {
+      node_id: node_id,
+      src_location: src_location,
+      error_name: error_name,
+      block: Box::new(ASTNode::Stub {
+        node_id: block.node_id(),
+        src_location: block.src_location().clone(),
+      }),
+      parameters: match parameters {
+        Some(p) => Some(Box::new(ASTNode::Stub {
+          node_id: p.node_id(),
+          src_location: p.src_location().clone(),
+        })),
+        None => None,
+      },
+    },
+    ASTNode::ModifierInvocation {
+      node_id,
+      src_location,
+      modifier_name,
+      arguments,
+    } => ASTNode::ModifierInvocation {
+      node_id: node_id,
+      src_location: src_location,
+      modifier_name: Box::new(ASTNode::Stub {
+        node_id: modifier_name.node_id(),
+        src_location: modifier_name.src_location().clone(),
+      }),
+      arguments: match arguments {
+        Some(args) => Some(
+          args
+            .iter()
+            .map(|n| ASTNode::Stub {
+              node_id: n.node_id(),
+              src_location: n.src_location().clone(),
+            })
+            .collect(),
+        ),
+        None => None,
+      },
+    },
+    ASTNode::UserDefinedTypeName {
+      node_id,
+      src_location,
+      path_node,
+      referenced_declaration,
+    } => ASTNode::UserDefinedTypeName {
+      node_id: node_id,
+      src_location: src_location,
+      path_node: Box::new(ASTNode::Stub {
+        node_id: path_node.node_id(),
+        src_location: path_node.src_location().clone(),
+      }),
+      referenced_declaration: referenced_declaration,
+    },
+    ASTNode::ArrayTypeName {
+      node_id,
+      src_location,
+      base_type,
+    } => ASTNode::ArrayTypeName {
+      node_id: node_id,
+      src_location: src_location,
+      base_type: Box::new(ASTNode::Stub {
+        node_id: base_type.node_id(),
+        src_location: base_type.src_location().clone(),
+      }),
+    },
+    ASTNode::Mapping {
+      node_id,
+      src_location,
+      key_name,
+      key_name_location,
+      key_type,
+      value_name,
+      value_name_location,
+      value_type,
+    } => ASTNode::Mapping {
+      node_id: node_id,
+      src_location: src_location,
+      key_name: key_name,
+      key_name_location: key_name_location,
+      key_type: Box::new(ASTNode::Stub {
+        node_id: key_type.node_id(),
+        src_location: key_type.src_location().clone(),
+      }),
+      value_name: value_name,
+      value_name_location: value_name_location,
+      value_type: Box::new(ASTNode::Stub {
+        node_id: value_type.node_id(),
+        src_location: value_type.src_location().clone(),
+      }),
+    },
+    ASTNode::StructuredDocumentation {
+      node_id,
+      src_location,
+      text,
+    } => ASTNode::StructuredDocumentation {
+      node_id: node_id,
+      src_location: src_location,
+      text: text,
+    },
+    ASTNode::Stub {
+      node_id,
+      src_location,
+    } => ASTNode::Stub {
+      node_id: node_id,
+      src_location: src_location,
+    },
+    ASTNode::Other {
+      node_id,
+      src_location,
+      nodes,
+      body,
+      node_type,
+    } => ASTNode::Other {
+      node_id: node_id,
+      src_location: src_location,
+      nodes: nodes
+        .iter()
+        .map(|n| ASTNode::Stub {
+          node_id: n.node_id(),
+          src_location: n.src_location().clone(),
+        })
+        .collect(),
+      body: match body {
+        Some(b) => Some(Box::new(ASTNode::Stub {
+          node_id: b.node_id(),
+          src_location: b.src_location().clone(),
+        })),
+        None => None,
+      },
+      node_type: node_type,
+    },
   }
 }
 
