@@ -3146,12 +3146,12 @@ fn extract_block_documentation(
   }
 }
 
-static mut NEXT_SEMANTIC_BLOCK_ID: i32 = 1000000; // Start with high ID to avoid conflicts
+static mut NEXT_GENERATED_NODE_ID: i32 = -100; // Run negative to avoid conflicts
 
-fn generate_semantic_block_id() -> i32 {
+fn generate_node_id() -> i32 {
   unsafe {
-    let id = NEXT_SEMANTIC_BLOCK_ID;
-    NEXT_SEMANTIC_BLOCK_ID += 1;
+    let id = NEXT_GENERATED_NODE_ID;
+    NEXT_GENERATED_NODE_ID -= 1;
     id
   }
 }
@@ -3169,25 +3169,26 @@ fn group_statements_into_semantic_blocks(
   let mut semantic_blocks = vec![];
   let mut current_group_start = 0;
 
-  for &break_index in &breaks {
-    let group_statements =
-      statements[current_group_start..break_index].to_vec();
+  let mut create_semantic_block =
+    |group_statements: Vec<ASTNode>, group_start_index: usize| {
+      if group_statements.is_empty() {
+        return;
+      }
 
-    if !group_statements.is_empty() {
       let first_stmt_start =
         group_statements[0].src_location().start.unwrap_or(0);
       let last_stmt = &group_statements[group_statements.len() - 1];
       let last_stmt_end = last_stmt.src_location().start.unwrap_or(0)
         + last_stmt.src_location().length.unwrap_or(0);
 
-      let group_start_pos = if current_group_start == 0 {
+      let group_start_pos = if group_start_index == 0 {
         block_src_location.start.unwrap_or(0)
       } else {
-        statements[current_group_start - 1]
+        statements[group_start_index - 1]
           .src_location()
           .start
           .unwrap_or(0)
-          + statements[current_group_start - 1]
+          + statements[group_start_index - 1]
             .src_location()
             .length
             .unwrap_or(0)
@@ -3197,7 +3198,7 @@ fn group_statements_into_semantic_blocks(
         extract_block_documentation(source, group_start_pos, first_stmt_start);
 
       let semantic_block = ASTNode::SemanticBlock {
-        node_id: generate_semantic_block_id(),
+        node_id: generate_node_id(),
         src_location: SourceLocation {
           start: Some(first_stmt_start),
           length: Some(last_stmt_end - first_stmt_start),
@@ -3208,79 +3209,18 @@ fn group_statements_into_semantic_blocks(
       };
 
       semantic_blocks.push(semantic_block);
-    }
+    };
 
+  for &break_index in &breaks {
+    let group_statements =
+      statements[current_group_start..break_index].to_vec();
+    create_semantic_block(group_statements, current_group_start);
     current_group_start = break_index;
   }
 
   // Handle the last group
-  if current_group_start < statements.len() {
-    let group_statements = statements[current_group_start..].to_vec();
-
-    if !group_statements.is_empty() {
-      let first_stmt_start =
-        group_statements[0].src_location().start.unwrap_or(0);
-      let last_stmt = &group_statements[group_statements.len() - 1];
-      let last_stmt_end = last_stmt.src_location().start.unwrap_or(0)
-        + last_stmt.src_location().length.unwrap_or(0);
-
-      let group_start_pos = if current_group_start == 0 {
-        block_src_location.start.unwrap_or(0)
-      } else {
-        statements[current_group_start - 1]
-          .src_location()
-          .start
-          .unwrap_or(0)
-          + statements[current_group_start - 1]
-            .src_location()
-            .length
-            .unwrap_or(0)
-      };
-
-      let documentation =
-        extract_block_documentation(source, group_start_pos, first_stmt_start);
-
-      let semantic_block = ASTNode::SemanticBlock {
-        node_id: generate_semantic_block_id(),
-        src_location: SourceLocation {
-          start: Some(first_stmt_start),
-          length: Some(last_stmt_end - first_stmt_start),
-          index: None,
-        },
-        documentation,
-        statements: group_statements,
-      };
-
-      semantic_blocks.push(semantic_block);
-    }
-  }
-
-  // If no semantic breaks were found, create a single semantic block
-  if semantic_blocks.is_empty() && !statements.is_empty() {
-    let first_stmt_start = statements[0].src_location().start.unwrap_or(0);
-    let last_stmt = &statements[statements.len() - 1];
-    let last_stmt_end = last_stmt.src_location().start.unwrap_or(0)
-      + last_stmt.src_location().length.unwrap_or(0);
-
-    let documentation = extract_block_documentation(
-      source,
-      block_src_location.start.unwrap_or(0),
-      first_stmt_start,
-    );
-
-    let semantic_block = ASTNode::SemanticBlock {
-      node_id: generate_semantic_block_id(),
-      src_location: SourceLocation {
-        start: Some(first_stmt_start),
-        length: Some(last_stmt_end - first_stmt_start),
-        index: None,
-      },
-      documentation,
-      statements,
-    };
-
-    semantic_blocks.push(semantic_block);
-  }
+  let group_statements = statements[current_group_start..].to_vec();
+  create_semantic_block(group_statements, current_group_start);
 
   Ok(semantic_blocks)
 }

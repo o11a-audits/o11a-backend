@@ -127,10 +127,6 @@ pub struct SecondPassDeclaration {
   pub declaration_kind: DeclarationKind,
   pub name: String,
   pub scope: Scope,
-  // For functions and modifiers
-  pub referenced_nodes: Vec<i32>, // Node IDs of all referenced nodes
-  pub require_revert_statements: Vec<i32>, // Node IDs of require/revert statements
-                                           // Additional fields for detailed analysis will be added here
 }
 
 /// Analyzer implementing the two-pass architecture described in the README:
