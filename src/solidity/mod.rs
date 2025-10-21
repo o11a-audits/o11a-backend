@@ -943,21 +943,32 @@ fn collect_references_and_statements(
     } => {
       referenced_nodes.push(*referenced_declaration);
     }
-    ASTNode::FunctionCall { expression, .. } => {
-      // Check if this is a require or revert statement
-      if let ASTNode::Identifier { name, .. } = expression.as_ref() {
-        if name == "require" || name == "revert" {
-          require_revert_statements.push(node.node_id());
-        }
-      }
-
-      // Extract function call reference from the expression
+    ASTNode::FunctionCall {
+      expression,
+      arguments,
+      ..
+    } => {
+      // Check if this is a require or revert function call
       if let ASTNode::Identifier {
+        name,
         referenced_declaration,
         ..
       } = expression.as_ref()
       {
-        function_calls.push(*referenced_declaration);
+        if name == "require" {
+          // For require, add the second argument (error message) if it exists
+          if arguments.len() >= 2 {
+            require_revert_statements.push(arguments[1].node_id());
+          }
+        } else if name == "revert" {
+          // For revert function call, add the first argument if it exists
+          if !arguments.is_empty() {
+            require_revert_statements.push(arguments[0].node_id());
+          }
+        } else {
+          // For other function calls, extract the function reference
+          function_calls.push(*referenced_declaration);
+        }
       }
 
       // Continue traversing child nodes
@@ -972,8 +983,19 @@ fn collect_references_and_statements(
         );
       }
     }
-    ASTNode::RevertStatement { node_id, .. } => {
-      require_revert_statements.push(*node_id);
+    ASTNode::RevertStatement { error_call, .. } => {
+      // For RevertStatement, extract the error identifier from the error_call
+      // The error_call is a FunctionCall node
+      if let ASTNode::FunctionCall { expression, .. } = error_call.as_ref() {
+        // The expression contains the error identifier
+        if let ASTNode::Identifier {
+          referenced_declaration,
+          ..
+        } = expression.as_ref()
+        {
+          require_revert_statements.push(*referenced_declaration);
+        }
+      }
 
       // Continue traversing child nodes
       let child_nodes = node.nodes();
