@@ -1,5 +1,5 @@
 # o11a-backend
-The o11a backend has five modules that form an almost linear processing pipeline:
+The o11a backend has five modules that form a processing pipeline:
 
  1. Parser - parses the audit source and allows clients to post new text blobs (added comments and docs) to be parsed in the context of the audit
  2. Analyzer - analyzes the audit source, producing a directory of definitions and their attributes, allowing clients to fetch structured audit data
@@ -12,20 +12,10 @@ Audit source files are parsed and compiled by the Foundry compilers, which can o
 
 The parser enhances the original AST by adding semantic blocks, which are a grouping of statements based on whitespace in the source code. Semantic blocks are not in the original AST but are added by the parser by analyzing the source files for consecutive newlines between statements in a block. This creates a structure where Block nodes contain SemanticBlock nodes, which contain statement nodes. Each semantic block has optional documentation from comments that appear at the beginning of the semantic block in the source, preserving context from the developers.
 
+Because the parser provides extra information about the source file not found in the original AST in the AST nodes it produces, it allows the formatter to work with only the modified AST provided by the parser, not needing to reference the original source files. This is paramount when needing to format a single node in an isolated way.
+
 # Analyzer
-The analyzer is responsible for traversing the Abstract Syntax Tree and performing static analysis on it. It notably creates in order:
- 1. A directory of contracts by contract node id, containing if it is in scope
- 2. A directory of in-scope and used by in-scope declarations by node id
- 3. A directory of nodes by id, where each node's children are stored as node stubs
-
-Each declaration has many attributes, which are the result of static analysis. The core attributes are the topic ID, name, scope, and declaration kind. Depending on the kind of declaration, other attributes exist that are stored in different directories by topic ID:
-
- - Signature directories: store the signatures of source, text, and comment declarations. This is the value to display to the user that represents the declaration. For a function, this is the code for the function without the body. For a text declaration, this is the text itself. For a statement or expression, this is the code for the statement or expression. For a variable, it is the declaration for the variable (including its type). Signatures are rendered through the formatter in the same way as source code, so they are stored as HTML strings and any info comments or references in them will be rendered.
- - Calls directories: store the external calls in a function (or contract by association)
-
-Declarations are scoped by three properties: Container, Component, and Member. Using the scope, any identifier/operation or its parent can be linked to.
-
-For contract source files, the container is the source file, the component is a contract, and the member is a function. A contract's scope will only be a container, a function's scope will be a container and a component, and a local variable's scope will be a container, component, and member. For documentation, the container is the source file, the component is a section, and the member is a paragraph. For comments, the container is the comment ID, the component is a section, and the member is a paragraph.
+The analyzer is responsible for traversing the Abstract Syntax Tree and performing static analysis on it.
 
 The AST we are given to analyze contains unique IDs for each node, and each time an identifier appears in the AST, its node contains a reference_id property that points to the ID of the node that declared it.
 
@@ -34,10 +24,24 @@ Each audit will contain a scope.txt file in the root project directory. This fil
 Projects being audited can pull in lots of dependencies, yet only use a few functions from them. Naively processing all contracts/functions from every file in the project leads to excessive processing and bloating in the audit. To avoid this, we can take the following two-pass approach to make sure only in-scope and used by in-scope contracts/functions are processed:
  1. First read and parse each AST, storing its declarations in an accumulating simple declaration dictionary that stores all declarations in the audit by node ID. With the function/modifier declarations, store a list of the other nodes referenced in its body, the require and revert statements, the function calls, and the variable mutations, making note of whether the function/modifier at hand is from an in-scope ast or not. This is the first pass, and is a great place to do processing that needs to check all child nodes recursively.
  2. Loop over all the declarations, storing the publicly (public or external; NOT internal, private, or local) in-scope declarations in a new dictionary that stores all publicly in-scope declarations in the audit and the nodes that reference them. When a declaration is found to be publicly in-scope, add it to the in-scope declaration dictionary and look up its referenced nodes in the previously generated dictionary. Add each of these references to the accumulating in-scope dictionary with the node at hand that referenced it, then recursively check these references for their references, adding them as needed and the node that referenced them and so on.
- 3. Now with a dictionary of all in-scope and used by in-scope declarations, we can parse each AST in scope into memory one at a time, checking each declaration for inclusion in the in-scope dictionary. If it is, we add it to an accumulating dictionary of detailed declarations. This is the second pass, and it's a great place to perform processing that requires knowledge of a node's references.
+ 3. Now with a dictionary of all in-scope and used by in-scope declarations, we can parse each AST in scope into memory one at a time, checking each declaration for inclusion in the in-scope dictionary. If it is, we add it to an accumulating collection of dictionaries that make up the complete data set needed for the rest of the application. This is the second pass, and it's a great place to perform processing that requires knowledge of a node's references.
+
+The exact data this three step process creates in order is:
+ 1. A directory of contracts by contract node ID, containing if it is in scope
+ 2. A temporary directory of in-scope and used by in-scope declarations by node ID
+ 3. A directory of nodes by topic ID, where each node's children are stored as node stubs. A directory of all declarations by topic ID with their name, scope, and declaration kind. Directories of extended properties by topic ID, the different directories are:
+ - Calls directory: store the external calls in a function (or contract by association)
+ - References directory: stores the references to the declaration (or contract by association)
+ - Function Arguments/Returns/Reverts directory: stores rich data about a function/modifier's argument list, return values, and the revert conditions. All these should contain references to the declarations when possible.
+
+See the collaborator section for topic ID details.
+
+Declarations are scoped by three properties: Container, Component, and Member. Using the scope, any identifier/operation or its parent can be linked to.
+
+For contract source files, the container is the source file, the component is a contract, and the member is a function. A contract's scope will only be a container, a function's scope will be a container and a component, and a local variable's scope will be a container, component, and member. For documentation, the container is the source file, the component is a section, and the member is a paragraph. For comments, the container is the comment ID, the component is a section, and the member is a paragraph.
 
 # Formatter
-The formatter takes an AST node and its source file as inputs and returns HTML. This HTML is largely formatted without consideration of the source file. The parser provides extra information about the source file not found in the original AST. This allows the formatter to work with only the modified AST provided by the parser, not needing to reference the original source file.
+The formatter takes an AST node from the parser and returns HTML.
 
 This rendered HTML is designed to be forty characters wide. Forty characters allows for four columns of code to be displayed side-by-side on a typical screen while not being so small that the comments are difficult to read. (Forty characters also allow for two columns of code to be printed on standard paper.)
 
@@ -51,17 +55,18 @@ The formatter output does not include traditional line numbers because the forma
 
 Although the complete source code of a file is not used, clients may want to display or allow copying the full source file in a separate view, at the user's request, for niche purposes. It should not be interactive.
 
+The formatter can format nodes as source text or as signatures. Source text is now the node would appear in the source file, but a signature is how a node should be represented in an isolated way, nested inside discussions or modals. For example, the source text of a function would contain the function's body, but the signature would not contain the body. Source text for variables will not include type information, but signatures will. Text is rendered the same either way.
+
 # Collaborator
 
 The collaborator allows users to comment on topics in the audit. The types of comments users can leave on topics depends on the type of topic. These comments can be collaborative discussions or structured properties of the topics.
 
-The types of topics and their suffixes are:
- - Source code expressions and values (e)
- - Source code contracts, functions, blocks, and statements (s)
- - Text Documentation, text comments, and text sections (t)
- - Attack vectors (a)
+The types of topics and their prefixes are:
+ - Source code nodes (N)
+ - Text Documentation, text comments, and text sections (N)
+ - Attack vectors (A)
 
- The topic id is a string identifier that uniquely identifies a topic within the audit. Each source code contract, function, block, statement, expression, variable, and literal value has an unique topic id. Each text document/comment and section has an unique topic id. It is sequential number for that topic type preceeded by the topic type prefix. For example, the first added Attack Vector will be `a1`, and the second `a2`.
+ The topic id is a string identifier that uniquely identifies a topic within the audit. Each source code contract, function, block, statement, expression, variable, and literal value has an unique topic id. Each text document/comment and section has an unique topic id. It is sequential number for that topic type preceeded by the topic type prefix. For example, the first added Attack Vector will be `A1`, and the second `A2`.
 
 ## Documentation
 
