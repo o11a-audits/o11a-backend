@@ -9,9 +9,9 @@ pub mod parser;
 pub struct DataContext {
   pub in_scope_files: HashSet<String>,
   pub nodes: BTreeMap<String, ASTNode>,
-  pub declarations: BTreeMap<String, todo!()>,
-  pub references: BTreeMap<String, todo!()>,
-  pub function_properties: BTreeMap<String, todo!()>,
+  pub declarations: BTreeMap<String, Declaration>,
+  pub references: BTreeMap<String, BTreeMap<String, Vec<String>>>,
+  pub function_properties: BTreeMap<String, FunctionProperties>,
 }
 
 pub fn analyze(project_root: &Path) -> Result<DataContext, String> {
@@ -114,39 +114,29 @@ impl InScopeDeclaration {
   }
 }
 
-/// Second pass declaration structure for detailed analysis (TODO: to be implemented).
-/// Will contain topic IDs and additional analysis data for in-scope declarations.
-/// This will be populated after determining which declarations are actually needed
-/// based on the in-scope analysis and reference following.
-/// Only declarations that are publicly visible or referenced by publicly visible
-/// declarations will be included in the second pass.
-// TODO: Implement SecondPassDeclaration for detailed analysis
 #[derive(Debug, Clone)]
-pub struct SecondPassDeclaration {
+pub struct Declaration {
   pub topic_id: i32,
-  pub is_publicly_in_scope: bool,
   pub declaration_kind: DeclarationKind,
   pub name: String,
   pub scope: Scope,
 }
 
-/// Analyzer implementing the two-pass architecture described in the README:
-///
-/// 1. First pass: Parse all ASTs and build comprehensive declaration dictionary
-///    - Store all declarations with basic info and references
-///    - Mark publicly visible declarations (contracts, public/external functions,
-///      constructors, fallback, receive functions) in in-scope files
-///    - All other declarations are marked as not publicly visible
-///    - No topic ID assignment yet
-///
-/// 2. Second pass (TODO): Build in-scope dictionary with topic IDs
-///    - Start from publicly visible in-scope declarations
-///    - Follow references recursively to build complete in-scope set
-///    - Assign sequential topic IDs to in-scope declarations
-///    - Create detailed analysis data structures
-/// Load scope.txt file from project root (required file).
-/// Returns error if file doesn't exist or cannot be read.
-/// Each line should contain a relative path to a file in audit scope.
+pub struct FunctionProperties {
+  // Topic IDs of the local declarations of the function parameters
+  pub parameters: Vec<String>,
+  // Topic IDs of the declarations of the function return values
+  pub returns: Vec<String>,
+  // Topic IDs of the declarations of the function revert nodes. This is either
+  // the error call for a revert statement, or the literal string node passed
+  // as the second argument to a require call
+  pub reverts: Vec<String>,
+  // Topic IDs of the declarations of the functions called
+  pub calls: Vec<String>,
+  // Topic IDs of the declarations of the state variables mutated
+  pub mutations: Vec<String>,
+}
+
 fn load_scope_file(project_root: &Path) -> Result<HashSet<String>, String> {
   let scope_file = project_root.join("scope.txt");
   if !scope_file.exists() {

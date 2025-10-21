@@ -31,7 +31,7 @@ The exact data this three step process creates goes into forming the Data Contex
  2. A directory of nodes by topic ID, where each node's children are stored as node stubs
  3. A directory of all declarations (reference-able identifiers in the source code) by topic ID with their name, scope, and declaration kind
  4. A directory of references to the declaration by topic ID
- 5. A directory of extended properties for functions and modifiers, this will include function arguments, returns, reverts, calls to other functions within it, and mutations to state variables within it. Each of these properties will have rich data about the subjects and should contain references to the releveant declarations when possible (ie, the function arguments should list the topic ID for the local variables that the arguments are mapped to).
+ 5. A directory of extended properties for functions and modifiers, this will include function parameters, returns, reverts, calls to other functions within it, and mutations to state variables within it. Each of these properties will have rich data about the subjects and should contain references to the relevant declarations when possible (ie, the function arguments should list the topic ID for the local variables that the arguments are mapped to).
 
 See the collaborator section for topic ID details.
 
