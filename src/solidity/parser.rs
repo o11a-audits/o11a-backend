@@ -25,6 +25,7 @@ pub fn process(
     ast_map.len(),
     total_asts
   );
+
   Ok(ast_map)
 }
 

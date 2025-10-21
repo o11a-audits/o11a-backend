@@ -24,15 +24,14 @@ Each audit will contain a scope.txt file in the root project directory. This fil
 Projects being audited can pull in lots of dependencies, yet only use a few functions from them. Naively processing all contracts/functions from every file in the project leads to excessive processing and bloating in the audit. To avoid this, we can take the following two-pass approach to make sure only in-scope and used by in-scope contracts/functions are processed:
  1. First read and parse each AST, storing its declarations in an accumulating simple declaration dictionary that stores all declarations in the audit by node ID. With the function/modifier declarations, store a list of the other nodes referenced in its body, the require and revert statements, the function calls, and the variable mutations, making note of whether the function/modifier at hand is from an in-scope ast or not. This is the first pass, and is a great place to do processing that needs to check all child nodes recursively.
  2. Loop over all the declarations, storing the publicly (public or external; NOT internal, private, or local) in-scope declarations in a new dictionary that stores all publicly in-scope declarations in the audit and the nodes that reference them. When a declaration is found to be publicly in-scope, add it to the in-scope declaration dictionary and look up its referenced nodes in the previously generated dictionary. Add each of these references to the accumulating in-scope dictionary with the node at hand that referenced it, then recursively check these references for their references, adding them as needed and the node that referenced them and so on.
- 3. Now with a dictionary of all in-scope and used by in-scope declarations, we can parse each AST in scope into memory one at a time, checking each declaration for inclusion in the in-scope dictionary. If it is, we add it to an accumulating collection of dictionaries that make up the complete data set needed for the rest of the application. This is the second pass, and it's a great place to perform processing that requires knowledge of a node's references.
+ 3. Now with a dictionary of all in-scope and used by in-scope declarations, we can parse each AST into memory one at a time, checking each declaration for inclusion in the in-scope dictionary. If it is, we add it and its child nodes to an accumulating collection of dictionaries that make up the complete data set needed for the rest of the application. This is the second pass, and it's a great place to perform processing that requires knowledge of a node's references.
 
-The exact data this three step process creates in order is:
- 1. A directory of contracts by contract node ID, containing if it is in scope
- 2. A temporary directory of in-scope and used by in-scope declarations by node ID
- 3. A directory of nodes by topic ID, where each node's children are stored as node stubs. A directory of all declarations by topic ID with their name, scope, and declaration kind. Directories of extended properties by topic ID, the different directories are:
- - Calls directory: store the external calls in a function (or contract by association)
- - References directory: stores the references to the declaration (or contract by association)
- - Function Arguments/Returns/Reverts directory: stores rich data about a function/modifier's argument list, return values, and the revert conditions. All these should contain references to the declarations when possible.
+The exact data this three step process creates goes into forming the Data Context type:
+ 1. A set of files that are in scope for the audit
+ 2. A directory of nodes by topic ID, where each node's children are stored as node stubs
+ 3. A directory of all declarations (reference-able identifiers in the source code) by topic ID with their name, scope, and declaration kind
+ 4. A directory of references to the declaration by topic ID
+ 5. A directory of extended properties for functions and modifiers, this will include function arguments, returns, reverts, calls to other functions within it, and mutations to state variables within it. Each of these properties will have rich data about the subjects and should contain references to the releveant declarations when possible (ie, the function arguments should list the topic ID for the local variables that the arguments are mapped to).
 
 See the collaborator section for topic ID details.
 
@@ -41,9 +40,9 @@ Declarations are scoped by three properties: Container, Component, and Member. U
 For contract source files, the container is the source file, the component is a contract, and the member is a function. A contract's scope will only be a container, a function's scope will be a container and a component, and a local variable's scope will be a container, component, and member. For documentation, the container is the source file, the component is a section, and the member is a paragraph. For comments, the container is the comment ID, the component is a section, and the member is a paragraph.
 
 # Formatter
-The formatter takes an AST node from the parser and returns HTML.
+The formatter takes an AST node from the parser and the data context from the analyzer and returns an HTML string.
 
-This rendered HTML is designed to be forty characters wide. Forty characters allows for four columns of code to be displayed side-by-side on a typical screen while not being so small that the comments are difficult to read. (Forty characters also allow for two columns of code to be printed on standard paper.)
+When rendered, this HTML is designed to be forty characters wide. Forty characters allows for four columns of code to be displayed side-by-side on a typical screen while not being so small that the comments are difficult to read. (Forty characters also allow for two columns of code to be printed on standard paper.)
 
 There are two core primitives for the formatter to respect: identifiers and operators. Each identifier and each operator will have dedicated topics for discussion, so they each need to be set on different lines so that their comments can be displayed inline above them. Identifier and operator inline comments are formatted differently, so there can be both an identifier and an operator on the same line, but the same line cannot have two identifiers or two operators.
 

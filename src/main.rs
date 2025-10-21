@@ -49,14 +49,12 @@ fn main() {
   let project_path = Path::new("/home/john/olla/server/priv/audits/lido-crmv2");
 
   match solidity::analyze(project_path) {
-    Ok((declarations, in_scope_files, _in_scope_declarations)) => {
+    Ok(data_context) => {
       println!("Analyzer Results:");
-      println!("In-scope files: {}", in_scope_files.len());
-      for file in &in_scope_files {
+      println!("In-scope files: {}", data_context.in_scope_files.len());
+      for file in &data_context.in_scope_files {
         println!("  - {}", file);
       }
-
-      println!("\nFirst pass declarations found: {}", declarations.len());
     }
     Err(e) => {
       eprintln!("Error analyzing project: {}", e);

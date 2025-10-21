@@ -6,16 +6,15 @@ use std::path::Path;
 pub mod formatter;
 pub mod parser;
 
-pub fn analyze(
-  project_root: &Path,
-) -> Result<
-  (
-    BTreeMap<i32, FirstPassDeclaration>,
-    HashSet<String>,
-    BTreeMap<i32, InScopeDeclaration>,
-  ),
-  String,
-> {
+pub struct DataContext {
+  pub in_scope_files: HashSet<String>,
+  pub nodes: BTreeMap<String, ASTNode>,
+  pub declarations: BTreeMap<String, todo!()>,
+  pub references: BTreeMap<String, todo!()>,
+  pub function_properties: BTreeMap<String, todo!()>,
+}
+
+pub fn analyze(project_root: &Path) -> Result<DataContext, String> {
   // Load scope.txt file to determine which files are in audit scope (required)
   let in_scope_files = load_scope_file(project_root)?;
 
@@ -28,11 +27,13 @@ pub fn analyze(
   // publicly visible declarations
   let in_scope_declarations = tree_shake(&first_pass_declarations)?;
 
-  Ok((
-    first_pass_declarations,
+  Ok(DataContext {
     in_scope_files,
-    in_scope_declarations,
-  ))
+    nodes: todo!(),
+    declarations: todo!(),
+    references: todo!(),
+    function_properties: todo!(),
+  })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -176,7 +177,7 @@ fn first_pass(
     let is_file_in_scope = in_scope_files.contains(path);
 
     for ast in asts {
-      process_ast_nodes(
+      process_first_pass_ast_nodes(
         &ast.nodes(),
         ast.absolute_path(),
         is_file_in_scope,
@@ -190,7 +191,7 @@ fn first_pass(
   Ok(first_pass_declarations)
 }
 
-fn process_ast_nodes(
+fn process_first_pass_ast_nodes(
   nodes: &[&ASTNode],
   file_path: &str,
   is_file_in_scope: bool,
@@ -217,7 +218,7 @@ fn process_ast_nodes(
         );
 
         let child_nodes = node.nodes();
-        process_ast_nodes(
+        process_first_pass_ast_nodes(
           &child_nodes,
           file_path,
           is_file_in_scope,
@@ -281,7 +282,7 @@ fn process_ast_nodes(
 
         // Process function body nodes for local variables
         let child_nodes = node.nodes();
-        process_ast_nodes(
+        process_first_pass_ast_nodes(
           &child_nodes,
           file_path,
           is_file_in_scope,
@@ -331,7 +332,7 @@ fn process_ast_nodes(
 
         // Process modifier body nodes
         let child_nodes = node.nodes();
-        process_ast_nodes(
+        process_first_pass_ast_nodes(
           &child_nodes,
           file_path,
           is_file_in_scope,
@@ -401,7 +402,7 @@ fn process_ast_nodes(
 
         // Process struct members
         let member_nodes = node.nodes();
-        process_ast_nodes(
+        process_first_pass_ast_nodes(
           &member_nodes,
           file_path,
           is_file_in_scope,
@@ -422,7 +423,7 @@ fn process_ast_nodes(
 
         // Process enum members
         let member_nodes = node.nodes();
-        process_ast_nodes(
+        process_first_pass_ast_nodes(
           &member_nodes,
           file_path,
           is_file_in_scope,
@@ -445,7 +446,7 @@ fn process_ast_nodes(
       _ => {
         // For other node types, recursively process their child nodes
         let child_nodes = node.nodes();
-        process_ast_nodes(
+        process_first_pass_ast_nodes(
           &child_nodes,
           file_path,
           is_file_in_scope,
@@ -459,6 +460,10 @@ fn process_ast_nodes(
 
   Ok(())
 }
+
+fn second_pass() {}
+
+fn process_secont_pass() {}
 
 fn collect_references_and_statements(
   node: &ASTNode,
