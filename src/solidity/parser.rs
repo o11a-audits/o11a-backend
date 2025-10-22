@@ -1091,6 +1091,7 @@ pub enum ASTNode {
   Stub {
     node_id: i32,
     src_location: SourceLocation,
+    topic_id: String,
   },
 
   // Catch-all for unknown node types
@@ -1565,6 +1566,14 @@ impl ASTNode {
   }
 }
 
+fn node_to_stub(node: &ASTNode) -> ASTNode {
+  ASTNode::Stub {
+    node_id: node.node_id(),
+    src_location: node.src_location().clone(),
+    topic_id: super::collaborator::node_id_to_topic_id(node.node_id()),
+  }
+}
+
 pub fn children_to_stubs(node: ASTNode) -> ASTNode {
   match node {
     ASTNode::Assignment {
@@ -1577,14 +1586,8 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       node_id: node_id,
       src_location: src_location,
       operator: operator,
-      right_and_side: Box::new(ASTNode::Stub {
-        node_id: right_and_side.node_id(),
-        src_location: right_and_side.src_location().clone(),
-      }),
-      left_hand_side: Box::new(ASTNode::Stub {
-        node_id: left_hand_side.node_id(),
-        src_location: left_hand_side.src_location().clone(),
-      }),
+      right_and_side: Box::new(node_to_stub(&right_and_side)),
+      left_hand_side: Box::new(node_to_stub(&left_hand_side)),
     },
     ASTNode::BinaryOperation {
       node_id,
@@ -1596,15 +1599,9 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     } => ASTNode::BinaryOperation {
       node_id: node_id,
       src_location: src_location,
-      left_expression: Box::new(ASTNode::Stub {
-        node_id: left_expression.node_id(),
-        src_location: left_expression.src_location().clone(),
-      }),
+      left_expression: Box::new(node_to_stub(&left_expression)),
       operator: operator,
-      right_expression: Box::new(ASTNode::Stub {
-        node_id: right_expression.node_id(),
-        src_location: right_expression.src_location().clone(),
-      }),
+      right_expression: Box::new(node_to_stub(&right_expression)),
       type_descriptions: type_descriptions,
     },
     ASTNode::Conditional {
@@ -1616,19 +1613,10 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     } => ASTNode::Conditional {
       node_id: node_id,
       src_location: src_location,
-      condition: Box::new(ASTNode::Stub {
-        node_id: condition.node_id(),
-        src_location: condition.src_location().clone(),
-      }),
-      true_expression: Box::new(ASTNode::Stub {
-        node_id: true_expression.node_id(),
-        src_location: true_expression.src_location().clone(),
-      }),
+      condition: Box::new(node_to_stub(&condition)),
+      true_expression: Box::new(node_to_stub(&true_expression)),
       false_expression: match false_expression {
-        Some(expr) => Some(Box::new(ASTNode::Stub {
-          node_id: expr.node_id(),
-          src_location: expr.src_location().clone(),
-        })),
+        Some(expr) => Some(Box::new(node_to_stub(&expr))),
         None => None,
       },
     },
@@ -1641,10 +1629,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       node_id: node_id,
       src_location: src_location,
       type_descriptions: type_descriptions,
-      type_name: Box::new(ASTNode::Stub {
-        node_id: type_name.node_id(),
-        src_location: type_name.src_location().clone(),
-      }),
+      type_name: Box::new(node_to_stub(&type_name)),
     },
     ASTNode::FunctionCall {
       node_id,
@@ -1659,17 +1644,8 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     } => ASTNode::FunctionCall {
       node_id: node_id,
       src_location: src_location,
-      arguments: arguments
-        .iter()
-        .map(|n| ASTNode::Stub {
-          node_id: n.node_id(),
-          src_location: n.src_location().clone(),
-        })
-        .collect(),
-      expression: Box::new(ASTNode::Stub {
-        node_id: expression.node_id(),
-        src_location: expression.src_location().clone(),
-      }),
+      arguments: arguments.iter().map(|n| node_to_stub(n)).collect(),
+      expression: Box::new(node_to_stub(&expression)),
       kind: kind,
       name_locations: name_locations,
       names: names,
@@ -1684,17 +1660,8 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     } => ASTNode::FunctionCallOptions {
       node_id: node_id,
       src_location: src_location,
-      expression: Box::new(ASTNode::Stub {
-        node_id: expression.node_id(),
-        src_location: expression.src_location().clone(),
-      }),
-      options: options
-        .iter()
-        .map(|n| ASTNode::Stub {
-          node_id: n.node_id(),
-          src_location: n.src_location().clone(),
-        })
-        .collect(),
+      expression: Box::new(node_to_stub(&expression)),
+      options: options.iter().map(|n| node_to_stub(n)).collect(),
     },
     ASTNode::Identifier {
       node_id,
@@ -1732,15 +1699,9 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     } => ASTNode::IndexAccess {
       node_id: node_id,
       src_location: src_location,
-      base_expression: Box::new(ASTNode::Stub {
-        node_id: base_expression.node_id(),
-        src_location: base_expression.src_location().clone(),
-      }),
+      base_expression: Box::new(node_to_stub(&base_expression)),
       index_expression: match index_expression {
-        Some(expr) => Some(Box::new(ASTNode::Stub {
-          node_id: expr.node_id(),
-          src_location: expr.src_location().clone(),
-        })),
+        Some(expr) => Some(Box::new(node_to_stub(&expr))),
         None => None,
       },
     },
@@ -1752,18 +1713,9 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     } => ASTNode::IndexRangeAccess {
       node_id: node_id,
       src_location: src_location,
-      nodes: nodes
-        .iter()
-        .map(|n| ASTNode::Stub {
-          node_id: n.node_id(),
-          src_location: n.src_location().clone(),
-        })
-        .collect(),
+      nodes: nodes.iter().map(|n| node_to_stub(n)).collect(),
       body: match body {
-        Some(b) => Some(Box::new(ASTNode::Stub {
-          node_id: b.node_id(),
-          src_location: b.src_location().clone(),
-        })),
+        Some(b) => Some(Box::new(node_to_stub(&b))),
         None => None,
       },
     },
@@ -1791,10 +1743,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     } => ASTNode::MemberAccess {
       node_id: node_id,
       src_location: src_location,
-      expression: Box::new(ASTNode::Stub {
-        node_id: expression.node_id(),
-        src_location: expression.src_location().clone(),
-      }),
+      expression: Box::new(node_to_stub(&expression)),
       member_location: member_location,
       member_name: member_name,
     },
@@ -1805,10 +1754,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     } => ASTNode::NewExpression {
       node_id: node_id,
       src_location: src_location,
-      type_name: Box::new(ASTNode::Stub {
-        node_id: type_name.node_id(),
-        src_location: type_name.src_location().clone(),
-      }),
+      type_name: Box::new(node_to_stub(&type_name)),
     },
     ASTNode::TupleExpression {
       node_id,
@@ -1817,13 +1763,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     } => ASTNode::TupleExpression {
       node_id: node_id,
       src_location: src_location,
-      components: components
-        .iter()
-        .map(|n| ASTNode::Stub {
-          node_id: n.node_id(),
-          src_location: n.src_location().clone(),
-        })
-        .collect(),
+      components: components.iter().map(|n| node_to_stub(n)).collect(),
     },
     ASTNode::UnaryOperation {
       node_id,
@@ -1836,10 +1776,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       src_location: src_location,
       prefix: prefix,
       operator: operator,
-      sub_expression: Box::new(ASTNode::Stub {
-        node_id: sub_expression.node_id(),
-        src_location: sub_expression.src_location().clone(),
-      }),
+      sub_expression: Box::new(node_to_stub(&sub_expression)),
     },
     ASTNode::EnumValue {
       node_id,
@@ -1859,13 +1796,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     } => ASTNode::Block {
       node_id: node_id,
       src_location: src_location,
-      statements: statements
-        .iter()
-        .map(|n| ASTNode::Stub {
-          node_id: n.node_id(),
-          src_location: n.src_location().clone(),
-        })
-        .collect(),
+      statements: statements.iter().map(|n| node_to_stub(n)).collect(),
     },
     ASTNode::SemanticBlock {
       node_id,
@@ -1876,13 +1807,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       node_id: node_id,
       src_location: src_location,
       documentation: documentation,
-      statements: statements
-        .iter()
-        .map(|n| ASTNode::Stub {
-          node_id: n.node_id(),
-          src_location: n.src_location().clone(),
-        })
-        .collect(),
+      statements: statements.iter().map(|n| node_to_stub(n)).collect(),
     },
     ASTNode::Break {
       node_id,
@@ -1906,18 +1831,9 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     } => ASTNode::DoWhileStatement {
       node_id: node_id,
       src_location: src_location,
-      nodes: nodes
-        .iter()
-        .map(|n| ASTNode::Stub {
-          node_id: n.node_id(),
-          src_location: n.src_location().clone(),
-        })
-        .collect(),
+      nodes: nodes.iter().map(|n| node_to_stub(n)).collect(),
       body: match body {
-        Some(b) => Some(Box::new(ASTNode::Stub {
-          node_id: b.node_id(),
-          src_location: b.src_location().clone(),
-        })),
+        Some(b) => Some(Box::new(node_to_stub(&b))),
         None => None,
       },
     },
@@ -1928,10 +1844,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     } => ASTNode::EmitStatement {
       node_id: node_id,
       src_location: src_location,
-      event_call: Box::new(ASTNode::Stub {
-        node_id: event_call.node_id(),
-        src_location: event_call.src_location().clone(),
-      }),
+      event_call: Box::new(node_to_stub(&event_call)),
     },
     ASTNode::ExpressionStatement {
       node_id,
@@ -1940,10 +1853,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     } => ASTNode::ExpressionStatement {
       node_id: node_id,
       src_location: src_location,
-      expression: Box::new(ASTNode::Stub {
-        node_id: expression.node_id(),
-        src_location: expression.src_location().clone(),
-      }),
+      expression: Box::new(node_to_stub(&expression)),
     },
     ASTNode::ForStatement {
       node_id,
@@ -1956,30 +1866,18 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     } => ASTNode::ForStatement {
       node_id: node_id,
       src_location: src_location,
-      body: Box::new(ASTNode::Stub {
-        node_id: body.node_id(),
-        src_location: body.src_location().clone(),
-      }),
+      body: Box::new(node_to_stub(&body)),
       condition: match condition {
-        Some(c) => Some(Box::new(ASTNode::Stub {
-          node_id: c.node_id(),
-          src_location: c.src_location().clone(),
-        })),
+        Some(c) => Some(Box::new(node_to_stub(&c))),
         None => None,
       },
       initialization_expression: match initialization_expression {
-        Some(ie) => Some(Box::new(ASTNode::Stub {
-          node_id: ie.node_id(),
-          src_location: ie.src_location().clone(),
-        })),
+        Some(ie) => Some(Box::new(node_to_stub(&ie))),
         None => None,
       },
       is_simple_counter_loop: is_simple_counter_loop,
       loop_expression: match loop_expression {
-        Some(le) => Some(Box::new(ASTNode::Stub {
-          node_id: le.node_id(),
-          src_location: le.src_location().clone(),
-        })),
+        Some(le) => Some(Box::new(node_to_stub(&le))),
         None => None,
       },
     },
@@ -1992,19 +1890,10 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     } => ASTNode::IfStatement {
       node_id: node_id,
       src_location: src_location,
-      condition: Box::new(ASTNode::Stub {
-        node_id: condition.node_id(),
-        src_location: condition.src_location().clone(),
-      }),
-      true_body: Box::new(ASTNode::Stub {
-        node_id: true_body.node_id(),
-        src_location: true_body.src_location().clone(),
-      }),
+      condition: Box::new(node_to_stub(&condition)),
+      true_body: Box::new(node_to_stub(&true_body)),
       false_body: match false_body {
-        Some(fb) => Some(Box::new(ASTNode::Stub {
-          node_id: fb.node_id(),
-          src_location: fb.src_location().clone(),
-        })),
+        Some(fb) => Some(Box::new(node_to_stub(&fb))),
         None => None,
       },
     },
@@ -2031,10 +1920,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       node_id: node_id,
       src_location: src_location,
       expression: match expression {
-        Some(e) => Some(Box::new(ASTNode::Stub {
-          node_id: e.node_id(),
-          src_location: e.src_location().clone(),
-        })),
+        Some(e) => Some(Box::new(node_to_stub(&e))),
         None => None,
       },
       function_return_parameters: function_return_parameters,
@@ -2046,10 +1932,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     } => ASTNode::RevertStatement {
       node_id: node_id,
       src_location: src_location,
-      error_call: Box::new(ASTNode::Stub {
-        node_id: error_call.node_id(),
-        src_location: error_call.src_location().clone(),
-      }),
+      error_call: Box::new(node_to_stub(&error_call)),
     },
     ASTNode::TryStatement {
       node_id,
@@ -2059,17 +1942,8 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     } => ASTNode::TryStatement {
       node_id: node_id,
       src_location: src_location,
-      clauses: clauses
-        .iter()
-        .map(|n| ASTNode::Stub {
-          node_id: n.node_id(),
-          src_location: n.src_location().clone(),
-        })
-        .collect(),
-      external_call: Box::new(ASTNode::Stub {
-        node_id: external_call.node_id(),
-        src_location: external_call.src_location().clone(),
-      }),
+      clauses: clauses.iter().map(|n| node_to_stub(n)).collect(),
+      external_call: Box::new(node_to_stub(&external_call)),
     },
     ASTNode::UncheckedBlock {
       node_id,
@@ -2078,13 +1952,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     } => ASTNode::UncheckedBlock {
       node_id: node_id,
       src_location: src_location,
-      statements: statements
-        .iter()
-        .map(|n| ASTNode::Stub {
-          node_id: n.node_id(),
-          src_location: n.src_location().clone(),
-        })
-        .collect(),
+      statements: statements.iter().map(|n| node_to_stub(n)).collect(),
     },
     ASTNode::VariableDeclarationStatement {
       node_id,
@@ -2094,18 +1962,9 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     } => ASTNode::VariableDeclarationStatement {
       node_id: node_id,
       src_location: src_location,
-      declarations: declarations
-        .iter()
-        .map(|n| ASTNode::Stub {
-          node_id: n.node_id(),
-          src_location: n.src_location().clone(),
-        })
-        .collect(),
+      declarations: declarations.iter().map(|n| node_to_stub(n)).collect(),
       initial_value: match initial_value {
-        Some(iv) => Some(Box::new(ASTNode::Stub {
-          node_id: iv.node_id(),
-          src_location: iv.src_location().clone(),
-        })),
+        Some(iv) => Some(Box::new(node_to_stub(&iv))),
         None => None,
       },
     },
@@ -2134,15 +1993,9 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       scope: scope,
       state_variable: state_variable,
       storage_location: storage_location,
-      type_name: Box::new(ASTNode::Stub {
-        node_id: type_name.node_id(),
-        src_location: type_name.src_location().clone(),
-      }),
+      type_name: Box::new(node_to_stub(&type_name)),
       value: match value {
-        Some(v) => Some(Box::new(ASTNode::Stub {
-          node_id: v.node_id(),
-          src_location: v.src_location().clone(),
-        })),
+        Some(v) => Some(Box::new(node_to_stub(&v))),
         None => None,
       },
       visibility: visibility,
@@ -2155,15 +2008,9 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     } => ASTNode::WhileStatement {
       node_id: node_id,
       src_location: src_location,
-      condition: Box::new(ASTNode::Stub {
-        node_id: condition.node_id(),
-        src_location: condition.src_location().clone(),
-      }),
+      condition: Box::new(node_to_stub(&condition)),
       body: match body {
-        Some(b) => Some(Box::new(ASTNode::Stub {
-          node_id: b.node_id(),
-          src_location: b.src_location().clone(),
-        })),
+        Some(b) => Some(Box::new(node_to_stub(&b))),
         None => None,
       },
     },
@@ -2179,21 +2026,9 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     } => ASTNode::ContractDefinition {
       node_id: node_id,
       src_location: src_location,
-      nodes: nodes
-        .iter()
-        .map(|n| ASTNode::Stub {
-          node_id: n.node_id(),
-          src_location: n.src_location().clone(),
-        })
-        .collect(),
+      nodes: nodes.iter().map(|n| node_to_stub(n)).collect(),
       abstract_: abstract_,
-      base_contracts: base_contracts
-        .iter()
-        .map(|n| ASTNode::Stub {
-          node_id: n.node_id(),
-          src_location: n.src_location().clone(),
-        })
-        .collect(),
+      base_contracts: base_contracts.iter().map(|n| node_to_stub(n)).collect(),
       name: name,
       name_location: name_location,
       contract_kind: contract_kind,
@@ -2218,38 +2053,20 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       node_id: node_id,
       src_location: src_location,
       body: match body {
-        Some(b) => Some(Box::new(ASTNode::Stub {
-          node_id: b.node_id(),
-          src_location: b.src_location().clone(),
-        })),
+        Some(b) => Some(Box::new(node_to_stub(&b))),
         None => None,
       },
       documentation: match documentation {
-        Some(d) => Some(Box::new(ASTNode::Stub {
-          node_id: d.node_id(),
-          src_location: d.src_location().clone(),
-        })),
+        Some(d) => Some(Box::new(node_to_stub(&d))),
         None => None,
       },
       implemented: implemented,
       kind: kind,
-      modifiers: modifiers
-        .iter()
-        .map(|n| ASTNode::Stub {
-          node_id: n.node_id(),
-          src_location: n.src_location().clone(),
-        })
-        .collect(),
+      modifiers: modifiers.iter().map(|n| node_to_stub(n)).collect(),
       name: name,
       name_location: name_location,
-      parameters: Box::new(ASTNode::Stub {
-        node_id: parameters.node_id(),
-        src_location: parameters.src_location().clone(),
-      }),
-      return_parameters: Box::new(ASTNode::Stub {
-        node_id: return_parameters.node_id(),
-        src_location: return_parameters.src_location().clone(),
-      }),
+      parameters: Box::new(node_to_stub(&parameters)),
+      return_parameters: Box::new(node_to_stub(&return_parameters)),
       scope: scope,
       state_mutability: state_mutability,
       virtual_: virtual_,
@@ -2266,10 +2083,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       src_location: src_location,
       name: name,
       name_location: name_location,
-      parameters: Box::new(ASTNode::Stub {
-        node_id: parameters.node_id(),
-        src_location: parameters.src_location().clone(),
-      }),
+      parameters: Box::new(node_to_stub(&parameters)),
     },
     ASTNode::ErrorDefinition {
       node_id,
@@ -2282,10 +2096,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       src_location: src_location,
       name: name,
       name_location: name_location,
-      parameters: Box::new(ASTNode::Stub {
-        node_id: parameters.node_id(),
-        src_location: parameters.src_location().clone(),
-      }),
+      parameters: Box::new(node_to_stub(&parameters)),
     },
     ASTNode::ModifierDefinition {
       node_id,
@@ -2300,23 +2111,14 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     } => ASTNode::ModifierDefinition {
       node_id: node_id,
       src_location: src_location,
-      body: Box::new(ASTNode::Stub {
-        node_id: body.node_id(),
-        src_location: body.src_location().clone(),
-      }),
+      body: Box::new(node_to_stub(&body)),
       documentation: match documentation {
-        Some(d) => Some(Box::new(ASTNode::Stub {
-          node_id: d.node_id(),
-          src_location: d.src_location().clone(),
-        })),
+        Some(d) => Some(Box::new(node_to_stub(&d))),
         None => None,
       },
       name: name,
       name_location: name_location,
-      parameters: Box::new(ASTNode::Stub {
-        node_id: parameters.node_id(),
-        src_location: parameters.src_location().clone(),
-      }),
+      parameters: Box::new(node_to_stub(&parameters)),
       virtual_: virtual_,
       visibility: visibility,
     },
@@ -2331,13 +2133,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     } => ASTNode::StructDefinition {
       node_id: node_id,
       src_location: src_location,
-      members: members
-        .iter()
-        .map(|n| ASTNode::Stub {
-          node_id: n.node_id(),
-          src_location: n.src_location().clone(),
-        })
-        .collect(),
+      members: members.iter().map(|n| node_to_stub(n)).collect(),
       canonical_name: canonical_name,
       name: name,
       name_location: name_location,
@@ -2353,13 +2149,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     } => ASTNode::EnumDefinition {
       node_id: node_id,
       src_location: src_location,
-      members: members
-        .iter()
-        .map(|n| ASTNode::Stub {
-          node_id: n.node_id(),
-          src_location: n.src_location().clone(),
-        })
-        .collect(),
+      members: members.iter().map(|n| node_to_stub(n)).collect(),
       canonical_name: canonical_name,
       name: name,
       name_location: name_location,
@@ -2372,18 +2162,9 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     } => ASTNode::UserDefinedValueTypeDefinition {
       node_id: node_id,
       src_location: src_location,
-      nodes: nodes
-        .iter()
-        .map(|n| ASTNode::Stub {
-          node_id: n.node_id(),
-          src_location: n.src_location().clone(),
-        })
-        .collect(),
+      nodes: nodes.iter().map(|n| node_to_stub(n)).collect(),
       body: match body {
-        Some(b) => Some(Box::new(ASTNode::Stub {
-          node_id: b.node_id(),
-          src_location: b.src_location().clone(),
-        })),
+        Some(b) => Some(Box::new(node_to_stub(&b))),
         None => None,
       },
     },
@@ -2420,17 +2201,11 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       src_location: src_location,
       global: global,
       library_name: match library_name {
-        Some(ln) => Some(Box::new(ASTNode::Stub {
-          node_id: ln.node_id(),
-          src_location: ln.src_location().clone(),
-        })),
+        Some(ln) => Some(Box::new(node_to_stub(&ln))),
         None => None,
       },
       type_name: match type_name {
-        Some(tn) => Some(Box::new(ASTNode::Stub {
-          node_id: tn.node_id(),
-          src_location: tn.src_location().clone(),
-        })),
+        Some(tn) => Some(Box::new(node_to_stub(&tn))),
         None => None,
       },
     },
@@ -2441,13 +2216,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     } => ASTNode::SourceUnit {
       node_id: node_id,
       src_location: src_location,
-      nodes: nodes
-        .iter()
-        .map(|n| ASTNode::Stub {
-          node_id: n.node_id(),
-          src_location: n.src_location().clone(),
-        })
-        .collect(),
+      nodes: nodes.iter().map(|n| node_to_stub(n)).collect(),
     },
     ASTNode::InheritanceSpecifier {
       node_id,
@@ -2456,10 +2225,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     } => ASTNode::InheritanceSpecifier {
       node_id: node_id,
       src_location: src_location,
-      base_name: Box::new(ASTNode::Stub {
-        node_id: base_name.node_id(),
-        src_location: base_name.src_location().clone(),
-      }),
+      base_name: Box::new(node_to_stub(&base_name)),
     },
     ASTNode::ElementaryTypeName {
       node_id,
@@ -2480,14 +2246,8 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     } => ASTNode::FunctionTypeName {
       node_id: node_id,
       src_location: src_location,
-      parameter_types: Box::new(ASTNode::Stub {
-        node_id: parameter_types.node_id(),
-        src_location: parameter_types.src_location().clone(),
-      }),
-      return_parameter_types: Box::new(ASTNode::Stub {
-        node_id: return_parameter_types.node_id(),
-        src_location: return_parameter_types.src_location().clone(),
-      }),
+      parameter_types: Box::new(node_to_stub(&parameter_types)),
+      return_parameter_types: Box::new(node_to_stub(&return_parameter_types)),
       state_mutability: state_mutability,
       visibility: visibility,
     },
@@ -2498,13 +2258,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     } => ASTNode::ParameterList {
       node_id: node_id,
       src_location: src_location,
-      parameters: parameters
-        .iter()
-        .map(|n| ASTNode::Stub {
-          node_id: n.node_id(),
-          src_location: n.src_location().clone(),
-        })
-        .collect(),
+      parameters: parameters.iter().map(|n| node_to_stub(n)).collect(),
     },
     ASTNode::TryCatchClause {
       node_id,
@@ -2516,15 +2270,9 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       node_id: node_id,
       src_location: src_location,
       error_name: error_name,
-      block: Box::new(ASTNode::Stub {
-        node_id: block.node_id(),
-        src_location: block.src_location().clone(),
-      }),
+      block: Box::new(node_to_stub(&block)),
       parameters: match parameters {
-        Some(p) => Some(Box::new(ASTNode::Stub {
-          node_id: p.node_id(),
-          src_location: p.src_location().clone(),
-        })),
+        Some(p) => Some(Box::new(node_to_stub(&p))),
         None => None,
       },
     },
@@ -2536,20 +2284,9 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     } => ASTNode::ModifierInvocation {
       node_id: node_id,
       src_location: src_location,
-      modifier_name: Box::new(ASTNode::Stub {
-        node_id: modifier_name.node_id(),
-        src_location: modifier_name.src_location().clone(),
-      }),
+      modifier_name: Box::new(node_to_stub(&modifier_name)),
       arguments: match arguments {
-        Some(args) => Some(
-          args
-            .iter()
-            .map(|n| ASTNode::Stub {
-              node_id: n.node_id(),
-              src_location: n.src_location().clone(),
-            })
-            .collect(),
-        ),
+        Some(args) => Some(args.iter().map(|n| node_to_stub(n)).collect()),
         None => None,
       },
     },
@@ -2561,10 +2298,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     } => ASTNode::UserDefinedTypeName {
       node_id: node_id,
       src_location: src_location,
-      path_node: Box::new(ASTNode::Stub {
-        node_id: path_node.node_id(),
-        src_location: path_node.src_location().clone(),
-      }),
+      path_node: Box::new(node_to_stub(&path_node)),
       referenced_declaration: referenced_declaration,
     },
     ASTNode::ArrayTypeName {
@@ -2574,10 +2308,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     } => ASTNode::ArrayTypeName {
       node_id: node_id,
       src_location: src_location,
-      base_type: Box::new(ASTNode::Stub {
-        node_id: base_type.node_id(),
-        src_location: base_type.src_location().clone(),
-      }),
+      base_type: Box::new(node_to_stub(&base_type)),
     },
     ASTNode::Mapping {
       node_id,
@@ -2593,16 +2324,10 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       src_location: src_location,
       key_name: key_name,
       key_name_location: key_name_location,
-      key_type: Box::new(ASTNode::Stub {
-        node_id: key_type.node_id(),
-        src_location: key_type.src_location().clone(),
-      }),
+      key_type: Box::new(node_to_stub(&key_type)),
       value_name: value_name,
       value_name_location: value_name_location,
-      value_type: Box::new(ASTNode::Stub {
-        node_id: value_type.node_id(),
-        src_location: value_type.src_location().clone(),
-      }),
+      value_type: Box::new(node_to_stub(&value_type)),
     },
     ASTNode::StructuredDocumentation {
       node_id,
@@ -2616,9 +2341,11 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     ASTNode::Stub {
       node_id,
       src_location,
+      topic_id,
     } => ASTNode::Stub {
       node_id: node_id,
       src_location: src_location,
+      topic_id: topic_id,
     },
     ASTNode::Other {
       node_id,
@@ -2629,18 +2356,9 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     } => ASTNode::Other {
       node_id: node_id,
       src_location: src_location,
-      nodes: nodes
-        .iter()
-        .map(|n| ASTNode::Stub {
-          node_id: n.node_id(),
-          src_location: n.src_location().clone(),
-        })
-        .collect(),
+      nodes: nodes.iter().map(|n| node_to_stub(n)).collect(),
       body: match body {
-        Some(b) => Some(Box::new(ASTNode::Stub {
-          node_id: b.node_id(),
-          src_location: b.src_location().clone(),
-        })),
+        Some(b) => Some(Box::new(node_to_stub(&b))),
         None => None,
       },
       node_type: node_type,
