@@ -210,8 +210,8 @@ fn first_pass(
 
     for ast in asts {
       process_first_pass_ast_nodes(
-        &ast.nodes(),
-        ast.absolute_path(),
+        &ast.nodes.iter().collect(),
+        &ast.absolute_path,
         is_file_in_scope,
         None,
         None,
@@ -224,7 +224,7 @@ fn first_pass(
 }
 
 fn process_first_pass_ast_nodes(
-  nodes: &[&ASTNode],
+  nodes: &Vec<&ASTNode>,
   file_path: &str,
   is_file_in_scope: bool,
   current_contract: Option<&str>,
@@ -518,10 +518,8 @@ fn second_pass(
   // Process each AST file
   for (file_path, asts) in ast_map {
     for ast in asts {
-      let ast_nodes = ast.nodes();
-
       process_second_pass_nodes(
-        &ast_nodes,
+        &ast.nodes.iter().collect(),
         file_path,
         None,  // No contract context initially
         None,  // No function context initially
@@ -541,7 +539,7 @@ fn second_pass(
 /// Recursively process nodes during the second pass
 /// If parent_in_scope is true, all nodes are assumed to be in scope
 fn process_second_pass_nodes(
-  ast_nodes: &[&ASTNode],
+  ast_nodes: &Vec<&ASTNode>,
   file_path: &str,
   current_contract: Option<&str>,
   current_function: Option<&str>,

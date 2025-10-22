@@ -142,28 +142,10 @@ pub fn ast_from_json_file(file_path: &str) -> Result<AST, String> {
 }
 
 pub struct AST {
-  node_id: i32,
-  nodes: Vec<ASTNode>,
-  absolute_path: String,
-  source_content: String,
-}
-
-impl AST {
-  pub fn nodes(&self) -> Vec<&ASTNode> {
-    self.nodes.iter().collect()
-  }
-
-  pub fn absolute_path(&self) -> &str {
-    &self.absolute_path
-  }
-
-  pub fn node_id(&self) -> i32 {
-    self.node_id
-  }
-
-  pub fn source_content(&self) -> &str {
-    &self.source_content
-  }
+  pub node_id: i32,
+  pub nodes: Vec<ASTNode>,
+  pub absolute_path: String,
+  pub source_content: String,
 }
 
 fn read_source_file(
@@ -313,12 +295,6 @@ pub enum LiteralKind {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TypeDescriptions {
-  pub type_identifier: String,
-  pub type_string: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct ArgumentType {
   pub type_identifier: String,
   pub type_string: String,
 }
