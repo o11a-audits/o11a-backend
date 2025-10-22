@@ -12,7 +12,7 @@ pub struct DataContext {
   pub nodes: BTreeMap<String, ASTNode>,
   pub declarations: BTreeMap<String, Declaration>,
   pub references: BTreeMap<String, Vec<String>>,
-  pub function_properties: BTreeMap<String, FunctionProperties>,
+  pub function_properties: BTreeMap<String, FunctionModProperties>,
 }
 
 pub fn analyze(project_root: &Path) -> Result<DataContext, String> {
@@ -44,8 +44,8 @@ pub fn analyze(project_root: &Path) -> Result<DataContext, String> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Scope {
   pub container: String,         // Source file path
-  pub component: Option<String>, // Contract name
-  pub member: Option<String>,    // Function name
+  pub component: Option<String>, // Contract topic ID
+  pub member: Option<String>,    // Function topic ID
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,6 +80,8 @@ pub enum FirstPassDeclaration {
   FunctionMod {
     is_publicly_in_scope: bool,
     declaration_kind: DeclarationKind,
+    name: String,
+    scope: Scope,
     referenced_nodes: Vec<i32>,
     require_revert_statements: Vec<i32>,
     function_calls: Vec<i32>,
@@ -88,6 +90,8 @@ pub enum FirstPassDeclaration {
   Flat {
     is_publicly_in_scope: bool,
     declaration_kind: DeclarationKind,
+    name: String,
+    scope: Scope,
   },
 }
 
@@ -95,6 +99,8 @@ pub enum InScopeDeclaration {
   // Functions and Modifiers
   FunctionMod {
     declaration_kind: DeclarationKind,
+    name: String,
+    scope: Scope,
     references: Vec<i32>,
     require_revert_statements: Vec<i32>,
     function_calls: Vec<i32>,
@@ -102,6 +108,8 @@ pub enum InScopeDeclaration {
   },
   Flat {
     declaration_kind: DeclarationKind,
+    name: String,
+    scope: Scope,
     references: Vec<i32>,
   },
 }
@@ -118,6 +126,31 @@ impl InScopeDeclaration {
     }
   }
 
+  pub fn declaration_kind(&self) -> &DeclarationKind {
+    match self {
+      InScopeDeclaration::FunctionMod {
+        declaration_kind, ..
+      }
+      | InScopeDeclaration::Flat {
+        declaration_kind, ..
+      } => declaration_kind,
+    }
+  }
+
+  pub fn name(&self) -> &String {
+    match self {
+      InScopeDeclaration::FunctionMod { name, .. }
+      | InScopeDeclaration::Flat { name, .. } => name,
+    }
+  }
+
+  pub fn scope(&self) -> &Scope {
+    match self {
+      InScopeDeclaration::FunctionMod { scope, .. }
+      | InScopeDeclaration::Flat { scope, .. } => scope,
+    }
+  }
+
   /// Get the references for any declaration variant
   pub fn references(&self) -> &[i32] {
     match self {
@@ -125,58 +158,43 @@ impl InScopeDeclaration {
       InScopeDeclaration::Flat { references, .. } => references,
     }
   }
-
-  /// Get the require/revert statements for FunctionMod, or empty slice for Flat
-  pub fn require_revert_statements(&self) -> &[i32] {
-    match self {
-      InScopeDeclaration::FunctionMod {
-        require_revert_statements,
-        ..
-      } => require_revert_statements,
-      InScopeDeclaration::Flat { .. } => &[],
-    }
-  }
-
-  /// Get the function calls for FunctionMod, or empty slice for Flat
-  pub fn function_calls(&self) -> &[i32] {
-    match self {
-      InScopeDeclaration::FunctionMod { function_calls, .. } => function_calls,
-      InScopeDeclaration::Flat { .. } => &[],
-    }
-  }
-
-  /// Get the variable mutations for FunctionMod, or empty slice for Flat
-  pub fn variable_mutations(&self) -> &[i32] {
-    match self {
-      InScopeDeclaration::FunctionMod {
-        variable_mutations, ..
-      } => variable_mutations,
-      InScopeDeclaration::Flat { .. } => &[],
-    }
-  }
 }
 
 #[derive(Debug, Clone)]
 pub struct Declaration {
-  pub topic_id: i32,
+  pub topic_id: String,
   pub declaration_kind: DeclarationKind,
   pub name: String,
   pub scope: Scope,
 }
 
-pub struct FunctionProperties {
-  // Topic IDs of the local declarations of the function parameters
-  pub parameters: Vec<String>,
-  // Topic IDs of the declarations of the function return values
-  pub returns: Vec<String>,
-  // Topic IDs of the declarations of the function revert nodes. This is either
-  // the error call for a revert statement, or the literal string node passed
-  // as the second argument to a require call
-  pub reverts: Vec<String>,
-  // Topic IDs of the declarations of the functions called
-  pub calls: Vec<String>,
-  // Topic IDs of the declarations of the state variables mutated
-  pub mutations: Vec<String>,
+pub enum FunctionModProperties {
+  FunctionProperties {
+    // Topic IDs of the local declarations of the function parameters
+    parameters: Vec<String>,
+    // Topic IDs of the declarations of the function return values
+    returns: Vec<String>,
+    // Topic IDs of the declarations of the function revert nodes. This is either
+    // the error call for a revert statement, or the literal string node passed
+    // as the second argument to a require call
+    reverts: Vec<String>,
+    // Topic IDs of the declarations of the functions called
+    calls: Vec<String>,
+    // Topic IDs of the declarations of the state variables mutated
+    mutations: Vec<String>,
+  },
+  ModifierProperties {
+    // Topic IDs of the local declarations of the modifier parameters
+    parameters: Vec<String>,
+    // Topic IDs of the declarations of the modifier revert nodes. This is either
+    // the error call for a revert statement, or the literal string node passed
+    // as the second argument to a require call
+    reverts: Vec<String>,
+    // Topic IDs of the declarations of the functions called
+    calls: Vec<String>,
+    // Topic IDs of the declarations of the state variables mutated
+    mutations: Vec<String>,
+  },
 }
 
 fn load_scope_file(project_root: &Path) -> Result<HashSet<String>, String> {
@@ -225,10 +243,10 @@ fn first_pass(
 
 fn process_first_pass_ast_nodes(
   nodes: &Vec<&ASTNode>,
-  file_path: &str,
+  file_path: &String,
   is_file_in_scope: bool,
-  current_contract: Option<&str>,
-  current_function: Option<&str>,
+  current_contract: Option<&String>,
+  current_function: Option<&String>,
   first_pass_declarations: &mut BTreeMap<i32, FirstPassDeclaration>,
 ) -> Result<(), String> {
   for node in nodes {
@@ -245,6 +263,12 @@ fn process_first_pass_ast_nodes(
           *node_id,
           FirstPassDeclaration::Flat {
             is_publicly_in_scope: is_file_in_scope, // All contracts are publicly visible
+            name: name.clone(),
+            scope: Scope {
+              container: file_path.clone(),
+              component: current_contract.map(|t| t.clone()),
+              member: current_function.map(|t| t.clone()),
+            },
             declaration_kind,
           },
         );
@@ -254,7 +278,7 @@ fn process_first_pass_ast_nodes(
           &child_nodes,
           file_path,
           is_file_in_scope,
-          Some(name),
+          Some(&collaborator::node_id_to_topic_id(*node_id)),
           current_function,
           first_pass_declarations,
         )?;
@@ -305,6 +329,12 @@ fn process_first_pass_ast_nodes(
           FirstPassDeclaration::FunctionMod {
             is_publicly_in_scope: is_publicly_visible,
             declaration_kind: DeclarationKind::Function(*kind),
+            name: name.clone(),
+            scope: Scope {
+              container: file_path.clone(),
+              component: current_contract.map(|t| t.clone()),
+              member: current_function.map(|t| t.clone()),
+            },
             referenced_nodes,
             require_revert_statements,
             function_calls,
@@ -316,10 +346,10 @@ fn process_first_pass_ast_nodes(
         let child_nodes = node.nodes();
         process_first_pass_ast_nodes(
           &child_nodes,
-          file_path,
+          &file_path,
           is_file_in_scope,
           current_contract,
-          Some(name),
+          Some(&collaborator::node_id_to_topic_id(*node_id)),
           first_pass_declarations,
         )?;
       }
@@ -327,6 +357,7 @@ fn process_first_pass_ast_nodes(
       ASTNode::ModifierDefinition {
         node_id,
         visibility,
+        name,
         ..
       } => {
         let mut referenced_nodes = Vec::new();
@@ -355,6 +386,12 @@ fn process_first_pass_ast_nodes(
           FirstPassDeclaration::FunctionMod {
             is_publicly_in_scope: is_publicly_visible,
             declaration_kind: DeclarationKind::Modifier,
+            name: name.clone(),
+            scope: Scope {
+              container: file_path.clone(),
+              component: current_contract.map(|t| t.clone()),
+              member: current_function.map(|t| t.clone()),
+            },
             referenced_nodes,
             require_revert_statements,
             function_calls,
@@ -369,7 +406,7 @@ fn process_first_pass_ast_nodes(
           file_path,
           is_file_in_scope,
           current_contract,
-          current_function,
+          Some(&collaborator::node_id_to_topic_id(*node_id)),
           first_pass_declarations,
         )?;
       }
@@ -379,6 +416,7 @@ fn process_first_pass_ast_nodes(
         visibility,
         state_variable,
         mutability,
+        name,
         ..
       } => {
         let is_publicly_visible = is_file_in_scope
@@ -399,36 +437,60 @@ fn process_first_pass_ast_nodes(
           FirstPassDeclaration::Flat {
             is_publicly_in_scope: is_publicly_visible,
             declaration_kind,
+            name: name.clone(),
+            scope: Scope {
+              container: file_path.clone(),
+              component: current_contract.map(|t| t.clone()),
+              member: current_function.map(|t| t.clone()),
+            },
           },
         );
       }
 
-      ASTNode::EventDefinition { node_id, .. } => {
+      ASTNode::EventDefinition { node_id, name, .. } => {
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::Flat {
             is_publicly_in_scope: false,
             declaration_kind: DeclarationKind::Event,
+            name: name.clone(),
+            scope: Scope {
+              container: file_path.clone(),
+              component: current_contract.map(|t| t.clone()),
+              member: current_function.map(|t| t.clone()),
+            },
           },
         );
       }
 
-      ASTNode::ErrorDefinition { node_id, .. } => {
+      ASTNode::ErrorDefinition { node_id, name, .. } => {
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::Flat {
             is_publicly_in_scope: false,
             declaration_kind: DeclarationKind::Error,
+            name: name.clone(),
+            scope: Scope {
+              container: file_path.clone(),
+              component: current_contract.map(|t| t.clone()),
+              member: current_function.map(|t| t.clone()),
+            },
           },
         );
       }
 
-      ASTNode::StructDefinition { node_id, .. } => {
+      ASTNode::StructDefinition { node_id, name, .. } => {
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::Flat {
             is_publicly_in_scope: false,
             declaration_kind: DeclarationKind::Struct,
+            name: name.clone(),
+            scope: Scope {
+              container: file_path.clone(),
+              component: current_contract.map(|t| t.clone()),
+              member: current_function.map(|t| t.clone()),
+            },
           },
         );
 
@@ -444,12 +506,18 @@ fn process_first_pass_ast_nodes(
         )?;
       }
 
-      ASTNode::EnumDefinition { node_id, .. } => {
+      ASTNode::EnumDefinition { node_id, name, .. } => {
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::Flat {
             is_publicly_in_scope: false, // Enums are not publicly visible
             declaration_kind: DeclarationKind::Enum,
+            name: name.clone(),
+            scope: Scope {
+              container: file_path.clone(),
+              component: current_contract.map(|t| t.clone()),
+              member: current_function.map(|t| t.clone()),
+            },
           },
         );
 
@@ -465,12 +533,18 @@ fn process_first_pass_ast_nodes(
         )?;
       }
 
-      ASTNode::EnumValue { node_id, .. } => {
+      ASTNode::EnumValue { node_id, name, .. } => {
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::Flat {
             is_publicly_in_scope: false, // Enum members are not publicly visible
             declaration_kind: DeclarationKind::EnumMember,
+            name: name.clone(),
+            scope: Scope {
+              container: file_path.clone(),
+              component: current_contract.map(|t| t.clone()),
+              member: current_function.map(|t| t.clone()),
+            },
           },
         );
       }
@@ -505,14 +579,14 @@ fn second_pass(
     BTreeMap<String, ASTNode>,
     BTreeMap<String, Declaration>,
     BTreeMap<String, Vec<String>>,
-    BTreeMap<String, FunctionProperties>,
+    BTreeMap<String, FunctionModProperties>,
   ),
   String,
 > {
   let mut nodes: BTreeMap<String, ASTNode> = BTreeMap::new();
   let mut declarations: BTreeMap<String, Declaration> = BTreeMap::new();
   let mut references: BTreeMap<String, Vec<String>> = BTreeMap::new();
-  let mut function_properties: BTreeMap<String, FunctionProperties> =
+  let mut function_properties: BTreeMap<String, FunctionModProperties> =
     BTreeMap::new();
 
   // Process each AST file
@@ -548,7 +622,7 @@ fn process_second_pass_nodes(
   nodes: &mut BTreeMap<String, ASTNode>,
   declarations: &mut BTreeMap<String, Declaration>,
   references: &mut BTreeMap<String, Vec<String>>,
-  function_properties: &mut BTreeMap<String, FunctionProperties>,
+  function_properties: &mut BTreeMap<String, FunctionModProperties>,
 ) -> Result<(), String> {
   for node in ast_nodes {
     let node_id = node.node_id();
@@ -566,316 +640,86 @@ fn process_second_pass_nodes(
 
     // Process declarations only if they exist in in_scope_declarations
     if let Some(in_scope_decl) = in_scope_decl {
-      // Process based on node type
-      match node {
-        ASTNode::ContractDefinition {
-          name,
-          contract_kind,
+      // Add declaration
+      declarations.insert(
+        topic_id.clone(),
+        Declaration {
+          topic_id: collaborator::node_id_to_topic_id(node_id),
+          declaration_kind: in_scope_decl.declaration_kind().clone(),
+          name: in_scope_decl.name().clone(),
+          scope: in_scope_decl.scope().clone(),
+        },
+      );
+
+      // Store references to this declaration
+      let ref_topic_ids: Vec<String> = in_scope_decl
+        .references()
+        .iter()
+        .map(|&id| collaborator::node_id_to_topic_id(id))
+        .collect();
+      references.insert(topic_id.clone(), ref_topic_ids);
+
+      match in_scope_decl {
+        InScopeDeclaration::FunctionMod {
+          require_revert_statements,
+          function_calls,
+          variable_mutations,
           ..
         } => {
-          // Add declaration
-          declarations.insert(
-            topic_id.clone(),
-            Declaration {
-              topic_id: node_id,
-              declaration_kind: DeclarationKind::Contract(*contract_kind),
-              name: name.clone(),
-              scope: Scope {
-                container: file_path.to_string(),
-                component: None,
-                member: None,
-              },
-            },
-          );
-
-          // Store references to this declaration
-          let ref_topic_ids: Vec<String> = in_scope_decl
-            .references()
+          let revert_topic_ids: Vec<String> = require_revert_statements
             .iter()
             .map(|&id| collaborator::node_id_to_topic_id(id))
             .collect();
-          references.insert(topic_id.clone(), ref_topic_ids);
-        }
-
-        ASTNode::FunctionDefinition {
-          name,
-          kind,
-          parameters,
-          return_parameters,
-          ..
-        } => {
-          // Add declaration
-          declarations.insert(
-            topic_id.clone(),
-            Declaration {
-              topic_id: node_id,
-              declaration_kind: DeclarationKind::Function(*kind),
-              name: name.clone(),
-              scope: Scope {
-                container: file_path.to_string(),
-                component: current_contract.map(|s| s.to_string()),
-                member: None,
-              },
-            },
-          );
-
-          // Store references to this declaration
-          let ref_topic_ids: Vec<String> = in_scope_decl
-            .references()
+          let call_topic_ids: Vec<String> = function_calls
             .iter()
             .map(|&id| collaborator::node_id_to_topic_id(id))
             .collect();
-          references.insert(topic_id.clone(), ref_topic_ids);
-
-          // Extract function properties
-          let param_topic_ids = extract_parameter_topic_ids(parameters);
-          let return_topic_ids = extract_parameter_topic_ids(return_parameters);
-          let revert_topic_ids: Vec<String> = in_scope_decl
-            .require_revert_statements()
-            .iter()
-            .map(|&id| collaborator::node_id_to_topic_id(id))
-            .collect();
-          let call_topic_ids: Vec<String> = in_scope_decl
-            .function_calls()
-            .iter()
-            .map(|&id| collaborator::node_id_to_topic_id(id))
-            .collect();
-          let mutation_topic_ids: Vec<String> = in_scope_decl
-            .variable_mutations()
+          let mutation_topic_ids: Vec<String> = variable_mutations
             .iter()
             .map(|&id| collaborator::node_id_to_topic_id(id))
             .collect();
 
-          function_properties.insert(
-            topic_id.clone(),
-            FunctionProperties {
-              parameters: param_topic_ids,
-              returns: return_topic_ids,
-              reverts: revert_topic_ids,
-              calls: call_topic_ids,
-              mutations: mutation_topic_ids,
-            },
-          );
-        }
+          match node {
+            ASTNode::FunctionDefinition {
+              parameters,
+              return_parameters,
+              ..
+            } => {
+              // Extract function properties
+              let param_topic_ids = extract_parameter_topic_ids(parameters);
+              let return_topic_ids =
+                extract_parameter_topic_ids(return_parameters);
 
-        ASTNode::ModifierDefinition {
-          name, parameters, ..
-        } => {
-          // Add declaration
-          declarations.insert(
-            topic_id.clone(),
-            Declaration {
-              topic_id: node_id,
-              declaration_kind: DeclarationKind::Modifier,
-              name: name.clone(),
-              scope: Scope {
-                container: file_path.to_string(),
-                component: current_contract.map(|s| s.to_string()),
-                member: None,
-              },
-            },
-          );
-
-          // Store references to this declaration
-          let ref_topic_ids: Vec<String> = in_scope_decl
-            .references()
-            .iter()
-            .map(|&id| collaborator::node_id_to_topic_id(id))
-            .collect();
-          references.insert(topic_id.clone(), ref_topic_ids);
-
-          // Extract modifier properties
-          let param_topic_ids = extract_parameter_topic_ids(parameters);
-          let revert_topic_ids: Vec<String> = in_scope_decl
-            .require_revert_statements()
-            .iter()
-            .map(|&id| collaborator::node_id_to_topic_id(id))
-            .collect();
-          let call_topic_ids: Vec<String> = in_scope_decl
-            .function_calls()
-            .iter()
-            .map(|&id| collaborator::node_id_to_topic_id(id))
-            .collect();
-          let mutation_topic_ids: Vec<String> = in_scope_decl
-            .variable_mutations()
-            .iter()
-            .map(|&id| collaborator::node_id_to_topic_id(id))
-            .collect();
-
-          function_properties.insert(
-            topic_id.clone(),
-            FunctionProperties {
-              parameters: param_topic_ids,
-              returns: Vec::new(), // Modifiers don't have return values
-              reverts: revert_topic_ids,
-              calls: call_topic_ids,
-              mutations: mutation_topic_ids,
-            },
-          );
-        }
-
-        ASTNode::VariableDeclaration {
-          name,
-          state_variable,
-          mutability,
-          ..
-        } => {
-          let declaration_kind = if *state_variable {
-            if matches!(mutability, parser::VariableMutability::Constant) {
-              DeclarationKind::Constant
-            } else {
-              DeclarationKind::StateVariable
+              function_properties.insert(
+                topic_id.clone(),
+                FunctionModProperties::FunctionProperties {
+                  parameters: param_topic_ids,
+                  returns: return_topic_ids,
+                  reverts: revert_topic_ids,
+                  calls: call_topic_ids,
+                  mutations: mutation_topic_ids,
+                },
+              );
             }
-          } else {
-            DeclarationKind::LocalVariable
-          };
+            ASTNode::ModifierDefinition { parameters, .. } => {
+              // Extract modifier properties
+              let param_topic_ids = extract_parameter_topic_ids(parameters);
 
-          declarations.insert(
-            topic_id.clone(),
-            Declaration {
-              topic_id: node_id,
-              declaration_kind,
-              name: name.clone(),
-              scope: Scope {
-                container: file_path.to_string(),
-                component: current_contract.map(|s| s.to_string()),
-                member: current_function.map(|s| s.to_string()),
-              },
-            },
-          );
+              function_properties.insert(
+                topic_id.clone(),
+                FunctionModProperties::ModifierProperties {
+                  parameters: param_topic_ids,
+                  reverts: revert_topic_ids,
+                  calls: call_topic_ids,
+                  mutations: mutation_topic_ids,
+                },
+              );
+            }
 
-          // Store references to this declaration
-          let ref_topic_ids: Vec<String> = in_scope_decl
-            .references()
-            .iter()
-            .map(|&id| collaborator::node_id_to_topic_id(id))
-            .collect();
-          references.insert(topic_id.clone(), ref_topic_ids);
+            _ => (),
+          }
         }
-
-        ASTNode::EventDefinition { name, .. } => {
-          declarations.insert(
-            topic_id.clone(),
-            Declaration {
-              topic_id: node_id,
-              declaration_kind: DeclarationKind::Event,
-              name: name.clone(),
-              scope: Scope {
-                container: file_path.to_string(),
-                component: current_contract.map(|s| s.to_string()),
-                member: None,
-              },
-            },
-          );
-
-          // Store references to this declaration
-          let ref_topic_ids: Vec<String> = in_scope_decl
-            .references()
-            .iter()
-            .map(|&id| collaborator::node_id_to_topic_id(id))
-            .collect();
-          references.insert(topic_id.clone(), ref_topic_ids);
-        }
-
-        ASTNode::ErrorDefinition { name, .. } => {
-          declarations.insert(
-            topic_id.clone(),
-            Declaration {
-              topic_id: node_id,
-              declaration_kind: DeclarationKind::Error,
-              name: name.clone(),
-              scope: Scope {
-                container: file_path.to_string(),
-                component: current_contract.map(|s| s.to_string()),
-                member: None,
-              },
-            },
-          );
-
-          // Store references to this declaration
-          let ref_topic_ids: Vec<String> = in_scope_decl
-            .references()
-            .iter()
-            .map(|&id| collaborator::node_id_to_topic_id(id))
-            .collect();
-          references.insert(topic_id.clone(), ref_topic_ids);
-        }
-
-        ASTNode::StructDefinition { name, .. } => {
-          declarations.insert(
-            topic_id.clone(),
-            Declaration {
-              topic_id: node_id,
-              declaration_kind: DeclarationKind::Struct,
-              name: name.clone(),
-              scope: Scope {
-                container: file_path.to_string(),
-                component: current_contract.map(|s| s.to_string()),
-                member: None,
-              },
-            },
-          );
-
-          // Store references to this declaration
-          let ref_topic_ids: Vec<String> = in_scope_decl
-            .references()
-            .iter()
-            .map(|&id| collaborator::node_id_to_topic_id(id))
-            .collect();
-          references.insert(topic_id.clone(), ref_topic_ids);
-        }
-
-        ASTNode::EnumDefinition { name, .. } => {
-          declarations.insert(
-            topic_id.clone(),
-            Declaration {
-              topic_id: node_id,
-              declaration_kind: DeclarationKind::Enum,
-              name: name.clone(),
-              scope: Scope {
-                container: file_path.to_string(),
-                component: current_contract.map(|s| s.to_string()),
-                member: None,
-              },
-            },
-          );
-
-          // Store references to this declaration
-          let ref_topic_ids: Vec<String> = in_scope_decl
-            .references()
-            .iter()
-            .map(|&id| collaborator::node_id_to_topic_id(id))
-            .collect();
-          references.insert(topic_id.clone(), ref_topic_ids);
-        }
-
-        ASTNode::EnumValue { name, .. } => {
-          declarations.insert(
-            topic_id.clone(),
-            Declaration {
-              topic_id: node_id,
-              declaration_kind: DeclarationKind::EnumMember,
-              name: name.clone(),
-              scope: Scope {
-                container: file_path.to_string(),
-                component: current_contract.map(|s| s.to_string()),
-                member: None,
-              },
-            },
-          );
-
-          // Store references to this declaration
-          let ref_topic_ids: Vec<String> = in_scope_decl
-            .references()
-            .iter()
-            .map(|&id| collaborator::node_id_to_topic_id(id))
-            .collect();
-          references.insert(topic_id.clone(), ref_topic_ids);
-        }
-
-        _ => {
-          // Other node types - children will be processed below
-        }
+        _ => (),
       }
     }
 
@@ -1100,7 +944,7 @@ fn tree_shake(
 
   // Process each publicly visible declaration recursively
   for &node_id in &publicly_visible {
-    process_declaration_recursive(
+    process_tree_shake_declarations(
       node_id,
       None, // No referencing node for root declarations
       first_pass_declarations,
@@ -1113,7 +957,7 @@ fn tree_shake(
 }
 
 /// Recursively process a declaration and all its references
-fn process_declaration_recursive(
+fn process_tree_shake_declarations(
   node_id: i32,
   referencing_node: Option<i32>, // The node that references this declaration
   first_pass_declarations: &BTreeMap<i32, FirstPassDeclaration>,
@@ -1157,6 +1001,8 @@ fn process_declaration_recursive(
   let in_scope_decl = match first_pass_decl {
     FirstPassDeclaration::FunctionMod {
       declaration_kind,
+      name,
+      scope,
       require_revert_statements,
       function_calls,
       variable_mutations,
@@ -1200,6 +1046,8 @@ fn process_declaration_recursive(
 
       InScopeDeclaration::FunctionMod {
         declaration_kind: declaration_kind.clone(),
+        name: name.clone(),
+        scope: scope.clone(),
         references: references,
         require_revert_statements: require_revert_statements.clone(),
         function_calls: filtered_function_calls,
@@ -1207,10 +1055,15 @@ fn process_declaration_recursive(
       }
     }
     FirstPassDeclaration::Flat {
-      declaration_kind, ..
+      declaration_kind,
+      name,
+      scope,
+      ..
     } => InScopeDeclaration::Flat {
       declaration_kind: declaration_kind.clone(),
-      references: references,
+      name: name.clone(),
+      scope: scope.clone(),
+      references,
     },
   };
 
@@ -1220,7 +1073,7 @@ fn process_declaration_recursive(
   let referenced_nodes = first_pass_decl.referenced_nodes();
 
   for &referenced_node_id in referenced_nodes {
-    process_declaration_recursive(
+    process_tree_shake_declarations(
       referenced_node_id,
       Some(node_id), // This node is the one referencing the next node
       first_pass_declarations,

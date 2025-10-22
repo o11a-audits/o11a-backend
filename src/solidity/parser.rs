@@ -71,22 +71,6 @@ fn traverse_directory(
   Ok(())
 }
 
-pub fn traverse_nodes<T, F>(node: &ASTNode, accumulator: T, mut f: F) -> T
-where
-  F: FnMut(&ASTNode, T) -> T,
-{
-  // Apply the closure to the current node
-  let new_accumulator = f(node, accumulator);
-
-  // Recursively traverse all child nodes
-  node
-    .nodes()
-    .iter()
-    .fold(new_accumulator, |acc, child_node| {
-      traverse_nodes(child_node, acc, &mut f)
-    })
-}
-
 pub fn ast_from_json_file(file_path: &str) -> Result<AST, String> {
   let json = std::fs::read_to_string(file_path)
     .map_err(|e| format!("Failed to read file: {}", e))?;
@@ -553,19 +537,6 @@ impl FromStr for ContractKind {
   }
 }
 
-impl FromStr for ContractVariableVisibility {
-  type Err = String;
-
-  fn from_str(s: &str) -> Result<Self, Self::Err> {
-    match s {
-      "public" => Ok(ContractVariableVisibility::Public),
-      "private" => Ok(ContractVariableVisibility::Private),
-      "internal" => Ok(ContractVariableVisibility::Internal),
-      _ => Err(format!("Invalid contract variable visibility: {}", s)),
-    }
-  }
-}
-
 impl TypeDescriptions {
   pub fn from_json(value: &serde_json::Value) -> Result<Self, String> {
     let type_identifier = value
@@ -588,12 +559,6 @@ impl TypeDescriptions {
       type_string,
     })
   }
-}
-
-pub enum ContractVariableVisibility {
-  Public,
-  Private,
-  Internal,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -2538,16 +2503,6 @@ fn get_required_string(
         field_name, available_fields
       )
     })
-}
-
-fn get_optional_string(
-  val: &serde_json::Value,
-  field_name: &str,
-) -> Option<String> {
-  val
-    .get(field_name)
-    .and_then(|v| v.as_str())
-    .map(|s| s.to_string())
 }
 
 fn get_required_bool(
