@@ -6,8 +6,11 @@ pub mod collaborator;
 pub mod formatter;
 pub mod parser;
 
-// Re-export analyzer types
-pub use analyzer::{
-  DataContext, Declaration, DeclarationKind, FunctionModProperties, Scope,
-  analyze,
+// Re-export data_context types
+pub use crate::data_context::{
+  ContractKind, DataContext, Declaration, DeclarationKind, FunctionKind,
+  FunctionModProperties, Scope,
 };
+
+// Re-export analyzer function
+pub use analyzer::analyze;

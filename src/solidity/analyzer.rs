@@ -1,16 +1,11 @@
+use crate::data_context::{
+  DataContext, Declaration, DeclarationKind, FunctionKind,
+  FunctionModProperties, Node, Scope,
+};
 use crate::solidity::collaborator;
 use crate::solidity::parser::{self, AST, ASTNode};
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
-
-pub struct DataContext {
-  pub in_scope_files: HashSet<String>,
-  pub nodes: BTreeMap<String, ASTNode>,
-  pub declarations: BTreeMap<String, Declaration>,
-  pub references: BTreeMap<String, Vec<String>>,
-  pub function_properties: BTreeMap<String, FunctionModProperties>,
-  pub source_content: BTreeMap<String, String>,
-}
 
 pub fn analyze(project_root: &Path) -> Result<DataContext, String> {
   // Load scope.txt file to determine which files are in audit scope (required)
@@ -37,28 +32,6 @@ pub fn analyze(project_root: &Path) -> Result<DataContext, String> {
     function_properties,
     source_content,
   })
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Scope {
-  pub container: String,         // Source file path
-  pub component: Option<String>, // Contract topic ID
-  pub member: Option<String>,    // Function topic ID
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DeclarationKind {
-  Contract(parser::ContractKind),
-  Function(parser::FunctionKind),
-  Modifier,
-  Event,
-  Error,
-  Struct,
-  Enum,
-  EnumMember,
-  Constant,
-  StateVariable,
-  LocalVariable,
 }
 
 /// First pass declaration structure used during initial AST traversal.
@@ -156,43 +129,6 @@ impl InScopeDeclaration {
       InScopeDeclaration::Flat { references, .. } => references,
     }
   }
-}
-
-#[derive(Debug, Clone)]
-pub struct Declaration {
-  pub topic_id: String,
-  pub declaration_kind: DeclarationKind,
-  pub name: String,
-  pub scope: Scope,
-}
-
-pub enum FunctionModProperties {
-  FunctionProperties {
-    // Topic IDs of the local declarations of the function parameters
-    parameters: Vec<String>,
-    // Topic IDs of the declarations of the function return values
-    returns: Vec<String>,
-    // Topic IDs of the declarations of the function revert nodes. This is either
-    // the error call for a revert statement, or the literal string node passed
-    // as the second argument to a require call
-    reverts: Vec<String>,
-    // Topic IDs of the declarations of the functions called
-    calls: Vec<String>,
-    // Topic IDs of the declarations of the state variables mutated
-    mutations: Vec<String>,
-  },
-  ModifierProperties {
-    // Topic IDs of the local declarations of the modifier parameters
-    parameters: Vec<String>,
-    // Topic IDs of the declarations of the modifier revert nodes. This is either
-    // the error call for a revert statement, or the literal string node passed
-    // as the second argument to a require call
-    reverts: Vec<String>,
-    // Topic IDs of the declarations of the functions called
-    calls: Vec<String>,
-    // Topic IDs of the declarations of the state variables mutated
-    mutations: Vec<String>,
-  },
 }
 
 fn load_scope_file(project_root: &Path) -> Result<HashSet<String>, String> {
@@ -306,11 +242,10 @@ fn process_first_pass_ast_nodes(
         // Determine if function is publicly visible
         let is_publicly_visible = if is_file_in_scope {
           match kind {
-            parser::FunctionKind::Constructor
-            | parser::FunctionKind::Fallback
-            | parser::FunctionKind::Receive => true,
-            parser::FunctionKind::Function
-            | parser::FunctionKind::FreeFunction => {
+            FunctionKind::Constructor
+            | FunctionKind::Fallback
+            | FunctionKind::Receive => true,
+            FunctionKind::Function | FunctionKind::FreeFunction => {
               matches!(
                 visibility,
                 parser::FunctionVisibility::Public
@@ -574,7 +509,7 @@ fn second_pass(
   in_scope_declarations: &BTreeMap<i32, InScopeDeclaration>,
 ) -> Result<
   (
-    BTreeMap<String, ASTNode>,
+    BTreeMap<String, Node>,
     BTreeMap<String, Declaration>,
     BTreeMap<String, Vec<String>>,
     BTreeMap<String, FunctionModProperties>,
@@ -582,7 +517,7 @@ fn second_pass(
   ),
   String,
 > {
-  let mut nodes: BTreeMap<String, ASTNode> = BTreeMap::new();
+  let mut nodes: BTreeMap<String, Node> = BTreeMap::new();
   let mut declarations: BTreeMap<String, Declaration> = BTreeMap::new();
   let mut references: BTreeMap<String, Vec<String>> = BTreeMap::new();
   let mut function_properties: BTreeMap<String, FunctionModProperties> =
@@ -629,7 +564,7 @@ fn process_second_pass_nodes(
   current_function: Option<&str>,
   parent_in_scope: bool,
   in_scope_declarations: &BTreeMap<i32, InScopeDeclaration>,
-  nodes: &mut BTreeMap<String, ASTNode>,
+  nodes: &mut BTreeMap<String, Node>,
   declarations: &mut BTreeMap<String, Declaration>,
   references: &mut BTreeMap<String, Vec<String>>,
   function_properties: &mut BTreeMap<String, FunctionModProperties>,
@@ -646,7 +581,9 @@ fn process_second_pass_nodes(
 
     if is_in_scope {
       // Add the node with its children converted to stubs
-      let stubbed_node = parser::children_to_stubs((*node).clone());
+      let stubbed_node =
+        Node::Solidity(parser::children_to_stubs((*node).clone()));
+
       nodes.insert(topic_id.clone(), stubbed_node);
       // Mark that a node was found so we can return this to the caller
       found_in_scope_node = true;

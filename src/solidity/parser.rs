@@ -1,3 +1,4 @@
+use crate::data_context::{ContractKind, FunctionKind};
 use serde_json;
 use std::path::Path;
 use std::str::FromStr;
@@ -212,23 +213,6 @@ impl FromStr for SourceLocation {
       index,
     })
   }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum FunctionKind {
-  Constructor,
-  Function,
-  Fallback,
-  Receive,
-  FreeFunction,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ContractKind {
-  Contract,
-  Library,
-  Abstract,
-  Interface,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

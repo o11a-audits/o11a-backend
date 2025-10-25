@@ -1,7 +1,8 @@
+use crate::data_context::{ContractKind, FunctionKind};
 use crate::solidity::parser::{
-  ASTNode, AssignmentOperator, BinaryOperator, ContractKind, FunctionKind,
-  FunctionStateMutability, FunctionVisibility, LiteralKind, StorageLocation,
-  UnaryOperator, VariableMutability, VariableVisibility,
+  ASTNode, AssignmentOperator, BinaryOperator, FunctionStateMutability,
+  FunctionVisibility, LiteralKind, StorageLocation, UnaryOperator,
+  VariableMutability, VariableVisibility,
 };
 
 /// Converts an AST node and all its children to a formatted HTML string with syntax highlighting.
