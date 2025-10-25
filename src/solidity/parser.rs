@@ -6,7 +6,7 @@ use std::{panic, vec};
 
 pub fn process(
   root: &Path,
-) -> Result<std::collections::BTreeMap<String, Vec<AST>>, String> {
+) -> Result<std::collections::BTreeMap<String, Vec<SolidityAST>>, String> {
   let mut ast_map = std::collections::BTreeMap::new();
 
   // Look for the "out" directory in the project root
@@ -32,7 +32,7 @@ pub fn process(
 
 fn traverse_directory(
   dir: &Path,
-  ast_map: &mut std::collections::BTreeMap<String, Vec<AST>>,
+  ast_map: &mut std::collections::BTreeMap<String, Vec<SolidityAST>>,
 ) -> Result<(), String> {
   let entries = std::fs::read_dir(dir)
     .map_err(|e| format!("Failed to read directory {:?}: {}", dir, e))?;
@@ -72,7 +72,7 @@ fn traverse_directory(
   Ok(())
 }
 
-pub fn ast_from_json_file(file_path: &str) -> Result<AST, String> {
+pub fn ast_from_json_file(file_path: &str) -> Result<SolidityAST, String> {
   let json = std::fs::read_to_string(file_path)
     .map_err(|e| format!("Failed to read file: {}", e))?;
 
@@ -118,7 +118,7 @@ pub fn ast_from_json_file(file_path: &str) -> Result<AST, String> {
 
   let nodes = nodes?;
 
-  Ok(AST {
+  Ok(SolidityAST {
     node_id,
     nodes,
     absolute_path,
@@ -126,7 +126,7 @@ pub fn ast_from_json_file(file_path: &str) -> Result<AST, String> {
   })
 }
 
-pub struct AST {
+pub struct SolidityAST {
   pub node_id: i32,
   pub nodes: Vec<ASTNode>,
   pub absolute_path: String,

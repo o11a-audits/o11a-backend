@@ -253,25 +253,3 @@ fn process_documentation_node(
 
   Ok(())
 }
-
-/// Extracts plain text content from a list of documentation nodes
-fn extract_text_content(nodes: &[DocumentationNode]) -> String {
-  let mut text = String::new();
-  for node in nodes {
-    match node {
-      DocumentationNode::Text { value, .. } => {
-        text.push_str(value);
-      }
-      DocumentationNode::InlineCode { value, .. } => {
-        text.push_str(value);
-      }
-      DocumentationNode::Emphasis { children, .. }
-      | DocumentationNode::Strong { children, .. }
-      | DocumentationNode::Link { children, .. } => {
-        text.push_str(&extract_text_content(children));
-      }
-      _ => {}
-    }
-  }
-  text
-}

@@ -3,7 +3,7 @@ use crate::data_context::{
   FunctionModProperties, Node, Scope,
 };
 use crate::solidity::collaborator;
-use crate::solidity::parser::{self, AST, ASTNode};
+use crate::solidity::parser::{self, ASTNode, SolidityAST};
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
@@ -152,7 +152,7 @@ fn load_scope_file(project_root: &Path) -> Result<HashSet<String>, String> {
 }
 
 fn first_pass(
-  ast_map: &std::collections::BTreeMap<String, Vec<AST>>,
+  ast_map: &std::collections::BTreeMap<String, Vec<SolidityAST>>,
   in_scope_files: &HashSet<String>,
 ) -> Result<BTreeMap<i32, FirstPassDeclaration>, String> {
   let mut first_pass_declarations = BTreeMap::new();
@@ -505,7 +505,7 @@ fn process_first_pass_ast_nodes(
 /// in-scope dictionary. When found, adds the node and all child nodes to the accumulating
 /// data structures.
 fn second_pass(
-  ast_map: &BTreeMap<String, Vec<AST>>,
+  ast_map: &BTreeMap<String, Vec<SolidityAST>>,
   in_scope_declarations: &BTreeMap<i32, InScopeDeclaration>,
 ) -> Result<
   (

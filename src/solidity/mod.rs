@@ -1,5 +1,5 @@
 pub use formatter::node_to_source_text;
-pub use parser::{AST, ASTNode};
+pub use parser::{ASTNode, SolidityAST};
 
 pub mod analyzer;
 pub mod collaborator;
