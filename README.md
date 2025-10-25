@@ -8,11 +8,22 @@ The o11a backend has five modules that form a processing pipeline:
  5. Checker - checks variable constraints and allows clients to post new constraints to be checked, providing data on any conflicting constraints
 
 # Parser
-Audit source files are parsed and compiled by the Foundry compilers, which can output an AST in JSON format that the processor can work with. Most analysis is done with this AST, with few references to the source files. Currently, there are no plans to support audit source files not supported by the Foundry tooling. Markdown files are parsed into an AST similar to source files, with paragraphs becoming declarations and code snippets becoming references. Since most of this work is accomplished through external libraries, it is the simplest part of the o11a processor.
 
-The parser enhances the original AST by adding semantic blocks, which are a grouping of statements based on whitespace in the source code. Semantic blocks are not in the original AST but are added by the parser by analyzing the source files for consecutive newlines between statements in a block. This creates a structure where Block nodes contain SemanticBlock nodes, which contain statement nodes. Each semantic block has optional documentation from comments that appear at the beginning of the semantic block in the source, preserving context from the developers.
+The parser is responsible for reading source files in an audit and producing AST representations of them for the rest of the application to use.
 
-Because the parser provides extra information about the source file not found in the original AST in the AST nodes it produces, it allows the formatter to work with only the modified AST provided by the parser, not needing to reference the original source files. This is paramount when needing to format a single node in an isolated way.
+The parser provides extra information not found in the original ASTs it parses in various ways, depending on the type of file. This allows the formatter to work with only the modified AST provided by the parser, not needing to reference the original source files. This is paramount when needing to format a single node in an isolated way.
+
+## Solidity Source Parsing
+
+Solidity source files are parsed and compiled by the Foundry compilers, which can output an AST file in JSON format that the parser can read and work with.
+
+The parser enhances original Solidity ASTs by adding semantic blocks, which are a grouping of statements based on whitespace in the original source file. Semantic blocks are not in the original AST but are added by the parser by analyzing the source files for consecutive newlines between statements in a block. This creates a structure where Block nodes contain SemanticBlock nodes, which contain statement nodes. Each semantic block has optional documentation from comments that appear at the beginning of the semantic block in the source, preserving semantic context and documentation comments from the developers.
+
+## Documentation Source Parsing
+
+Documentation (Markdown, but maybe later Plain Text and Djot) source files are compiled by a markdown rust crate that produces an AST directly within the application.
+
+In Documentation files, sections and paragraphs become declarations and inline code snippets become references. These may contain references by name to the same variables and functions as the implementation. Because of this, Text files are parsed last, so that they can be parsed with the full context of the source code, and can resolve any references to the code by searching for a declaration that contains the same name.
 
 # Analyzer
 The analyzer is responsible for traversing the Abstract Syntax Tree and performing static analysis on it.
