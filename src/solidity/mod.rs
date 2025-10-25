@@ -13,6 +13,7 @@ pub struct DataContext {
   pub declarations: BTreeMap<String, Declaration>,
   pub references: BTreeMap<String, Vec<String>>,
   pub function_properties: BTreeMap<String, FunctionModProperties>,
+  pub source_content: BTreeMap<String, String>,
 }
 
 pub fn analyze(project_root: &Path) -> Result<DataContext, String> {
@@ -29,7 +30,7 @@ pub fn analyze(project_root: &Path) -> Result<DataContext, String> {
   let in_scope_declarations = tree_shake(&first_pass_declarations)?;
 
   // Second pass: Build final data structures for in-scope declarations
-  let (nodes, declarations, references, function_properties) =
+  let (nodes, declarations, references, function_properties, source_content) =
     second_pass(&ast_map, &in_scope_declarations)?;
 
   Ok(DataContext {
@@ -38,6 +39,7 @@ pub fn analyze(project_root: &Path) -> Result<DataContext, String> {
     declarations,
     references,
     function_properties,
+    source_content,
   })
 }
 
@@ -580,6 +582,7 @@ fn second_pass(
     BTreeMap<String, Declaration>,
     BTreeMap<String, Vec<String>>,
     BTreeMap<String, FunctionModProperties>,
+    BTreeMap<String, String>,
   ),
   String,
 > {
@@ -588,11 +591,12 @@ fn second_pass(
   let mut references: BTreeMap<String, Vec<String>> = BTreeMap::new();
   let mut function_properties: BTreeMap<String, FunctionModProperties> =
     BTreeMap::new();
+  let mut source_content: BTreeMap<String, String> = BTreeMap::new();
 
   // Process each AST file
   for (file_path, asts) in ast_map {
     for ast in asts {
-      process_second_pass_nodes(
+      let found_in_scope_node = process_second_pass_nodes(
         &ast.nodes.iter().collect(),
         file_path,
         None,  // No contract context initially
@@ -604,10 +608,20 @@ fn second_pass(
         &mut references,
         &mut function_properties,
       )?;
+
+      if found_in_scope_node == true {
+        source_content.insert(file_path.clone(), ast.source_content.clone());
+      }
     }
   }
 
-  Ok((nodes, declarations, references, function_properties))
+  Ok((
+    nodes,
+    declarations,
+    references,
+    function_properties,
+    source_content,
+  ))
 }
 
 /// Recursively process nodes during the second pass
@@ -623,7 +637,9 @@ fn process_second_pass_nodes(
   declarations: &mut BTreeMap<String, Declaration>,
   references: &mut BTreeMap<String, Vec<String>>,
   function_properties: &mut BTreeMap<String, FunctionModProperties>,
-) -> Result<(), String> {
+) -> Result<bool, String> {
+  let mut found_in_scope_node = false;
+
   for node in ast_nodes {
     let node_id = node.node_id();
     let topic_id = collaborator::node_id_to_topic_id(node_id);
@@ -636,6 +652,8 @@ fn process_second_pass_nodes(
       // Add the node with its children converted to stubs
       let stubbed_node = parser::children_to_stubs((*node).clone());
       nodes.insert(topic_id.clone(), stubbed_node);
+      // Mark that a node was found so we can return this to the caller
+      found_in_scope_node = true;
     }
 
     // Process declarations only if they exist in in_scope_declarations
@@ -755,7 +773,7 @@ fn process_second_pass_nodes(
     }
   }
 
-  Ok(())
+  Ok(found_in_scope_node)
 }
 
 /// Extract parameter topic IDs from a ParameterList node
