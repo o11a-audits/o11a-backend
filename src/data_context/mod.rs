@@ -28,7 +28,7 @@ pub struct DataContext {
 
 pub enum Node {
   Solidity(crate::solidity::parser::ASTNode),
-  Documentation(String),
+  Documentation(crate::documentation::parser::DocumentationNode),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,6 +51,8 @@ pub enum DeclarationKind {
   Constant,
   StateVariable,
   LocalVariable,
+  DocumentationSection,
+  DocumentationParagraph,
 }
 
 #[derive(Debug, Clone)]
@@ -59,6 +61,37 @@ pub struct Declaration {
   pub declaration_kind: DeclarationKind,
   pub name: String,
   pub scope: Scope,
+}
+
+impl Declaration {
+  /// Returns the qualified name of the declaration
+  /// Format: component.member.name or member.name or name
+  /// Uses the declaration names from the scope components, not topic IDs
+  pub fn qualified_name(&self, data_context: &DataContext) -> String {
+    let mut parts = Vec::new();
+
+    // Add component name if it exists
+    if let Some(component_topic_id) = &self.scope.component {
+      if let Some(component_decl) =
+        data_context.declarations.get(component_topic_id)
+      {
+        parts.push(component_decl.name.clone());
+      }
+    }
+
+    // Add member name if it exists
+    if let Some(member_topic_id) = &self.scope.member {
+      if let Some(member_decl) = data_context.declarations.get(member_topic_id)
+      {
+        parts.push(member_decl.name.clone());
+      }
+    }
+
+    // Add the declaration's own name
+    parts.push(self.name.clone());
+
+    parts.join(".")
+  }
 }
 
 pub enum FunctionModProperties {

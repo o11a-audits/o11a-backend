@@ -21,7 +21,7 @@ The parser enhances original Solidity ASTs by adding semantic blocks, which are 
 
 ## Documentation Source Parsing
 
-Documentation (Markdown, but maybe later Plain Text and Djot) source files are compiled by a markdown rust crate that produces an AST directly within the application.
+Documentation (Markdown, but maybe later Plain Text and Djot) source files are compiled by a markdown rust crate that produces an AST directly within the application. Documentation files are looked for in the `src` and `docs` directories of the audit project recursively.
 
 In Documentation files, sections and paragraphs become declarations and inline code snippets become references. These may contain references by name to the same variables and functions as the implementation. Because of this, Text files are parsed last, so that they can be parsed with the full context of the source code, and can resolve any references to the code by searching for a declaration that contains the same name.
 
@@ -73,7 +73,7 @@ The collaborator allows users to comment on topics in the audit. The types of co
 
 The types of topics and their prefixes are:
  - Source code nodes (N)
- - Text Documentation, text comments, and text sections (N)
+ - Text Documentation, text comments, and text sections (T)
  - Attack vectors (A)
 
  The topic id is a string identifier that uniquely identifies a topic within the audit. Each source code contract, function, block, statement, expression, variable, and literal value has an unique topic id. Each text document/comment and section has an unique topic id. It is sequential number for that topic type preceeded by the topic type prefix. For example, the first added Attack Vector will be `A1`, and the second `A2`.
