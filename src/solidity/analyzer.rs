@@ -1,4 +1,3 @@
-
 use crate::solidity::collaborator;
 use crate::solidity::parser::{self, AST, ASTNode};
 use std::collections::{BTreeMap, HashSet};
