@@ -24,11 +24,17 @@ pub struct DataContext {
   pub references: BTreeMap<String, Vec<String>>,
   pub function_properties: BTreeMap<String, FunctionModProperties>,
   pub source_content: BTreeMap<String, String>,
+  pub asts: BTreeMap<String, AST>,
 }
 
 pub enum Node {
   Solidity(crate::solidity::parser::ASTNode),
   Documentation(crate::documentation::parser::DocumentationNode),
+}
+
+pub enum AST {
+  Solidity(crate::solidity::parser::SolidityAST),
+  Documentation(crate::documentation::parser::DocumentationAST),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

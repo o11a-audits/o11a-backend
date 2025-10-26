@@ -1,5 +1,5 @@
 use crate::data_context::{
-  DataContext, Declaration, DeclarationKind, FunctionKind,
+  AST, DataContext, Declaration, DeclarationKind, FunctionKind,
   FunctionModProperties, Node, Scope,
 };
 use crate::solidity::collaborator;
@@ -24,6 +24,24 @@ pub fn analyze(project_root: &Path) -> Result<DataContext, String> {
   let (nodes, declarations, references, function_properties, source_content) =
     second_pass(&ast_map, &in_scope_declarations)?;
 
+  // Build ASTs map with stubbed nodes
+  let mut asts = BTreeMap::new();
+  for (path, ast_list) in ast_map {
+    for ast in ast_list {
+      let stubbed_ast = crate::solidity::parser::SolidityAST {
+        node_id: ast.node_id,
+        nodes: ast
+          .nodes
+          .iter()
+          .map(|n| parser::children_to_stubs(n.clone()))
+          .collect(),
+        absolute_path: ast.absolute_path.clone(),
+        source_content: ast.source_content.clone(),
+      };
+      asts.insert(path.clone(), AST::Solidity(stubbed_ast));
+    }
+  }
+
   Ok(DataContext {
     in_scope_files,
     nodes,
@@ -31,6 +49,7 @@ pub fn analyze(project_root: &Path) -> Result<DataContext, String> {
     references,
     function_properties,
     source_content,
+    asts,
   })
 }
 

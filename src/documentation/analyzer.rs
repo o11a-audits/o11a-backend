@@ -1,5 +1,5 @@
 use crate::data_context::{
-  DataContext, Declaration, DeclarationKind, Node, Scope,
+  AST, DataContext, Declaration, DeclarationKind, Node, Scope,
 };
 use crate::documentation::collaborator;
 use crate::documentation::parser::{self, DocumentationAST, DocumentationNode};
@@ -18,11 +18,49 @@ pub fn analyze(
   // Process each markdown file and add nodes/declarations to the data context
   for (file_path, asts) in &ast_map {
     for ast in asts {
-      process_documentation_ast(ast, file_path, &mut data_context)?;
+      // Convert absolute path to relative path
+      let absolute_path = make_relative_to_project(project_root, file_path)?;
+
+      // Add to in_scope_files
+      data_context.in_scope_files.insert(absolute_path.clone());
+
+      // Add to asts map with stubbed nodes
+      let stubbed_ast = DocumentationAST {
+        nodes: ast
+          .nodes
+          .iter()
+          .map(|n| parser::children_to_stubs(n.clone()))
+          .collect(),
+        absolute_path: absolute_path.clone(),
+        source_content: ast.source_content.clone(),
+      };
+      data_context
+        .asts
+        .insert(absolute_path.clone(), AST::Documentation(stubbed_ast));
+
+      process_documentation_ast(ast, &absolute_path, &mut data_context)?;
     }
   }
 
   Ok(data_context)
+}
+
+/// Converts an absolute path to a path relative to the project root
+fn make_relative_to_project(
+  project_root: &Path,
+  absolute_path: &str,
+) -> Result<String, String> {
+  let abs_path = Path::new(absolute_path);
+  abs_path
+    .strip_prefix(project_root)
+    .map(|p| p.to_string_lossy().to_string())
+    .map_err(|_| {
+      format!(
+        "Failed to make path relative: {} not under {}",
+        absolute_path,
+        project_root.display()
+      )
+    })
 }
 
 fn process_documentation_ast(
