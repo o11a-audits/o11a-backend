@@ -1,5 +1,1 @@
-/// Converts a node ID to a topic ID by prefixing it with "T"
-/// This distinguishes documentation topic IDs from solidity topic IDs (prefixed with "N")
-pub fn node_id_to_topic_id(node_id: i32) -> String {
-  format!("T{}", node_id)
-}
+

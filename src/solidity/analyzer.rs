@@ -1,8 +1,8 @@
-use crate::data_context::{
+use crate::core::data_context::{
   AST, DataContext, Declaration, DeclarationKind, FunctionKind,
   FunctionModProperties, Node, Scope,
 };
-use crate::solidity::collaborator;
+use crate::core::topic;
 use crate::solidity::parser::{self, ASTNode, SolidityAST};
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
@@ -198,8 +198,8 @@ fn process_first_pass_ast_nodes(
   nodes: &Vec<&ASTNode>,
   file_path: &String,
   is_file_in_scope: bool,
-  current_contract: Option<&String>,
-  current_function: Option<&String>,
+  current_contract: Option<&topic::Topic>,
+  current_function: Option<&topic::Topic>,
   first_pass_declarations: &mut BTreeMap<i32, FirstPassDeclaration>,
 ) -> Result<(), String> {
   for node in nodes {
@@ -231,7 +231,7 @@ fn process_first_pass_ast_nodes(
           &child_nodes,
           file_path,
           is_file_in_scope,
-          Some(&collaborator::node_id_to_topic_id(*node_id)),
+          Some(&topic::new_node_topic(*node_id)),
           current_function,
           first_pass_declarations,
         )?;
@@ -301,7 +301,7 @@ fn process_first_pass_ast_nodes(
           &file_path,
           is_file_in_scope,
           current_contract,
-          Some(&collaborator::node_id_to_topic_id(*node_id)),
+          Some(&topic::new_node_topic(*node_id)),
           first_pass_declarations,
         )?;
       }
@@ -358,7 +358,7 @@ fn process_first_pass_ast_nodes(
           file_path,
           is_file_in_scope,
           current_contract,
-          Some(&collaborator::node_id_to_topic_id(*node_id)),
+          Some(&topic::new_node_topic(*node_id)),
           first_pass_declarations,
         )?;
       }
@@ -528,18 +528,19 @@ fn second_pass(
   in_scope_declarations: &BTreeMap<i32, InScopeDeclaration>,
 ) -> Result<
   (
-    BTreeMap<String, Node>,
-    BTreeMap<String, Declaration>,
-    BTreeMap<String, Vec<String>>,
-    BTreeMap<String, FunctionModProperties>,
+    BTreeMap<topic::Topic, Node>,
+    BTreeMap<topic::Topic, Declaration>,
+    BTreeMap<topic::Topic, Vec<topic::Topic>>,
+    BTreeMap<topic::Topic, FunctionModProperties>,
     BTreeMap<String, String>,
   ),
   String,
 > {
-  let mut nodes: BTreeMap<String, Node> = BTreeMap::new();
-  let mut declarations: BTreeMap<String, Declaration> = BTreeMap::new();
-  let mut references: BTreeMap<String, Vec<String>> = BTreeMap::new();
-  let mut function_properties: BTreeMap<String, FunctionModProperties> =
+  let mut nodes: BTreeMap<topic::Topic, Node> = BTreeMap::new();
+  let mut declarations: BTreeMap<topic::Topic, Declaration> = BTreeMap::new();
+  let mut references: BTreeMap<topic::Topic, Vec<topic::Topic>> =
+    BTreeMap::new();
+  let mut function_properties: BTreeMap<topic::Topic, FunctionModProperties> =
     BTreeMap::new();
   let mut source_content: BTreeMap<String, String> = BTreeMap::new();
 
@@ -583,16 +584,16 @@ fn process_second_pass_nodes(
   current_function: Option<&str>,
   parent_in_scope: bool,
   in_scope_declarations: &BTreeMap<i32, InScopeDeclaration>,
-  nodes: &mut BTreeMap<String, Node>,
-  declarations: &mut BTreeMap<String, Declaration>,
-  references: &mut BTreeMap<String, Vec<String>>,
-  function_properties: &mut BTreeMap<String, FunctionModProperties>,
+  nodes: &mut BTreeMap<topic::Topic, Node>,
+  declarations: &mut BTreeMap<topic::Topic, Declaration>,
+  references: &mut BTreeMap<topic::Topic, Vec<topic::Topic>>,
+  function_properties: &mut BTreeMap<topic::Topic, FunctionModProperties>,
 ) -> Result<bool, String> {
   let mut found_in_scope_node = false;
 
   for node in ast_nodes {
     let node_id = node.node_id();
-    let topic_id = collaborator::node_id_to_topic_id(node_id);
+    let topic = topic::new_node_topic(node_id);
 
     // Check if this node should be processed (either parent is in scope or it's in the in_scope_declarations)
     let in_scope_decl = in_scope_declarations.get(&node_id);
@@ -603,7 +604,7 @@ fn process_second_pass_nodes(
       let stubbed_node =
         Node::Solidity(parser::children_to_stubs((*node).clone()));
 
-      nodes.insert(topic_id.clone(), stubbed_node);
+      nodes.insert(topic.clone(), stubbed_node);
       // Mark that a node was found so we can return this to the caller
       found_in_scope_node = true;
     }
@@ -612,9 +613,9 @@ fn process_second_pass_nodes(
     if let Some(in_scope_decl) = in_scope_decl {
       // Add declaration
       declarations.insert(
-        topic_id.clone(),
+        topic.clone(),
         Declaration {
-          topic_id: collaborator::node_id_to_topic_id(node_id),
+          topic: topic::new_node_topic(node_id),
           declaration_kind: in_scope_decl.declaration_kind().clone(),
           name: in_scope_decl.name().clone(),
           scope: in_scope_decl.scope().clone(),
@@ -622,12 +623,12 @@ fn process_second_pass_nodes(
       );
 
       // Store references to this declaration
-      let ref_topic_ids: Vec<String> = in_scope_decl
+      let ref_topics: Vec<topic::Topic> = in_scope_decl
         .references()
         .iter()
-        .map(|&id| collaborator::node_id_to_topic_id(id))
+        .map(|&id| topic::new_node_topic(id))
         .collect();
-      references.insert(topic_id.clone(), ref_topic_ids);
+      references.insert(topic.clone(), ref_topics);
 
       match in_scope_decl {
         InScopeDeclaration::FunctionMod {
@@ -636,17 +637,17 @@ fn process_second_pass_nodes(
           variable_mutations,
           ..
         } => {
-          let revert_topic_ids: Vec<String> = require_revert_statements
+          let revert_topics: Vec<topic::Topic> = require_revert_statements
             .iter()
-            .map(|&id| collaborator::node_id_to_topic_id(id))
+            .map(|&id| topic::new_node_topic(id))
             .collect();
-          let call_topic_ids: Vec<String> = function_calls
+          let call_topics: Vec<topic::Topic> = function_calls
             .iter()
-            .map(|&id| collaborator::node_id_to_topic_id(id))
+            .map(|&id| topic::new_node_topic(id))
             .collect();
-          let mutation_topic_ids: Vec<String> = variable_mutations
+          let mutation_topics: Vec<topic::Topic> = variable_mutations
             .iter()
-            .map(|&id| collaborator::node_id_to_topic_id(id))
+            .map(|&id| topic::new_node_topic(id))
             .collect();
 
           match node {
@@ -656,32 +657,31 @@ fn process_second_pass_nodes(
               ..
             } => {
               // Extract function properties
-              let param_topic_ids = extract_parameter_topic_ids(parameters);
-              let return_topic_ids =
-                extract_parameter_topic_ids(return_parameters);
+              let param_topics = extract_parameter_topics(parameters);
+              let return_topics = extract_parameter_topics(return_parameters);
 
               function_properties.insert(
-                topic_id.clone(),
+                topic.clone(),
                 FunctionModProperties::FunctionProperties {
-                  parameters: param_topic_ids,
-                  returns: return_topic_ids,
-                  reverts: revert_topic_ids,
-                  calls: call_topic_ids,
-                  mutations: mutation_topic_ids,
+                  parameters: param_topics,
+                  returns: return_topics,
+                  reverts: revert_topics,
+                  calls: call_topics,
+                  mutations: mutation_topics,
                 },
               );
             }
             ASTNode::ModifierDefinition { parameters, .. } => {
               // Extract modifier properties
-              let param_topic_ids = extract_parameter_topic_ids(parameters);
+              let param_topics = extract_parameter_topics(parameters);
 
               function_properties.insert(
-                topic_id.clone(),
+                topic.clone(),
                 FunctionModProperties::ModifierProperties {
-                  parameters: param_topic_ids,
-                  reverts: revert_topic_ids,
-                  calls: call_topic_ids,
-                  mutations: mutation_topic_ids,
+                  parameters: param_topics,
+                  reverts: revert_topics,
+                  calls: call_topics,
+                  mutations: mutation_topics,
                 },
               );
             }
@@ -729,16 +729,16 @@ fn process_second_pass_nodes(
 }
 
 /// Extract parameter topic IDs from a ParameterList node
-fn extract_parameter_topic_ids(parameter_list: &ASTNode) -> Vec<String> {
-  let mut topic_ids = Vec::new();
+fn extract_parameter_topics(parameter_list: &ASTNode) -> Vec<topic::Topic> {
+  let mut topics = Vec::new();
 
   if let ASTNode::ParameterList { parameters, .. } = parameter_list {
     for param in parameters {
-      topic_ids.push(collaborator::node_id_to_topic_id(param.node_id()));
+      topics.push(topic::new_node_topic(param.node_id()));
     }
   }
 
-  topic_ids
+  topics
 }
 
 fn collect_references_and_statements(

@@ -1,3 +1,4 @@
+use crate::core::topic;
 use std::collections::{BTreeMap, HashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -18,13 +19,16 @@ pub enum ContractKind {
 }
 
 pub struct DataContext {
+  // A list of files that are in scope for the current audit
   pub in_scope_files: HashSet<String>,
-  pub nodes: BTreeMap<String, Node>,
-  pub declarations: BTreeMap<String, Declaration>,
-  pub references: BTreeMap<String, Vec<String>>,
-  pub function_properties: BTreeMap<String, FunctionModProperties>,
+  // Contains the content of the original source file for a given file path
   pub source_content: BTreeMap<String, String>,
+  // Contains the ASTs for a given file path
   pub asts: BTreeMap<String, AST>,
+  pub nodes: BTreeMap<topic::Topic, Node>,
+  pub declarations: BTreeMap<topic::Topic, Declaration>,
+  pub references: BTreeMap<topic::Topic, Vec<topic::Topic>>,
+  pub function_properties: BTreeMap<topic::Topic, FunctionModProperties>,
 }
 
 pub enum Node {
@@ -39,9 +43,9 @@ pub enum AST {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Scope {
-  pub container: String,         // Source file path
-  pub component: Option<String>, // Contract topic ID
-  pub member: Option<String>,    // Function topic ID
+  pub container: String,               // Source file path
+  pub component: Option<topic::Topic>, // Contract topic ID
+  pub member: Option<topic::Topic>,    // Function topic ID
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,7 +67,7 @@ pub enum DeclarationKind {
 
 #[derive(Debug, Clone)]
 pub struct Declaration {
-  pub topic_id: String,
+  pub topic: topic::Topic,
   pub declaration_kind: DeclarationKind,
   pub name: String,
   pub scope: Scope,
@@ -77,18 +81,17 @@ impl Declaration {
     let mut parts = Vec::new();
 
     // Add component name if it exists
-    if let Some(component_topic_id) = &self.scope.component {
+    if let Some(component_topic) = &self.scope.component {
       if let Some(component_decl) =
-        data_context.declarations.get(component_topic_id)
+        data_context.declarations.get(component_topic)
       {
         parts.push(component_decl.name.clone());
       }
     }
 
     // Add member name if it exists
-    if let Some(member_topic_id) = &self.scope.member {
-      if let Some(member_decl) = data_context.declarations.get(member_topic_id)
-      {
+    if let Some(member_topic) = &self.scope.member {
+      if let Some(member_decl) = data_context.declarations.get(member_topic) {
         parts.push(member_decl.name.clone());
       }
     }
@@ -103,28 +106,28 @@ impl Declaration {
 pub enum FunctionModProperties {
   FunctionProperties {
     // Topic IDs of the local declarations of the function parameters
-    parameters: Vec<String>,
+    parameters: Vec<topic::Topic>,
     // Topic IDs of the declarations of the function return values
-    returns: Vec<String>,
+    returns: Vec<topic::Topic>,
     // Topic IDs of the declarations of the function revert nodes. This is either
     // the error call for a revert statement, or the literal string node passed
     // as the second argument to a require call
-    reverts: Vec<String>,
+    reverts: Vec<topic::Topic>,
     // Topic IDs of the declarations of the functions called
-    calls: Vec<String>,
+    calls: Vec<topic::Topic>,
     // Topic IDs of the declarations of the state variables mutated
-    mutations: Vec<String>,
+    mutations: Vec<topic::Topic>,
   },
   ModifierProperties {
     // Topic IDs of the local declarations of the modifier parameters
-    parameters: Vec<String>,
+    parameters: Vec<topic::Topic>,
     // Topic IDs of the declarations of the modifier revert nodes. This is either
     // the error call for a revert statement, or the literal string node passed
     // as the second argument to a require call
-    reverts: Vec<String>,
+    reverts: Vec<topic::Topic>,
     // Topic IDs of the declarations of the functions called
-    calls: Vec<String>,
+    calls: Vec<topic::Topic>,
     // Topic IDs of the declarations of the state variables mutated
-    mutations: Vec<String>,
+    mutations: Vec<topic::Topic>,
   },
 }

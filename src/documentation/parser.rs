@@ -1,4 +1,5 @@
-use crate::data_context::DataContext;
+use crate::core::data_context::DataContext;
+use crate::core::topic;
 use markdown::mdast::Node as MdNode;
 use markdown::{ParseOptions, to_mdast};
 use std::path::Path;
@@ -147,7 +148,7 @@ pub enum DocumentationNode {
   InlineCode {
     node_id: i32,
     value: String,
-    referenced_declaration: Option<String>, // Solidity topic ID if found
+    referenced_declaration: Option<topic::Topic>, // Solidity topic ID if found
   },
 
   // Code blocks
@@ -202,7 +203,7 @@ pub enum DocumentationNode {
   // Placeholder for a node (similar to Solidity's Stub)
   Stub {
     node_id: i32,
-    topic_id: String,
+    topic: topic::Topic,
   },
 }
 
@@ -353,7 +354,7 @@ fn convert_mdast_node(
       // Try to find a matching declaration in the solidity context
       let referenced_declaration =
         find_declaration_by_name(data_context, &code.value)
-          .map(|decl| decl.topic_id.clone());
+          .map(|decl| decl.topic.clone());
 
       Ok(DocumentationNode::InlineCode {
         node_id,
@@ -455,22 +456,25 @@ fn convert_mdast_node(
 fn find_declaration_by_name<'a>(
   data_context: &'a DataContext,
   value: &str,
-) -> Option<&'a crate::data_context::Declaration> {
+) -> Option<&'a crate::core::data_context::Declaration> {
   // First try to find by topic ID (most specific)
-  data_context.declarations.get(value).or_else(|| {
-    // If not found by topic ID, try to find by qualified name
-    data_context
-      .declarations
-      .values()
-      .find(|decl| decl.qualified_name(data_context) == value)
-      .or_else(|| {
-        // If not found by qualified name, try to find by simple name
-        data_context
-          .declarations
-          .values()
-          .find(|decl| decl.name == value)
-      })
-  })
+  data_context
+    .declarations
+    .get(&topic::new_topic(value))
+    .or_else(|| {
+      // If not found by topic ID, try to find by qualified name
+      data_context
+        .declarations
+        .values()
+        .find(|decl| decl.qualified_name(data_context) == value)
+        .or_else(|| {
+          // If not found by qualified name, try to find by simple name
+          data_context
+            .declarations
+            .values()
+            .find(|decl| decl.name == value)
+        })
+    })
 }
 
 /// Converts children nodes to stubs for storage optimization
@@ -556,6 +560,6 @@ pub fn children_to_stubs(node: DocumentationNode) -> DocumentationNode {
 fn node_to_stub(node: DocumentationNode) -> DocumentationNode {
   DocumentationNode::Stub {
     node_id: node.node_id(),
-    topic_id: super::collaborator::node_id_to_topic_id(node.node_id()),
+    topic: topic::new_documentation_topic(node.node_id()),
   }
 }

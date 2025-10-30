@@ -77,8 +77,8 @@ fn do_node_to_html(node: &DocumentationNode, indent_level: usize) -> String {
       ..
     } => {
       // Add reference class and data attribute if this links to a declaration
-      let reference_attrs = if let Some(ref_topic_id) = referenced_declaration {
-        format!(" data-ref-topic=\"{}\"", ref_topic_id)
+      let reference_attrs = if let Some(ref_topic) = referenced_declaration {
+        format!(" data-ref-topic=\"{}\"", ref_topic.id)
       } else {
         String::new()
       };
@@ -232,10 +232,10 @@ fn do_node_to_html(node: &DocumentationNode, indent_level: usize) -> String {
       )
     }
 
-    DocumentationNode::Stub { topic_id, .. } => {
+    DocumentationNode::Stub { topic, .. } => {
       format!(
         "<span class=\"stub\" data-topic-id=\"{}\">Stub</span>",
-        topic_id
+        topic.id
       )
     }
   }

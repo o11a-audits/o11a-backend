@@ -1,4 +1,5 @@
-use crate::data_context::{ContractKind, FunctionKind};
+use crate::core::data_context::{ContractKind, FunctionKind};
+use crate::core::topic;
 use serde_json;
 use std::path::Path;
 use std::str::FromStr;
@@ -1016,7 +1017,7 @@ pub enum ASTNode {
   Stub {
     node_id: i32,
     src_location: SourceLocation,
-    topic_id: String,
+    topic: topic::Topic,
   },
 
   // Catch-all for unknown node types
@@ -1495,7 +1496,7 @@ fn node_to_stub(node: &ASTNode) -> ASTNode {
   ASTNode::Stub {
     node_id: node.node_id(),
     src_location: node.src_location().clone(),
-    topic_id: super::collaborator::node_id_to_topic_id(node.node_id()),
+    topic: topic::new_node_topic(node.node_id()),
   }
 }
 
@@ -2266,11 +2267,11 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     ASTNode::Stub {
       node_id,
       src_location,
-      topic_id,
+      topic,
     } => ASTNode::Stub {
       node_id: node_id,
       src_location: src_location,
-      topic_id: topic_id,
+      topic: topic,
     },
     ASTNode::Other {
       node_id,

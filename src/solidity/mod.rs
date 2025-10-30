@@ -7,7 +7,7 @@ pub mod formatter;
 pub mod parser;
 
 // Re-export data_context types
-pub use crate::data_context::{
+pub use crate::core::data_context::{
   ContractKind, DataContext, Declaration, DeclarationKind, FunctionKind,
   FunctionModProperties, Scope,
 };

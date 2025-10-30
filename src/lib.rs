@@ -1,5 +1,5 @@
 pub mod api;
-pub mod data_context;
+pub mod core;
 pub mod db;
 pub mod documentation;
 pub mod solidity;

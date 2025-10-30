@@ -1,7 +1,7 @@
-use crate::data_context::{
+use crate::core::data_context::{
   AST, DataContext, Declaration, DeclarationKind, Node, Scope,
 };
-use crate::documentation::collaborator;
+use crate::core::topic;
 use crate::documentation::parser::{self, DocumentationAST, DocumentationNode};
 use std::path::Path;
 
@@ -90,18 +90,18 @@ fn process_documentation_ast(
 fn process_documentation_node(
   node: &DocumentationNode,
   file_path: &str,
-  current_section: Option<&str>,
-  current_paragraph: Option<&str>,
+  current_section: Option<&topic::Topic>,
+  current_paragraph: Option<&topic::Topic>,
   data_context: &mut DataContext,
 ) -> Result<(), String> {
   let node_id = node.node_id();
-  let topic_id = collaborator::node_id_to_topic_id(node_id);
+  let topic = topic::new_node_topic(node_id);
 
   match node {
     DocumentationNode::Root { children, .. } => {
       // Add the Root node to the data context
       data_context.nodes.insert(
-        topic_id.clone(),
+        topic.clone(),
         Node::Documentation(parser::children_to_stubs(node.clone())),
       );
 
@@ -121,7 +121,7 @@ fn process_documentation_node(
       header, children, ..
     } => {
       // Extract the heading topic ID from the header
-      let header_topic_id = collaborator::node_id_to_topic_id(header.node_id());
+      let header_topic = topic::new_node_topic(header.node_id());
 
       // Process the header node (which is a Heading)
       process_documentation_node(
@@ -137,7 +137,7 @@ fn process_documentation_node(
         process_documentation_node(
           child,
           file_path,
-          Some(&header_topic_id),
+          Some(&header_topic),
           None, // Reset paragraph context when entering new section
           data_context,
         )?;
@@ -145,7 +145,7 @@ fn process_documentation_node(
 
       // Add the section node itself with children converted to stubs
       data_context.nodes.insert(
-        topic_id,
+        topic,
         Node::Documentation(parser::children_to_stubs(node.clone())),
       );
     }
@@ -159,12 +159,12 @@ fn process_documentation_node(
       };
 
       // Extract heading text from children for the name
-      let name = format!("Header {}", topic_id);
+      let name = format!("Header {}", topic.id);
 
       data_context.declarations.insert(
-        topic_id.clone(),
+        topic.clone(),
         Declaration {
-          topic_id: topic_id.clone(),
+          topic: topic.clone(),
           declaration_kind: DeclarationKind::DocumentationSection,
           name,
           scope,
@@ -173,7 +173,7 @@ fn process_documentation_node(
 
       // Add the heading node with children converted to stubs
       data_context.nodes.insert(
-        topic_id.clone(),
+        topic.clone(),
         Node::Documentation(parser::children_to_stubs(node.clone())),
       );
 
@@ -190,18 +190,18 @@ fn process_documentation_node(
     }
 
     DocumentationNode::Paragraph { children, .. } => {
-      let name = format!("Paragraph {}", topic_id);
+      let name = format!("Paragraph {}", topic.id);
       // Paragraphs become paragraph declarations (members in scope)
       let scope = Scope {
         container: file_path.to_string(),
-        component: Some(name.clone()),
+        component: Some(topic.clone()),
         member: None,
       };
 
       data_context.declarations.insert(
-        topic_id.clone(),
+        topic.clone(),
         Declaration {
-          topic_id: topic_id.clone(),
+          topic: topic.clone(),
           declaration_kind: DeclarationKind::DocumentationParagraph,
           name,
           scope,
@@ -210,7 +210,7 @@ fn process_documentation_node(
 
       // Add the node with children converted to stubs
       data_context.nodes.insert(
-        topic_id.clone(),
+        topic.clone(),
         Node::Documentation(parser::children_to_stubs(node.clone())),
       );
 
@@ -220,7 +220,7 @@ fn process_documentation_node(
           child,
           file_path,
           current_section,
-          Some(&topic_id),
+          Some(&topic),
           data_context,
         )?;
       }
@@ -233,19 +233,19 @@ fn process_documentation_node(
       // Add the inline code node
       data_context
         .nodes
-        .insert(topic_id.clone(), Node::Documentation(node.clone()));
+        .insert(topic.clone(), Node::Documentation(node.clone()));
 
       // If there's a referenced declaration, create a reference
-      if let Some(solidity_topic_id) = referenced_declaration {
+      if let Some(solidity_topic) = referenced_declaration {
         // Create a reference from the solidity declaration to this inline code
         let references = data_context
           .references
-          .entry(solidity_topic_id.clone())
+          .entry(solidity_topic.clone())
           .or_insert_with(Vec::new);
 
         // Add this inline code as a reference to the declaration
-        if !references.contains(&topic_id) {
-          references.push(topic_id.clone());
+        if !references.contains(&topic) {
+          references.push(topic.clone());
         }
       }
     }
@@ -256,7 +256,7 @@ fn process_documentation_node(
     | DocumentationNode::ThematicBreak { .. } => {
       data_context
         .nodes
-        .insert(topic_id, Node::Documentation(node.clone()));
+        .insert(topic, Node::Documentation(node.clone()));
     }
 
     // For nodes with children, add the node and recurse
@@ -268,7 +268,7 @@ fn process_documentation_node(
     | DocumentationNode::BlockQuote { children, .. } => {
       // Add the node with children converted to stubs
       data_context.nodes.insert(
-        topic_id,
+        topic,
         Node::Documentation(parser::children_to_stubs(node.clone())),
       );
 

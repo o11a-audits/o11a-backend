@@ -1,4 +1,4 @@
-use crate::data_context::{ContractKind, FunctionKind};
+use crate::core::data_context::{ContractKind, FunctionKind};
 use crate::solidity::parser::{
   ASTNode, AssignmentOperator, BinaryOperator, FunctionStateMutability,
   FunctionVisibility, LiteralKind, StorageLocation, UnaryOperator,
