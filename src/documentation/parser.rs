@@ -1,4 +1,4 @@
-use crate::core::data_context::DataContext;
+use crate::core;
 use crate::core::topic;
 use markdown::mdast::Node as MdNode;
 use markdown::{ParseOptions, to_mdast};
@@ -16,21 +16,24 @@ pub fn next_node_id() -> i32 {
 
 /// Processes markdown files from src/ and docs/ directories
 pub fn process(
-  root: &Path,
-  data_context: &DataContext,
-) -> Result<std::collections::BTreeMap<String, Vec<DocumentationAST>>, String> {
+  project_path: &Path,
+  data_context: &core::DataContext,
+) -> Result<
+  std::collections::BTreeMap<core::ProjectPath, Vec<DocumentationAST>>,
+  String,
+> {
   let mut ast_map = std::collections::BTreeMap::new();
 
   // Process both src/ and docs/ directories
-  let src_dir = root.join("src");
-  let docs_dir = root.join("docs");
+  let src_dir = project_path.join("src");
+  let docs_dir = project_path.join("docs");
 
   if src_dir.exists() && src_dir.is_dir() {
-    traverse_directory(&src_dir, &mut ast_map, data_context)?;
+    traverse_directory(&src_dir, &project_path, &mut ast_map, data_context)?;
   }
 
   if docs_dir.exists() && docs_dir.is_dir() {
-    traverse_directory(&docs_dir, &mut ast_map, data_context)?;
+    traverse_directory(&docs_dir, &project_path, &mut ast_map, data_context)?;
   }
 
   Ok(ast_map)
@@ -38,8 +41,12 @@ pub fn process(
 
 fn traverse_directory(
   dir: &Path,
-  ast_map: &mut std::collections::BTreeMap<String, Vec<DocumentationAST>>,
-  data_context: &DataContext,
+  project_root: &Path,
+  ast_map: &mut std::collections::BTreeMap<
+    core::ProjectPath,
+    Vec<DocumentationAST>,
+  >,
+  data_context: &core::DataContext,
 ) -> Result<(), String> {
   let entries = std::fs::read_dir(dir)
     .map_err(|e| format!("Failed to read directory {:?}: {}", dir, e))?;
@@ -51,7 +58,7 @@ fn traverse_directory(
 
     if path.is_dir() {
       // Recursively traverse subdirectories
-      traverse_directory(&path, ast_map, data_context)?;
+      traverse_directory(&path, &project_root, ast_map, data_context)?;
     } else if path.is_file() {
       if let Some(extension) = path.extension() {
         if extension == "md" {
@@ -59,16 +66,13 @@ fn traverse_directory(
             format!("Failed to read markdown file {:?}: {}", path, e)
           })?;
 
-          let ast = ast_from_markdown(&content, &path, data_context)?;
-          let absolute_path = path
-            .to_str()
-            .ok_or_else(|| {
-              format!("Failed to convert path to string: {:?}", path)
-            })?
-            .to_string();
+          let project_path =
+            core::new_project_path_from_path(&path, project_root);
+
+          let ast = ast_from_markdown(&content, &project_path, data_context)?;
 
           ast_map
-            .entry(absolute_path)
+            .entry(project_path)
             .or_insert_with(Vec::new)
             .push(ast);
         }
@@ -81,8 +85,8 @@ fn traverse_directory(
 
 pub fn ast_from_markdown(
   content: &str,
-  file_path: &Path,
-  data_context: &DataContext,
+  project_path: &core::ProjectPath,
+  data_context: &core::DataContext,
 ) -> Result<DocumentationAST, String> {
   // Parse markdown to mdast
   let md_ast = to_mdast(content, &ParseOptions::default())
@@ -93,19 +97,14 @@ pub fn ast_from_markdown(
 
   Ok(DocumentationAST {
     nodes: vec![nodes],
-    absolute_path: file_path
-      .to_str()
-      .ok_or_else(|| {
-        format!("Failed to convert path to string: {:?}", file_path)
-      })?
-      .to_string(),
+    project_path: project_path.clone(),
     source_content: content.to_string(),
   })
 }
 
 pub struct DocumentationAST {
   pub nodes: Vec<DocumentationNode>,
-  pub absolute_path: String,
+  pub project_path: core::ProjectPath,
   pub source_content: String,
 }
 
@@ -299,7 +298,7 @@ fn group_into_sections(
 
 fn convert_mdast_node(
   node: &MdNode,
-  data_context: &DataContext,
+  data_context: &core::DataContext,
 ) -> Result<DocumentationNode, String> {
   let node_id = next_node_id();
 
@@ -454,9 +453,9 @@ fn convert_mdast_node(
 /// Search order: topic ID, qualified name, then simple name
 /// This is used to resolve inline code references to solidity declarations
 fn find_declaration_by_name<'a>(
-  data_context: &'a DataContext,
+  data_context: &'a core::DataContext,
   value: &str,
-) -> Option<&'a crate::core::data_context::Declaration> {
+) -> Option<&'a crate::core::Declaration> {
   // First try to find by topic ID (most specific)
   data_context
     .declarations

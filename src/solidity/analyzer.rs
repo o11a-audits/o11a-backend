@@ -1,15 +1,16 @@
-use crate::core::data_context::{
+use crate::core;
+use crate::core::topic;
+use crate::core::{
   AST, DataContext, Declaration, DeclarationKind, FunctionKind,
   FunctionModProperties, Node, Scope,
 };
-use crate::core::topic;
 use crate::solidity::parser::{self, ASTNode, SolidityAST};
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
 pub fn analyze(project_root: &Path) -> Result<DataContext, String> {
   // Load scope.txt file to determine which files are in audit scope (required)
-  let in_scope_files = load_scope_file(project_root)?;
+  let in_scope_files = core::load_in_scope_files(project_root)?;
 
   // First pass: Parse all ASTs and build comprehensive declaration dictionary
   // This processes every declaration in every file, regardless of scope
@@ -150,29 +151,9 @@ impl InScopeDeclaration {
   }
 }
 
-fn load_scope_file(project_root: &Path) -> Result<HashSet<String>, String> {
-  let scope_file = project_root.join("scope.txt");
-  if !scope_file.exists() {
-    return Err("scope.txt file not found in project root".to_string());
-  }
-
-  let content = std::fs::read_to_string(&scope_file)
-    .map_err(|e| format!("Failed to read scope.txt: {}", e))?;
-
-  let mut in_scope_files = HashSet::new();
-  for line in content.lines() {
-    let line = line.trim();
-    if !line.is_empty() {
-      in_scope_files.insert(line.to_string());
-    }
-  }
-
-  Ok(in_scope_files)
-}
-
 fn first_pass(
-  ast_map: &std::collections::BTreeMap<String, Vec<SolidityAST>>,
-  in_scope_files: &HashSet<String>,
+  ast_map: &std::collections::BTreeMap<core::ProjectPath, Vec<SolidityAST>>,
+  in_scope_files: &HashSet<core::ProjectPath>,
 ) -> Result<BTreeMap<i32, FirstPassDeclaration>, String> {
   let mut first_pass_declarations = BTreeMap::new();
 
@@ -182,7 +163,7 @@ fn first_pass(
     for ast in asts {
       process_first_pass_ast_nodes(
         &ast.nodes.iter().collect(),
-        &ast.absolute_path,
+        &path,
         is_file_in_scope,
         None,
         None,
@@ -196,7 +177,7 @@ fn first_pass(
 
 fn process_first_pass_ast_nodes(
   nodes: &Vec<&ASTNode>,
-  file_path: &String,
+  file_path: &core::ProjectPath,
   is_file_in_scope: bool,
   current_contract: Option<&topic::Topic>,
   current_function: Option<&topic::Topic>,
@@ -524,7 +505,7 @@ fn process_first_pass_ast_nodes(
 /// in-scope dictionary. When found, adds the node and all child nodes to the accumulating
 /// data structures.
 fn second_pass(
-  ast_map: &BTreeMap<String, Vec<SolidityAST>>,
+  ast_map: &BTreeMap<core::ProjectPath, Vec<SolidityAST>>,
   in_scope_declarations: &BTreeMap<i32, InScopeDeclaration>,
 ) -> Result<
   (
@@ -532,7 +513,7 @@ fn second_pass(
     BTreeMap<topic::Topic, Declaration>,
     BTreeMap<topic::Topic, Vec<topic::Topic>>,
     BTreeMap<topic::Topic, FunctionModProperties>,
-    BTreeMap<String, String>,
+    BTreeMap<core::ProjectPath, String>,
   ),
   String,
 > {
@@ -542,7 +523,7 @@ fn second_pass(
     BTreeMap::new();
   let mut function_properties: BTreeMap<topic::Topic, FunctionModProperties> =
     BTreeMap::new();
-  let mut source_content: BTreeMap<String, String> = BTreeMap::new();
+  let mut source_content: BTreeMap<core::ProjectPath, String> = BTreeMap::new();
 
   // Process each AST file
   for (file_path, asts) in ast_map {
@@ -579,7 +560,7 @@ fn second_pass(
 /// If parent_in_scope is true, all nodes are assumed to be in scope
 fn process_second_pass_nodes(
   ast_nodes: &Vec<&ASTNode>,
-  file_path: &str,
+  file_path: &core::ProjectPath,
   current_contract: Option<&str>,
   current_function: Option<&str>,
   parent_in_scope: bool,

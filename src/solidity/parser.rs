@@ -1,17 +1,21 @@
-use crate::core::data_context::{ContractKind, FunctionKind};
+use crate::core;
 use crate::core::topic;
+use crate::core::{ContractKind, FunctionKind};
 use serde_json;
 use std::path::Path;
 use std::str::FromStr;
 use std::{panic, vec};
 
 pub fn process(
-  root: &Path,
-) -> Result<std::collections::BTreeMap<String, Vec<SolidityAST>>, String> {
+  project_root: &Path,
+) -> Result<
+  std::collections::BTreeMap<core::ProjectPath, Vec<SolidityAST>>,
+  String,
+> {
   let mut ast_map = std::collections::BTreeMap::new();
 
   // Look for the "out" directory in the project root
-  let out_dir = root.join("out");
+  let out_dir = project_root.join("out");
   if !out_dir.exists() || !out_dir.is_dir() {
     return Err(format!("'out' directory not found at {:?}", out_dir));
   }
@@ -19,7 +23,7 @@ pub fn process(
   println!("Processing JSON files in directory: {:?}", out_dir);
 
   // Recursively traverse the out directory to find all JSON files
-  traverse_directory(&out_dir, &mut ast_map)?;
+  traverse_directory(&out_dir, &project_root, &mut ast_map)?;
 
   let total_asts: usize = ast_map.values().map(|v| v.len()).sum();
   println!(
@@ -33,7 +37,8 @@ pub fn process(
 
 fn traverse_directory(
   dir: &Path,
-  ast_map: &mut std::collections::BTreeMap<String, Vec<SolidityAST>>,
+  project_root: &Path,
+  ast_map: &mut std::collections::BTreeMap<core::ProjectPath, Vec<SolidityAST>>,
 ) -> Result<(), String> {
   let entries = std::fs::read_dir(dir)
     .map_err(|e| format!("Failed to read directory {:?}: {}", dir, e))?;
@@ -51,7 +56,7 @@ fn traverse_directory(
         }
       }
       // Recursively traverse subdirectories
-      traverse_directory(&path, ast_map)?;
+      traverse_directory(&path, &project_root, ast_map)?;
     } else if path.is_file() {
       if let Some(extension) = path.extension() {
         if extension == "json" {
@@ -61,8 +66,11 @@ fn traverse_directory(
               format!("Failed to parse JSON file {:?}: {}", path, e)
             })?;
 
+          let project_path =
+            core::new_project_path(&ast.absolute_path, project_root);
+
           ast_map
-            .entry(ast.absolute_path.clone())
+            .entry(project_path)
             .or_insert_with(Vec::new)
             .push(ast);
         }
