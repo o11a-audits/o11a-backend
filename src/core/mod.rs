@@ -1,5 +1,6 @@
 use std::path::Path;
 
+pub mod project;
 pub mod topic;
 
 use std::collections::{BTreeMap, HashSet};
@@ -197,4 +198,16 @@ pub fn load_in_scope_files(
   }
 
   Ok(in_scope_files)
+}
+
+pub fn new_data_context() -> DataContext {
+  DataContext {
+    in_scope_files: HashSet::new(),
+    source_content: BTreeMap::new(),
+    asts: BTreeMap::new(),
+    nodes: BTreeMap::new(),
+    declarations: BTreeMap::new(),
+    references: BTreeMap::new(),
+    function_properties: BTreeMap::new(),
+  }
 }

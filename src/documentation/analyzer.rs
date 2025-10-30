@@ -11,8 +11,8 @@ use std::path::Path;
 /// declarations to resolve inline code references
 pub fn analyze(
   project_root: &Path,
-  mut data_context: DataContext,
-) -> Result<DataContext, String> {
+  data_context: &mut DataContext,
+) -> Result<(), String> {
   // Parse all markdown files (passing data_context for inline code resolution)
   let ast_map = parser::process(project_root, &data_context)?;
 
@@ -36,11 +36,11 @@ pub fn analyze(
         .asts
         .insert(project_path.clone(), AST::Documentation(stubbed_ast));
 
-      process_documentation_ast(ast, project_path, &mut data_context)?;
+      process_documentation_ast(ast, project_path, data_context)?;
     }
   }
 
-  Ok(data_context)
+  Ok(())
 }
 
 fn process_documentation_ast(

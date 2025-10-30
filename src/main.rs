@@ -1,4 +1,5 @@
 use o11a_backend::api::{AppState, routes};
+use o11a_backend::core::{self, project};
 use o11a_backend::db;
 use std::path::Path;
 
@@ -25,8 +26,23 @@ async fn main() {
     .await
     .expect("Failed to run migrations");
 
+  println!("Creating DataContext...");
+
+  // Create empty DataContext
+  let data_context = core::new_data_context();
+
+  println!("DataContext created successfully");
+
   // Create app state
-  let state = AppState::new(pool);
+  let state = AppState::new(pool, data_context);
+
+  // Get project root from environment variable or use current directory
+  let project_root =
+    std::env::var("PROJECT_ROOT").unwrap_or_else(|_| ".".to_string());
+  let project_root = Path::new(&project_root);
+
+  project::load_project(project_root, &state.data_context)
+    .expect("Unable to load project");
 
   // Build router
   let app = routes::create_router(state);

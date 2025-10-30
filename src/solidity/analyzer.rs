@@ -8,25 +8,33 @@ use crate::solidity::parser::{self, ASTNode, SolidityAST};
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
-pub fn analyze(project_root: &Path) -> Result<DataContext, String> {
-  // Load scope.txt file to determine which files are in audit scope (required)
-  let in_scope_files = core::load_in_scope_files(project_root)?;
-
+pub fn analyze(
+  project_root: &Path,
+  data_context: &mut DataContext,
+) -> Result<(), String> {
   // First pass: Parse all ASTs and build comprehensive declaration dictionary
   // This processes every declaration in every file, regardless of scope
   let ast_map = parser::process(project_root)?;
-  let first_pass_declarations = first_pass(&ast_map, &in_scope_files)?;
+  let first_pass_declarations =
+    first_pass(&ast_map, &data_context.in_scope_files)?;
 
   // Tree shaking: Build in-scope dictionary by following references from
   // publicly visible declarations
   let in_scope_declarations = tree_shake(&first_pass_declarations)?;
 
   // Second pass: Build final data structures for in-scope declarations
-  let (nodes, declarations, references, function_properties, source_content) =
-    second_pass(&ast_map, &in_scope_declarations)?;
+  // Pass mutable references to data_context's maps directly
+  second_pass(
+    &ast_map,
+    &in_scope_declarations,
+    &mut data_context.nodes,
+    &mut data_context.declarations,
+    &mut data_context.references,
+    &mut data_context.function_properties,
+    &mut data_context.source_content,
+  )?;
 
-  // Build ASTs map with stubbed nodes
-  let mut asts = BTreeMap::new();
+  // Insert ASTs with stubbed nodes
   for (path, ast_list) in ast_map {
     for ast in ast_list {
       let stubbed_ast = crate::solidity::parser::SolidityAST {
@@ -39,19 +47,13 @@ pub fn analyze(project_root: &Path) -> Result<DataContext, String> {
         absolute_path: ast.absolute_path.clone(),
         source_content: ast.source_content.clone(),
       };
-      asts.insert(path.clone(), AST::Solidity(stubbed_ast));
+      data_context
+        .asts
+        .insert(path.clone(), AST::Solidity(stubbed_ast));
     }
   }
 
-  Ok(DataContext {
-    in_scope_files,
-    nodes,
-    declarations,
-    references,
-    function_properties,
-    source_content,
-    asts,
-  })
+  Ok(())
 }
 
 /// First pass declaration structure used during initial AST traversal.
@@ -507,24 +509,12 @@ fn process_first_pass_ast_nodes(
 fn second_pass(
   ast_map: &BTreeMap<core::ProjectPath, Vec<SolidityAST>>,
   in_scope_declarations: &BTreeMap<i32, InScopeDeclaration>,
-) -> Result<
-  (
-    BTreeMap<topic::Topic, Node>,
-    BTreeMap<topic::Topic, Declaration>,
-    BTreeMap<topic::Topic, Vec<topic::Topic>>,
-    BTreeMap<topic::Topic, FunctionModProperties>,
-    BTreeMap<core::ProjectPath, String>,
-  ),
-  String,
-> {
-  let mut nodes: BTreeMap<topic::Topic, Node> = BTreeMap::new();
-  let mut declarations: BTreeMap<topic::Topic, Declaration> = BTreeMap::new();
-  let mut references: BTreeMap<topic::Topic, Vec<topic::Topic>> =
-    BTreeMap::new();
-  let mut function_properties: BTreeMap<topic::Topic, FunctionModProperties> =
-    BTreeMap::new();
-  let mut source_content: BTreeMap<core::ProjectPath, String> = BTreeMap::new();
-
+  nodes: &mut BTreeMap<topic::Topic, Node>,
+  declarations: &mut BTreeMap<topic::Topic, Declaration>,
+  references: &mut BTreeMap<topic::Topic, Vec<topic::Topic>>,
+  function_properties: &mut BTreeMap<topic::Topic, FunctionModProperties>,
+  source_content: &mut BTreeMap<core::ProjectPath, String>,
+) -> Result<(), String> {
   // Process each AST file
   for (file_path, asts) in ast_map {
     for ast in asts {
@@ -535,10 +525,10 @@ fn second_pass(
         None,  // No function context initially
         false, // Parent is not in scope - check each node
         in_scope_declarations,
-        &mut nodes,
-        &mut declarations,
-        &mut references,
-        &mut function_properties,
+        nodes,
+        declarations,
+        references,
+        function_properties,
       )?;
 
       if found_in_scope_node == true {
@@ -547,13 +537,7 @@ fn second_pass(
     }
   }
 
-  Ok((
-    nodes,
-    declarations,
-    references,
-    function_properties,
-    source_content,
-  ))
+  Ok(())
 }
 
 /// Recursively process nodes during the second pass
