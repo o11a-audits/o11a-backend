@@ -36,12 +36,21 @@ async fn main() {
   // Create app state
   let state = AppState::new(pool, data_context);
 
-  // Get project root from environment variable or use current directory
+  // Get project root and audit ID from environment variables
   let project_root =
     std::env::var("PROJECT_ROOT").unwrap_or_else(|_| ".".to_string());
   let project_root = Path::new(&project_root);
 
-  project::load_project(project_root, &state.data_context)
+  let audit_id =
+    std::env::var("AUDIT_ID").unwrap_or_else(|_| "default".to_string());
+
+  println!(
+    "Loading audit '{}' from project: {}",
+    audit_id,
+    project_root.display()
+  );
+
+  project::load_project(project_root, &audit_id, &state.data_context)
     .expect("Unable to load project");
 
   // Build router

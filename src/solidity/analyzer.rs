@@ -10,28 +10,34 @@ use std::path::Path;
 
 pub fn analyze(
   project_root: &Path,
+  audit_id: &str,
   data_context: &mut DataContext,
 ) -> Result<(), String> {
+  // Get or create the audit data
+  let audit_data = data_context
+    .get_audit_mut(audit_id)
+    .ok_or_else(|| format!("Audit '{}' not found", audit_id))?;
+
   // First pass: Parse all ASTs and build comprehensive declaration dictionary
   // This processes every declaration in every file, regardless of scope
   let ast_map = parser::process(project_root)?;
   let first_pass_declarations =
-    first_pass(&ast_map, &data_context.in_scope_files)?;
+    first_pass(&ast_map, &audit_data.in_scope_files)?;
 
   // Tree shaking: Build in-scope dictionary by following references from
   // publicly visible declarations
   let in_scope_declarations = tree_shake(&first_pass_declarations)?;
 
   // Second pass: Build final data structures for in-scope declarations
-  // Pass mutable references to data_context's maps directly
+  // Pass mutable references to audit_data's maps directly
   second_pass(
     &ast_map,
     &in_scope_declarations,
-    &mut data_context.nodes,
-    &mut data_context.declarations,
-    &mut data_context.references,
-    &mut data_context.function_properties,
-    &mut data_context.source_content,
+    &mut audit_data.nodes,
+    &mut audit_data.declarations,
+    &mut audit_data.references,
+    &mut audit_data.function_properties,
+    &mut audit_data.source_content,
   )?;
 
   // Insert ASTs with stubbed nodes
@@ -47,7 +53,7 @@ pub fn analyze(
         absolute_path: ast.absolute_path.clone(),
         source_content: ast.source_content.clone(),
       };
-      data_context
+      audit_data
         .asts
         .insert(path.clone(), AST::Solidity(stubbed_ast));
     }

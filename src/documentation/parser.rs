@@ -17,7 +17,7 @@ pub fn next_node_id() -> i32 {
 /// Processes markdown files from src/ and docs/ directories
 pub fn process(
   project_path: &Path,
-  data_context: &core::DataContext,
+  audit_data: &core::AuditData,
 ) -> Result<
   std::collections::BTreeMap<core::ProjectPath, Vec<DocumentationAST>>,
   String,
@@ -29,11 +29,11 @@ pub fn process(
   let docs_dir = project_path.join("docs");
 
   if src_dir.exists() && src_dir.is_dir() {
-    traverse_directory(&src_dir, &project_path, &mut ast_map, data_context)?;
+    traverse_directory(&src_dir, &project_path, &mut ast_map, audit_data)?;
   }
 
   if docs_dir.exists() && docs_dir.is_dir() {
-    traverse_directory(&docs_dir, &project_path, &mut ast_map, data_context)?;
+    traverse_directory(&docs_dir, &project_path, &mut ast_map, audit_data)?;
   }
 
   Ok(ast_map)
@@ -46,7 +46,7 @@ fn traverse_directory(
     core::ProjectPath,
     Vec<DocumentationAST>,
   >,
-  data_context: &core::DataContext,
+  audit_data: &core::AuditData,
 ) -> Result<(), String> {
   let entries = std::fs::read_dir(dir)
     .map_err(|e| format!("Failed to read directory {:?}: {}", dir, e))?;
@@ -58,7 +58,7 @@ fn traverse_directory(
 
     if path.is_dir() {
       // Recursively traverse subdirectories
-      traverse_directory(&path, &project_root, ast_map, data_context)?;
+      traverse_directory(&path, &project_root, ast_map, audit_data)?;
     } else if path.is_file() {
       if let Some(extension) = path.extension() {
         if extension == "md" {
@@ -69,7 +69,7 @@ fn traverse_directory(
           let project_path =
             core::new_project_path_from_path(&path, project_root);
 
-          let ast = ast_from_markdown(&content, &project_path, data_context)?;
+          let ast = ast_from_markdown(&content, &project_path, audit_data)?;
 
           ast_map
             .entry(project_path)
@@ -86,14 +86,14 @@ fn traverse_directory(
 pub fn ast_from_markdown(
   content: &str,
   project_path: &core::ProjectPath,
-  data_context: &core::DataContext,
+  audit_data: &core::AuditData,
 ) -> Result<DocumentationAST, String> {
   // Parse markdown to mdast
   let md_ast = to_mdast(content, &ParseOptions::default())
     .map_err(|e| format!("Failed to parse markdown: {}", e))?;
 
   // Convert mdast to our DocumentationNode format
-  let nodes = convert_mdast_node(&md_ast, data_context)?;
+  let nodes = convert_mdast_node(&md_ast, audit_data)?;
 
   Ok(DocumentationAST {
     nodes: vec![nodes],
@@ -298,7 +298,7 @@ fn group_into_sections(
 
 fn convert_mdast_node(
   node: &MdNode,
-  data_context: &core::DataContext,
+  audit_data: &core::AuditData,
 ) -> Result<DocumentationNode, String> {
   let node_id = next_node_id();
 
@@ -308,7 +308,7 @@ fn convert_mdast_node(
       let children = root
         .children
         .iter()
-        .map(|child| convert_mdast_node(child, data_context))
+        .map(|child| convert_mdast_node(child, audit_data))
         .collect::<Result<Vec<_>, _>>()?;
 
       // Group children into sections
@@ -324,7 +324,7 @@ fn convert_mdast_node(
       let children = heading
         .children
         .iter()
-        .map(|child| convert_mdast_node(child, data_context))
+        .map(|child| convert_mdast_node(child, audit_data))
         .collect::<Result<Vec<_>, _>>()?;
 
       Ok(DocumentationNode::Heading {
@@ -338,7 +338,7 @@ fn convert_mdast_node(
       let children = paragraph
         .children
         .iter()
-        .map(|child| convert_mdast_node(child, data_context))
+        .map(|child| convert_mdast_node(child, audit_data))
         .collect::<Result<Vec<_>, _>>()?;
 
       Ok(DocumentationNode::Paragraph { node_id, children })
@@ -352,7 +352,7 @@ fn convert_mdast_node(
     MdNode::InlineCode(code) => {
       // Try to find a matching declaration in the solidity context
       let referenced_declaration =
-        find_declaration_by_name(data_context, &code.value)
+        find_declaration_by_name(audit_data, &code.value)
           .map(|decl| decl.topic.clone());
 
       Ok(DocumentationNode::InlineCode {
@@ -372,7 +372,7 @@ fn convert_mdast_node(
       let children = list
         .children
         .iter()
-        .map(|child| convert_mdast_node(child, data_context))
+        .map(|child| convert_mdast_node(child, audit_data))
         .collect::<Result<Vec<_>, _>>()?;
 
       Ok(DocumentationNode::List {
@@ -386,7 +386,7 @@ fn convert_mdast_node(
       let children = item
         .children
         .iter()
-        .map(|child| convert_mdast_node(child, data_context))
+        .map(|child| convert_mdast_node(child, audit_data))
         .collect::<Result<Vec<_>, _>>()?;
 
       Ok(DocumentationNode::ListItem { node_id, children })
@@ -396,7 +396,7 @@ fn convert_mdast_node(
       let children = emphasis
         .children
         .iter()
-        .map(|child| convert_mdast_node(child, data_context))
+        .map(|child| convert_mdast_node(child, audit_data))
         .collect::<Result<Vec<_>, _>>()?;
 
       Ok(DocumentationNode::Emphasis { node_id, children })
@@ -406,7 +406,7 @@ fn convert_mdast_node(
       let children = strong
         .children
         .iter()
-        .map(|child| convert_mdast_node(child, data_context))
+        .map(|child| convert_mdast_node(child, audit_data))
         .collect::<Result<Vec<_>, _>>()?;
 
       Ok(DocumentationNode::Strong { node_id, children })
@@ -416,7 +416,7 @@ fn convert_mdast_node(
       let children = link
         .children
         .iter()
-        .map(|child| convert_mdast_node(child, data_context))
+        .map(|child| convert_mdast_node(child, audit_data))
         .collect::<Result<Vec<_>, _>>()?;
 
       Ok(DocumentationNode::Link {
@@ -431,7 +431,7 @@ fn convert_mdast_node(
       let children = quote
         .children
         .iter()
-        .map(|child| convert_mdast_node(child, data_context))
+        .map(|child| convert_mdast_node(child, audit_data))
         .collect::<Result<Vec<_>, _>>()?;
 
       Ok(DocumentationNode::BlockQuote { node_id, children })
@@ -449,26 +449,26 @@ fn convert_mdast_node(
   }
 }
 
-/// Searches the DataContext for a declaration with the given value
+/// Searches the AuditData for a declaration with the given value
 /// Search order: topic ID, qualified name, then simple name
 /// This is used to resolve inline code references to solidity declarations
 fn find_declaration_by_name<'a>(
-  data_context: &'a core::DataContext,
+  audit_data: &'a core::AuditData,
   value: &str,
 ) -> Option<&'a crate::core::Declaration> {
   // First try to find by topic ID (most specific)
-  data_context
+  audit_data
     .declarations
     .get(&topic::new_topic(value))
     .or_else(|| {
       // If not found by topic ID, try to find by qualified name
-      data_context
+      audit_data
         .declarations
         .values()
-        .find(|decl| decl.qualified_name(data_context) == value)
+        .find(|decl| decl.qualified_name(audit_data) == value)
         .or_else(|| {
           // If not found by qualified name, try to find by simple name
-          data_context
+          audit_data
             .declarations
             .values()
             .find(|decl| decl.name == value)

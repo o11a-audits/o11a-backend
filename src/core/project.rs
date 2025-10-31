@@ -7,8 +7,17 @@ use std::sync::{Arc, Mutex};
 
 pub fn load_project(
   project_root: &Path,
+  audit_id: &str,
   data_context: &Arc<Mutex<DataContext>>,
 ) -> Result<(), String> {
+  // Create the audit if it doesn't exist
+  {
+    let mut ctx = data_context.lock().unwrap();
+    if !ctx.create_audit(audit_id.to_string()) {
+      return Err(format!("Audit '{}' already exists", audit_id));
+    }
+  }
+
   // Load in-scope files from scope.txt
   let in_scope_files =
     core::load_in_scope_files(project_root).map_err(|e| {
@@ -17,26 +26,28 @@ pub fn load_project(
 
   {
     let mut ctx = data_context.lock().unwrap();
-    for file in in_scope_files {
-      ctx.in_scope_files.insert(file);
-    }
+    let audit_data = ctx
+      .get_audit_mut(audit_id)
+      .ok_or_else(|| format!("Audit '{}' not found", audit_id))?;
+
+    audit_data.in_scope_files = in_scope_files;
   }
 
   println!("Analyzing Solidity project at: {}", project_root.display());
 
-  // Analyze Solidity project and populate DataContext
+  // Analyze Solidity project and populate AuditData
   {
     let mut ctx = data_context.lock().unwrap();
-    solidity::analyze(project_root, &mut ctx)
+    solidity::analyze(project_root, audit_id, &mut ctx)
       .map_err(|e| format!("Failed to analyze Solidity project: {}", e))?;
   }
 
   println!("Analyzing documentation files...");
 
-  // Analyze documentation and augment DataContext
+  // Analyze documentation and augment AuditData
   {
     let mut ctx = data_context.lock().unwrap();
-    documentation::analyze(project_root, &mut ctx)
+    documentation::analyze(project_root, audit_id, &mut ctx)
       .map_err(|e| format!("Failed to analyze documentation files: {}", e))?;
   }
 

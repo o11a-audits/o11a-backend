@@ -1,7 +1,7 @@
 use crate::core;
 use crate::core::topic;
 use crate::core::{
-  AST, DataContext, Declaration, DeclarationKind, Node, Scope,
+  AST, AuditData, DataContext, Declaration, DeclarationKind, Node, Scope,
 };
 use crate::documentation::parser::{self, DocumentationAST, DocumentationNode};
 use std::path::Path;
@@ -11,16 +11,22 @@ use std::path::Path;
 /// declarations to resolve inline code references
 pub fn analyze(
   project_root: &Path,
+  audit_id: &str,
   data_context: &mut DataContext,
 ) -> Result<(), String> {
-  // Parse all markdown files (passing data_context for inline code resolution)
-  let ast_map = parser::process(project_root, &data_context)?;
+  // Get the audit data
+  let audit_data = data_context
+    .get_audit_mut(audit_id)
+    .ok_or_else(|| format!("Audit '{}' not found", audit_id))?;
 
-  // Process each markdown file and add nodes/declarations to the data context
+  // Parse all markdown files (passing audit_data for inline code resolution)
+  let ast_map = parser::process(project_root, &audit_data)?;
+
+  // Process each markdown file and add nodes/declarations to the audit data
   for (project_path, asts) in &ast_map {
     for ast in asts {
       // Add to in_scope_files
-      data_context.in_scope_files.insert(project_path.clone());
+      audit_data.in_scope_files.insert(project_path.clone());
 
       // Add to asts map with stubbed nodes
       let stubbed_ast = DocumentationAST {
@@ -32,11 +38,11 @@ pub fn analyze(
         project_path: project_path.clone(),
         source_content: ast.source_content.clone(),
       };
-      data_context
+      audit_data
         .asts
         .insert(project_path.clone(), AST::Documentation(stubbed_ast));
 
-      process_documentation_ast(ast, project_path, data_context)?;
+      process_documentation_ast(ast, project_path, audit_data)?;
     }
   }
 
@@ -46,10 +52,10 @@ pub fn analyze(
 fn process_documentation_ast(
   ast: &DocumentationAST,
   project_path: &core::ProjectPath,
-  data_context: &mut DataContext,
+  audit_data: &mut AuditData,
 ) -> Result<(), String> {
   // Store source content for this file
-  data_context
+  audit_data
     .source_content
     .insert(project_path.clone(), ast.source_content.clone());
 
@@ -60,7 +66,7 @@ fn process_documentation_ast(
       project_path,
       None, // No section context initially
       None, // No paragraph context initially
-      data_context,
+      audit_data,
     )?;
   }
 
@@ -72,15 +78,15 @@ fn process_documentation_node(
   project_path: &core::ProjectPath,
   current_section: Option<&topic::Topic>,
   current_paragraph: Option<&topic::Topic>,
-  data_context: &mut DataContext,
+  audit_data: &mut AuditData,
 ) -> Result<(), String> {
   let node_id = node.node_id();
   let topic = topic::new_node_topic(node_id);
 
   match node {
     DocumentationNode::Root { children, .. } => {
-      // Add the Root node to the data context
-      data_context.nodes.insert(
+      // Add the Root node to the audit data
+      audit_data.nodes.insert(
         topic.clone(),
         Node::Documentation(parser::children_to_stubs(node.clone())),
       );
@@ -92,7 +98,7 @@ fn process_documentation_node(
           project_path,
           current_section,
           current_paragraph,
-          data_context,
+          audit_data,
         )?;
       }
     }
@@ -109,7 +115,7 @@ fn process_documentation_node(
         project_path,
         current_section,
         current_paragraph,
-        data_context,
+        audit_data,
       )?;
 
       // Process section children with this section as the current section
@@ -119,12 +125,12 @@ fn process_documentation_node(
           project_path,
           Some(&header_topic),
           None, // Reset paragraph context when entering new section
-          data_context,
+          audit_data,
         )?;
       }
 
       // Add the section node itself with children converted to stubs
-      data_context.nodes.insert(
+      audit_data.nodes.insert(
         topic,
         Node::Documentation(parser::children_to_stubs(node.clone())),
       );
@@ -141,7 +147,7 @@ fn process_documentation_node(
       // Extract heading text from children for the name
       let name = format!("Header {}", topic.id);
 
-      data_context.declarations.insert(
+      audit_data.declarations.insert(
         topic.clone(),
         Declaration {
           topic: topic.clone(),
@@ -152,7 +158,7 @@ fn process_documentation_node(
       );
 
       // Add the heading node with children converted to stubs
-      data_context.nodes.insert(
+      audit_data.nodes.insert(
         topic.clone(),
         Node::Documentation(parser::children_to_stubs(node.clone())),
       );
@@ -164,7 +170,7 @@ fn process_documentation_node(
           project_path,
           current_section,
           current_paragraph,
-          data_context,
+          audit_data,
         )?;
       }
     }
@@ -178,7 +184,7 @@ fn process_documentation_node(
         member: None,
       };
 
-      data_context.declarations.insert(
+      audit_data.declarations.insert(
         topic.clone(),
         Declaration {
           topic: topic.clone(),
@@ -189,7 +195,7 @@ fn process_documentation_node(
       );
 
       // Add the node with children converted to stubs
-      data_context.nodes.insert(
+      audit_data.nodes.insert(
         topic.clone(),
         Node::Documentation(parser::children_to_stubs(node.clone())),
       );
@@ -201,7 +207,7 @@ fn process_documentation_node(
           project_path,
           current_section,
           Some(&topic),
-          data_context,
+          audit_data,
         )?;
       }
     }
@@ -211,14 +217,14 @@ fn process_documentation_node(
       ..
     } => {
       // Add the inline code node
-      data_context
+      audit_data
         .nodes
         .insert(topic.clone(), Node::Documentation(node.clone()));
 
       // If there's a referenced declaration, create a reference
       if let Some(solidity_topic) = referenced_declaration {
         // Create a reference from the solidity declaration to this inline code
-        let references = data_context
+        let references = audit_data
           .references
           .entry(solidity_topic.clone())
           .or_insert_with(Vec::new);
@@ -234,7 +240,7 @@ fn process_documentation_node(
     DocumentationNode::Text { .. }
     | DocumentationNode::CodeBlock { .. }
     | DocumentationNode::ThematicBreak { .. } => {
-      data_context
+      audit_data
         .nodes
         .insert(topic, Node::Documentation(node.clone()));
     }
@@ -247,7 +253,7 @@ fn process_documentation_node(
     | DocumentationNode::Link { children, .. }
     | DocumentationNode::BlockQuote { children, .. } => {
       // Add the node with children converted to stubs
-      data_context.nodes.insert(
+      audit_data.nodes.insert(
         topic,
         Node::Documentation(parser::children_to_stubs(node.clone())),
       );
@@ -259,7 +265,7 @@ fn process_documentation_node(
           project_path,
           current_section,
           current_paragraph,
-          data_context,
+          audit_data,
         )?;
       }
     }

@@ -22,8 +22,9 @@ pub enum ContractKind {
   Interface,
 }
 
-pub struct DataContext {
-  // A list of files that are in scope for the current audit
+/// Contains all data for a single audit
+pub struct AuditData {
+  // A list of files that are in scope for this audit
   pub in_scope_files: HashSet<ProjectPath>,
   // Contains the content of the original source file for a given file path
   pub source_content: BTreeMap<ProjectPath, String>,
@@ -37,6 +38,11 @@ pub struct DataContext {
   pub references: BTreeMap<topic::Topic, Vec<topic::Topic>>,
   // Contains the function properties for a given topic
   pub function_properties: BTreeMap<topic::Topic, FunctionModProperties>,
+}
+
+pub struct DataContext {
+  // Map of audit_id to audit data
+  pub audits: BTreeMap<String, AuditData>,
 }
 
 pub enum Node {
@@ -85,13 +91,12 @@ impl Declaration {
   /// Returns the qualified name of the declaration
   /// Format: component.member.name or member.name or name
   /// Uses the declaration names from the scope components, not topic IDs
-  pub fn qualified_name(&self, data_context: &DataContext) -> String {
+  pub fn qualified_name(&self, audit_data: &AuditData) -> String {
     let mut parts = Vec::new();
 
     // Add component name if it exists
     if let Some(component_topic) = &self.scope.component {
-      if let Some(component_decl) =
-        data_context.declarations.get(component_topic)
+      if let Some(component_decl) = audit_data.declarations.get(component_topic)
       {
         parts.push(component_decl.name.clone());
       }
@@ -99,7 +104,7 @@ impl Declaration {
 
     // Add member name if it exists
     if let Some(member_topic) = &self.scope.member {
-      if let Some(member_decl) = data_context.declarations.get(member_topic) {
+      if let Some(member_decl) = audit_data.declarations.get(member_topic) {
         parts.push(member_decl.name.clone());
       }
     }
@@ -200,8 +205,8 @@ pub fn load_in_scope_files(
   Ok(in_scope_files)
 }
 
-pub fn new_data_context() -> DataContext {
-  DataContext {
+pub fn new_audit_data() -> AuditData {
+  AuditData {
     in_scope_files: HashSet::new(),
     source_content: BTreeMap::new(),
     asts: BTreeMap::new(),
@@ -209,5 +214,42 @@ pub fn new_data_context() -> DataContext {
     declarations: BTreeMap::new(),
     references: BTreeMap::new(),
     function_properties: BTreeMap::new(),
+  }
+}
+
+pub fn new_data_context() -> DataContext {
+  DataContext {
+    audits: BTreeMap::new(),
+  }
+}
+
+impl DataContext {
+  /// Creates a new audit and returns true if successful, false if audit already exists
+  pub fn create_audit(&mut self, audit_id: String) -> bool {
+    if self.audits.contains_key(&audit_id) {
+      return false;
+    }
+    self.audits.insert(audit_id, new_audit_data());
+    true
+  }
+
+  /// Gets a reference to an audit's data
+  pub fn get_audit(&self, audit_id: &str) -> Option<&AuditData> {
+    self.audits.get(audit_id)
+  }
+
+  /// Gets a mutable reference to an audit's data
+  pub fn get_audit_mut(&mut self, audit_id: &str) -> Option<&mut AuditData> {
+    self.audits.get_mut(audit_id)
+  }
+
+  /// Removes an audit and returns true if it existed
+  pub fn delete_audit(&mut self, audit_id: &str) -> bool {
+    self.audits.remove(audit_id).is_some()
+  }
+
+  /// Lists all audit IDs
+  pub fn list_audits(&self) -> Vec<String> {
+    self.audits.keys().cloned().collect()
   }
 }

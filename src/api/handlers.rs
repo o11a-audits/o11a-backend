@@ -1,8 +1,13 @@
-use axum::{Json, extract::State, http::StatusCode};
+use axum::{
+  Json,
+  extract::{Path, State},
+  http::StatusCode,
+};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
 use crate::api::AppState;
+use crate::core::project;
 
 // Health check handler
 pub async fn health_check() -> StatusCode {
@@ -17,14 +22,24 @@ pub struct DataContextResponse {
   pub declarations: serde_json::Value,
 }
 
-// Get DataContext
+// Get DataContext for a specific audit
 pub async fn get_data_context(
-  State(_state): State<AppState>,
+  State(state): State<AppState>,
+  Path(audit_id): Path<String>,
 ) -> Result<Json<DataContextResponse>, StatusCode> {
-  // TODO: Implement actual analyzer integration
-  // For now, return placeholder response
+  let ctx = state.data_context.lock().unwrap();
+
+  let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+
+  // Convert in_scope_files to Vec<String>
+  let in_scope_files: Vec<String> = audit_data
+    .in_scope_files
+    .iter()
+    .map(|p| p.file_path.clone())
+    .collect();
+
   Ok(Json(DataContextResponse {
-    in_scope_files: vec![],
+    in_scope_files,
     nodes: serde_json::json!({}),
     declarations: serde_json::json!({}),
   }))
@@ -85,10 +100,93 @@ pub struct BoundariesResponse {
   pub boundaries: Vec<String>,
 }
 
-// Get boundaries
+// Get boundaries for a specific audit
 pub async fn get_boundaries(
   State(_state): State<AppState>,
+  Path(_audit_id): Path<String>,
 ) -> Result<Json<BoundariesResponse>, StatusCode> {
   // TODO: Implement actual boundaries from checker
   Ok(Json(BoundariesResponse { boundaries: vec![] }))
+}
+
+// Audit management handlers
+
+#[derive(Debug, Serialize)]
+pub struct AuditInfo {
+  pub audit_id: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AuditsListResponse {
+  pub audits: Vec<AuditInfo>,
+}
+
+// List all audits
+pub async fn list_audits(
+  State(state): State<AppState>,
+) -> Result<Json<AuditsListResponse>, StatusCode> {
+  let ctx = state.data_context.lock().unwrap();
+  let audits = ctx
+    .list_audits()
+    .into_iter()
+    .map(|audit_id| AuditInfo { audit_id })
+    .collect();
+
+  Ok(Json(AuditsListResponse { audits }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateAuditRequest {
+  pub audit_id: String,
+  pub project_root: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CreateAuditResponse {
+  pub audit_id: String,
+  pub message: String,
+}
+
+// Create a new audit
+pub async fn create_audit(
+  State(state): State<AppState>,
+  Json(payload): Json<CreateAuditRequest>,
+) -> Result<Json<CreateAuditResponse>, StatusCode> {
+  let project_root = std::path::Path::new(&payload.project_root);
+
+  // Load the project for this audit
+  project::load_project(project_root, &payload.audit_id, &state.data_context)
+    .map_err(|e| {
+    eprintln!(
+      "Failed to load project for audit '{}': {}",
+      payload.audit_id, e
+    );
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+
+  Ok(Json(CreateAuditResponse {
+    audit_id: payload.audit_id.clone(),
+    message: format!("Audit '{}' created successfully", payload.audit_id),
+  }))
+}
+
+#[derive(Debug, Serialize)]
+pub struct DeleteAuditResponse {
+  pub message: String,
+}
+
+// Delete an audit
+pub async fn delete_audit(
+  State(state): State<AppState>,
+  Path(audit_id): Path<String>,
+) -> Result<Json<DeleteAuditResponse>, StatusCode> {
+  let mut ctx = state.data_context.lock().unwrap();
+
+  if ctx.delete_audit(&audit_id) {
+    Ok(Json(DeleteAuditResponse {
+      message: format!("Audit '{}' deleted successfully", audit_id),
+    }))
+  } else {
+    Err(StatusCode::NOT_FOUND)
+  }
 }
