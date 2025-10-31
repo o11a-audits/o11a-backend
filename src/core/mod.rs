@@ -24,6 +24,8 @@ pub enum ContractKind {
 
 /// Contains all data for a single audit
 pub struct AuditData {
+  // The name of the audit being audited, like "Chainlink"
+  pub audit_name: String,
   // A list of files that are in scope for this audit
   pub in_scope_files: HashSet<ProjectPath>,
   // Contains the content of the original source file for a given file path
@@ -205,9 +207,38 @@ pub fn load_in_scope_files(
   Ok(in_scope_files)
 }
 
-pub fn new_audit_data() -> AuditData {
+/// Reads the first line of the "name.txt" file in the project root
+pub fn load_audit_name(project_root: &Path) -> Result<String, String> {
+  let name_file = project_root.join("name.txt");
+  if !name_file.exists() {
+    return Err("name.txt file not found in project root".to_string());
+  }
+
+  let content = std::fs::read_to_string(&name_file)
+    .map_err(|e| format!("Failed to read name.txt: {}", e))?;
+
+  let audit_name = content
+    .lines()
+    .next()
+    .ok_or_else(|| "name.txt is empty".to_string())
+    .map_err(|_| "Failed to parse name.txt".to_string())?
+    .trim()
+    .to_string();
+
+  if audit_name.is_empty() {
+    return Err("First line of name.txt is empty".to_string());
+  }
+
+  Ok(audit_name)
+}
+
+pub fn new_audit_data(
+  audit_name: String,
+  in_scope_files: HashSet<ProjectPath>,
+) -> AuditData {
   AuditData {
-    in_scope_files: HashSet::new(),
+    audit_name,
+    in_scope_files,
     source_content: BTreeMap::new(),
     asts: BTreeMap::new(),
     nodes: BTreeMap::new(),
@@ -225,11 +256,18 @@ pub fn new_data_context() -> DataContext {
 
 impl DataContext {
   /// Creates a new audit and returns true if successful, false if audit already exists
-  pub fn create_audit(&mut self, audit_id: String) -> bool {
+  pub fn create_audit(
+    &mut self,
+    audit_id: String,
+    audit_name: String,
+    in_scope_files: HashSet<ProjectPath>,
+  ) -> bool {
     if self.audits.contains_key(&audit_id) {
       return false;
     }
-    self.audits.insert(audit_id, new_audit_data());
+    self
+      .audits
+      .insert(audit_id, new_audit_data(audit_name, in_scope_files));
     true
   }
 

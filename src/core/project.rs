@@ -10,27 +10,21 @@ pub fn load_project(
   audit_id: &str,
   data_context: &Arc<Mutex<DataContext>>,
 ) -> Result<(), String> {
-  // Create the audit if it doesn't exist
-  {
-    let mut ctx = data_context.lock().unwrap();
-    if !ctx.create_audit(audit_id.to_string()) {
-      return Err(format!("Audit '{}' already exists", audit_id));
-    }
-  }
-
   // Load in-scope files from scope.txt
   let in_scope_files =
     core::load_in_scope_files(project_root).map_err(|e| {
       format!("Failed to load in-scope files from scope.txt: {}", e)
     })?;
 
+  let audit_name = core::load_audit_name(project_root)
+    .map_err(|e| format!("Failed to load audit name from audit.txt: {}", e))?;
+
+  // Create the audit if it doesn't exist
   {
     let mut ctx = data_context.lock().unwrap();
-    let audit_data = ctx
-      .get_audit_mut(audit_id)
-      .ok_or_else(|| format!("Audit '{}' not found", audit_id))?;
-
-    audit_data.in_scope_files = in_scope_files;
+    if !ctx.create_audit(audit_id.to_string(), audit_name, in_scope_files) {
+      return Err(format!("Audit '{}' already exists", audit_id));
+    }
   }
 
   println!("Analyzing Solidity project at: {}", project_root.display());
