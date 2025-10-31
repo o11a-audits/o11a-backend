@@ -190,3 +190,60 @@ pub async fn delete_audit(
     Err(StatusCode::NOT_FOUND)
   }
 }
+
+#[derive(Debug, Serialize)]
+pub struct ContractInfo {
+  pub name: String,
+  pub kind: String,
+  pub file_path: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ContractsResponse {
+  pub contracts: Vec<ContractInfo>,
+}
+
+// Get all contracts for an audit
+pub async fn get_contracts(
+  State(state): State<AppState>,
+  Path(audit_id): Path<String>,
+) -> Result<Json<ContractsResponse>, StatusCode> {
+  let ctx = state.data_context.lock().unwrap();
+
+  let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+
+  let mut contracts = Vec::new();
+
+  // Filter for .sol files
+  let sol_files: Vec<_> = audit_data
+    .in_scope_files
+    .iter()
+    .filter(|path| path.file_path.ends_with(".sol"))
+    .collect();
+
+  // Process each .sol file
+  for project_path in sol_files {
+    if let Some(ast) = audit_data.asts.get(project_path) {
+      // Get the AST and traverse it
+      if let crate::core::AST::Solidity(solidity_ast) = ast {
+        // Look for ContractDefinition nodes
+        for node in solidity_ast.resolve_nodes(&audit_data.nodes) {
+          if let crate::solidity::parser::ASTNode::ContractDefinition {
+            name,
+            contract_kind,
+            ..
+          } = node
+          {
+            contracts.push(ContractInfo {
+              name: name.clone(),
+              kind: format!("{:?}", contract_kind),
+              file_path: project_path.file_path.clone(),
+            });
+          }
+        }
+      }
+    }
+  }
+
+  Ok(Json(ContractsResponse { contracts }))
+}

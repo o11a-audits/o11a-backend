@@ -37,12 +37,12 @@ async fn main() {
   let state = AppState::new(pool, data_context);
 
   // Get project root and audit ID from environment variables
-  let project_root =
-    std::env::var("PROJECT_ROOT").unwrap_or_else(|_| ".".to_string());
+  let project_root = std::env::var("PROJECT_ROOT")
+    .unwrap_or_else(|_| "/home/john/audits/nudgexyz".to_string());
   let project_root = Path::new(&project_root);
 
   let audit_id =
-    std::env::var("AUDIT_ID").unwrap_or_else(|_| "default".to_string());
+    std::env::var("AUDIT_ID").unwrap_or_else(|_| "nudgexyz".to_string());
 
   println!(
     "Loading audit '{}' from project: {}",

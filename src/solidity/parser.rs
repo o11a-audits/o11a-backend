@@ -2,6 +2,7 @@ use crate::core;
 use crate::core::topic;
 use crate::core::{ContractKind, FunctionKind};
 use serde_json;
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::str::FromStr;
 use std::{panic, vec};
@@ -140,6 +141,30 @@ pub struct SolidityAST {
   pub nodes: Vec<ASTNode>,
   pub absolute_path: String,
   pub source_content: String,
+}
+
+impl SolidityAST {
+  /// Get children nodes, resolving nodes that are stubs to their real nodes
+  /// from the nodes map
+  pub fn resolve_nodes(
+    &self,
+    nodes_map: &BTreeMap<topic::Topic, core::Node>,
+  ) -> Vec<ASTNode> {
+    self
+      .nodes
+      .iter()
+      .map(|node| match node {
+        ASTNode::Stub { topic, .. } => {
+          if let Some(core::Node::Solidity(ast_node)) = nodes_map.get(topic) {
+            ast_node.clone()
+          } else {
+            node.clone()
+          }
+        }
+        _ => node.clone(),
+      })
+      .collect()
+  }
 }
 
 fn read_source_file(
@@ -1497,6 +1522,29 @@ impl ASTNode {
         result
       }
     }
+  }
+
+  /// Get children nodes, resolving nodes that are stubs to their real nodes
+  /// from the nodes map
+  pub fn resolve_nodes(
+    &self,
+    nodes_map: &BTreeMap<topic::Topic, core::Node>,
+  ) -> Vec<ASTNode> {
+    let nodes = self.nodes();
+
+    nodes
+      .iter()
+      .map(|node| match node {
+        ASTNode::Stub { topic, .. } => {
+          if let Some(core::Node::Solidity(ast_node)) = nodes_map.get(topic) {
+            ast_node.clone()
+          } else {
+            (*node).clone()
+          }
+        }
+        _ => (*node).clone(),
+      })
+      .collect()
   }
 }
 
