@@ -697,8 +697,16 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       )
     }
 
-    ASTNode::UserDefinedValueTypeDefinition { .. } => {
-      "UserDefinedValueTypeDefinition placeholder".to_owned()
+    ASTNode::UserDefinedValueTypeDefinition {
+      name,
+      underlying_type,
+      ..
+    } => {
+      format!(
+        "type {} is {}",
+        format_user_defined_type(name),
+        do_node_to_source_text(underlying_type, indent_level)
+      )
     }
 
     ASTNode::PragmaDirective { literals, .. } => {

@@ -878,8 +878,8 @@ pub enum ASTNode {
   UserDefinedValueTypeDefinition {
     node_id: i32,
     src_location: SourceLocation,
-    nodes: Vec<ASTNode>,
-    body: Option<Box<ASTNode>>,
+    name: String,
+    underlying_type: Box<ASTNode>,
   },
 
   // Directive nodes
@@ -1434,9 +1434,9 @@ impl ASTNode {
         }
         result
       }
-      ASTNode::UserDefinedValueTypeDefinition { .. } => {
-        panic!("UserDefinedValueTypeDefinition")
-      }
+      ASTNode::UserDefinedValueTypeDefinition {
+        underlying_type, ..
+      } => vec![underlying_type],
       ASTNode::PragmaDirective { .. } => vec![],
       ASTNode::ImportDirective { .. } => vec![],
       ASTNode::UsingForDirective {
@@ -2139,16 +2139,13 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     ASTNode::UserDefinedValueTypeDefinition {
       node_id,
       src_location,
-      nodes,
-      body,
+      name,
+      underlying_type,
     } => ASTNode::UserDefinedValueTypeDefinition {
       node_id: node_id,
       src_location: src_location,
-      nodes: nodes.iter().map(|n| node_to_stub(n)).collect(),
-      body: match body {
-        Some(b) => Some(Box::new(node_to_stub(&b))),
-        None => None,
-      },
+      name: name,
+      underlying_type: Box::new(node_to_stub(&underlying_type)),
     },
     ASTNode::PragmaDirective {
       node_id,
@@ -3870,24 +3867,19 @@ pub fn node_from_json(
       })
     }
     "UserDefinedValueTypeDefinition" => {
-      let nodes = get_required_node_vec_with_context(
+      let name = get_required_string_with_context(val, "name", node_type_str)?;
+      let underlying_type = get_required_node_with_context(
         val,
-        "nodes",
-        "UserDefinedValueTypeDefinition",
-        source_content,
-      )?;
-      let body = get_optional_node_with_context(
-        val,
-        "body",
-        "UserDefinedValueTypeDefinition",
+        "underlyingType",
+        node_type_str,
         source_content,
       )?;
 
       Ok(ASTNode::UserDefinedValueTypeDefinition {
         node_id,
         src_location,
-        nodes,
-        body,
+        name,
+        underlying_type,
       })
     }
     "PragmaDirective" => {
