@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub mod project;
 pub mod topic;
@@ -165,23 +165,52 @@ pub fn new_project_path_from_path(
   file_path: &Path,
   project_root: &Path,
 ) -> ProjectPath {
-  // If the file path is already relative, use it as-is
-  if file_path.is_relative() {
-    return ProjectPath {
-      file_path: file_path.to_string_lossy().to_string(),
-    };
-  }
+  // Convert relative paths to absolute by joining with project root
+  let absolute_path = if file_path.is_relative() {
+    project_root.join(file_path)
+  } else {
+    file_path.to_path_buf()
+  };
 
-  // If the file path is absolute, try to strip the project path prefix
-  let relative_path = file_path
+  // Normalize the path by removing "." and ".." components
+  let normalized = normalize_path(&absolute_path);
+
+  // Strip the project root prefix to get a clean relative path
+  let relative_path = normalized
     .strip_prefix(project_root)
-    .unwrap_or(file_path)
+    .unwrap_or(&normalized)
     .to_string_lossy()
     .to_string();
 
   ProjectPath {
     file_path: relative_path,
   }
+}
+
+/// Normalizes a path by resolving "." and ".." components
+/// This is similar to canonicalize but doesn't require the path to exist
+fn normalize_path(path: &Path) -> PathBuf {
+  let mut components = Vec::new();
+
+  for component in path.components() {
+    match component {
+      std::path::Component::CurDir => {
+        // Skip "." components
+      }
+      std::path::Component::ParentDir => {
+        // Remove the last component for ".."
+        if !components.is_empty() {
+          components.pop();
+        }
+      }
+      _ => {
+        // Add normal components (RootDir, Prefix, Normal)
+        components.push(component);
+      }
+    }
+  }
+
+  components.iter().collect()
 }
 
 pub fn load_in_scope_files(
@@ -289,5 +318,71 @@ impl DataContext {
   /// Lists all audit IDs
   pub fn list_audits(&self) -> Vec<String> {
     self.audits.keys().cloned().collect()
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use std::path::PathBuf;
+
+  #[test]
+  fn test_new_project_path_strips_dot_slash() {
+    let project_root = PathBuf::from("/home/user/project");
+    let file_path = String::from("./src/my.sol");
+
+    let result = new_project_path(&file_path, &project_root);
+
+    assert_eq!(result.file_path, "src/my.sol");
+  }
+
+  #[test]
+  fn test_new_project_path_from_path_strips_dot_slash() {
+    let project_root = PathBuf::from("/home/user/project");
+    let file_path = Path::new("./src/my.sol");
+
+    let result = new_project_path_from_path(file_path, &project_root);
+
+    assert_eq!(result.file_path, "src/my.sol");
+  }
+
+  #[test]
+  fn test_new_project_path_handles_simple_relative() {
+    let project_root = PathBuf::from("/home/user/project");
+    let file_path = String::from("src/my.sol");
+
+    let result = new_project_path(&file_path, &project_root);
+
+    assert_eq!(result.file_path, "src/my.sol");
+  }
+
+  #[test]
+  fn test_new_project_path_handles_absolute() {
+    let project_root = PathBuf::from("/home/user/project");
+    let file_path = String::from("/home/user/project/src/my.sol");
+
+    let result = new_project_path(&file_path, &project_root);
+
+    assert_eq!(result.file_path, "src/my.sol");
+  }
+
+  #[test]
+  fn test_new_project_path_handles_parent_directory() {
+    let project_root = PathBuf::from("/home/user/project");
+    let file_path = String::from("./src/../contracts/my.sol");
+
+    let result = new_project_path(&file_path, &project_root);
+
+    assert_eq!(result.file_path, "contracts/my.sol");
+  }
+
+  #[test]
+  fn test_new_project_path_handles_nested_dot_slash() {
+    let project_root = PathBuf::from("/home/user/project");
+    let file_path = String::from("./src/./contracts/./my.sol");
+
+    let result = new_project_path(&file_path, &project_root);
+
+    assert_eq!(result.file_path, "src/contracts/my.sol");
   }
 }
