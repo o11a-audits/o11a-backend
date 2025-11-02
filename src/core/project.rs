@@ -45,5 +45,7 @@ pub fn load_project(
       .map_err(|e| format!("Failed to analyze documentation files: {}", e))?;
   }
 
+  println!("Done loading audit: {}", audit_id);
+
   Ok(())
 }
