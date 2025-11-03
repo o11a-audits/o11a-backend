@@ -17,11 +17,13 @@ pub fn load_project(
     })?;
 
   let audit_name = core::load_audit_name(project_root)
-    .map_err(|e| format!("Failed to load audit name from audit.txt: {}", e))?;
+    .map_err(|e| format!("Failed to load audit name from name.txt: {}", e))?;
 
   // Create the audit if it doesn't exist
   {
-    let mut ctx = data_context.lock().unwrap();
+    let mut ctx = data_context
+      .lock()
+      .map_err(|e| format!("Mutex poisoned while creating audit: {}", e))?;
     if !ctx.create_audit(audit_id.to_string(), audit_name, in_scope_files) {
       return Err(format!("Audit '{}' already exists", audit_id));
     }
@@ -31,7 +33,9 @@ pub fn load_project(
 
   // Analyze Solidity project and populate AuditData
   {
-    let mut ctx = data_context.lock().unwrap();
+    let mut ctx = data_context.lock().map_err(|e| {
+      format!("Mutex poisoned while analyzing Solidity project: {}", e)
+    })?;
     solidity::analyze(project_root, audit_id, &mut ctx)
       .map_err(|e| format!("Failed to analyze Solidity project: {}", e))?;
   }
@@ -40,7 +44,9 @@ pub fn load_project(
 
   // Analyze documentation and augment AuditData
   {
-    let mut ctx = data_context.lock().unwrap();
+    let mut ctx = data_context.lock().map_err(|e| {
+      format!("Mutex poisoned while analyzing documentation: {}", e)
+    })?;
     documentation::analyze(project_root, audit_id, &mut ctx)
       .map_err(|e| format!("Failed to analyze documentation files: {}", e))?;
   }

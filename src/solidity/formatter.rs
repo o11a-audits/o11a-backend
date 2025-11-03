@@ -22,14 +22,14 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
     ASTNode::Assignment {
       operator,
       left_hand_side,
-      right_and_side,
+      right_hand_side,
       ..
     } => {
       let lhs = do_node_to_source_text(left_hand_side, indent_level);
       let op = assignment_operator_to_string(operator);
 
       let indent_level = indent_level + 1;
-      let rhs = do_node_to_source_text(right_and_side, indent_level);
+      let rhs = do_node_to_source_text(right_hand_side, indent_level);
       format!(
         "{} {}{}",
         lhs,

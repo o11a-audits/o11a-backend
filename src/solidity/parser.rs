@@ -1,6 +1,6 @@
 use crate::core;
 use crate::core::topic;
-use crate::core::{ContractKind, FunctionKind};
+use crate::core::{ContractKind, FunctionKind, ProjectPath};
 use serde_json;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -62,16 +62,13 @@ fn traverse_directory(
       if let Some(extension) = path.extension() {
         if extension == "json" {
           println!("Processing JSON file: {:?}", path);
-          let ast =
-            ast_from_json_file(&path.to_string_lossy()).map_err(|e| {
+          let ast = ast_from_json_file(&path.to_string_lossy(), &project_root)
+            .map_err(|e| {
               format!("Failed to parse JSON file {:?}: {}", path, e)
             })?;
 
-          let project_path =
-            core::new_project_path(&ast.absolute_path, project_root);
-
           ast_map
-            .entry(project_path)
+            .entry(ast.project_path.clone())
             .or_insert_with(Vec::new)
             .push(ast);
         }
@@ -82,7 +79,10 @@ fn traverse_directory(
   Ok(())
 }
 
-pub fn ast_from_json_file(file_path: &str) -> Result<SolidityAST, String> {
+pub fn ast_from_json_file(
+  file_path: &str,
+  project_root: &Path,
+) -> Result<SolidityAST, String> {
   let json = std::fs::read_to_string(file_path)
     .map_err(|e| format!("Failed to read file: {}", e))?;
 
@@ -109,9 +109,10 @@ pub fn ast_from_json_file(file_path: &str) -> Result<SolidityAST, String> {
     .ok_or_else(|| {
       "Missing or invalid 'absolutePath' field in ast object".to_string()
     })?;
+  let project_path = core::new_project_path(&absolute_path, project_root);
 
   // Read the original source file content
-  let source_content = read_source_file(&file_path, &absolute_path)?;
+  let source_content = read_source_file(&project_path, &project_root)?;
 
   let nodes_array = ast_obj
     .get("nodes")
@@ -131,7 +132,7 @@ pub fn ast_from_json_file(file_path: &str) -> Result<SolidityAST, String> {
   Ok(SolidityAST {
     node_id,
     nodes,
-    absolute_path,
+    project_path,
     source_content,
   })
 }
@@ -139,7 +140,7 @@ pub fn ast_from_json_file(file_path: &str) -> Result<SolidityAST, String> {
 pub struct SolidityAST {
   pub node_id: i32,
   pub nodes: Vec<ASTNode>,
-  pub absolute_path: String,
+  pub project_path: ProjectPath,
   pub source_content: String,
 }
 
@@ -168,30 +169,19 @@ impl SolidityAST {
 }
 
 fn read_source_file(
-  json_file_path: &str,
-  absolute_path: &str,
+  project_path: &ProjectPath,
+  project_root: &Path,
 ) -> Result<String, String> {
-  // Extract project root from JSON file path
-  // JSON files are typically in out/ directory, so go up to find project root
-  let json_path = std::path::Path::new(json_file_path);
-  let mut project_root = json_path;
-
-  // Navigate up to find project root (look for parent that doesn't contain "out")
-  while let Some(parent) = project_root.parent() {
-    if !parent.to_string_lossy().contains("out") {
-      project_root = parent;
-      break;
-    }
-    project_root = parent;
-  }
-
-  // Combine project root with absolute path to get source file path
-  let source_file_path =
-    project_root.join(absolute_path.trim_start_matches('/'));
+  // Create the absolute path to the source file
+  let absolute_source_file_path =
+    core::project_path_to_absolute_path(project_path, project_root);
 
   // Read the source file
-  std::fs::read_to_string(&source_file_path).map_err(|e| {
-    format!("Failed to read source file {:?}: {}", source_file_path, e)
+  std::fs::read_to_string(&absolute_source_file_path).map_err(|e| {
+    format!(
+      "Failed to read source file {:?}: {}",
+      absolute_source_file_path, e
+    )
   })
 }
 
@@ -509,7 +499,7 @@ impl FromStr for AssignmentOperator {
       "^=" => Ok(AssignmentOperator::BitwiseXorAssign),
       "<<=" => Ok(AssignmentOperator::LeftShiftAssign),
       ">>=" => Ok(AssignmentOperator::RightShiftAssign),
-      _ => Err(format!("Unknown binary operator: {}", s)),
+      _ => Err(format!("Unknown assignment operator: {}", s)),
     }
   }
 }
@@ -586,7 +576,7 @@ pub enum ASTNode {
     node_id: i32,
     src_location: SourceLocation,
     operator: AssignmentOperator,
-    right_and_side: Box<ASTNode>,
+    right_hand_side: Box<ASTNode>,
     left_hand_side: Box<ASTNode>,
   },
   BinaryOperation {
@@ -1199,10 +1189,10 @@ impl ASTNode {
   pub fn nodes(&self) -> Vec<&ASTNode> {
     match self {
       ASTNode::Assignment {
-        right_and_side,
+        right_hand_side,
         left_hand_side,
         ..
-      } => vec![right_and_side, left_hand_side],
+      } => vec![right_hand_side, left_hand_side],
       ASTNode::BinaryOperation {
         left_expression,
         right_expression,
@@ -1562,13 +1552,13 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       node_id,
       src_location,
       operator,
-      right_and_side,
+      right_hand_side,
       left_hand_side,
     } => ASTNode::Assignment {
       node_id: node_id,
       src_location: src_location,
       operator: operator,
-      right_and_side: Box::new(node_to_stub(&right_and_side)),
+      right_hand_side: Box::new(node_to_stub(&right_hand_side)),
       left_hand_side: Box::new(node_to_stub(&left_hand_side)),
     },
     ASTNode::BinaryOperation {
@@ -2946,7 +2936,7 @@ pub fn node_from_json(
     "Assignment" => {
       let operator =
         get_required_enum_with_context(val, "operator", node_type_str)?;
-      let right_and_side = get_required_node_with_context(
+      let right_hand_side = get_required_node_with_context(
         val,
         "rightHandSide",
         node_type_str,
@@ -2963,7 +2953,7 @@ pub fn node_from_json(
         node_id,
         src_location,
         operator,
-        right_and_side,
+        right_hand_side,
         left_hand_side,
       })
     }

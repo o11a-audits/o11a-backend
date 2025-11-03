@@ -187,6 +187,13 @@ pub fn new_project_path_from_path(
   }
 }
 
+pub fn project_path_to_absolute_path(
+  project_path: &ProjectPath,
+  project_root: &Path,
+) -> PathBuf {
+  project_root.join(&project_path.file_path)
+}
+
 /// Normalizes a path by resolving "." and ".." components
 /// This is similar to canonicalize but doesn't require the path to exist
 fn normalize_path(path: &Path) -> PathBuf {

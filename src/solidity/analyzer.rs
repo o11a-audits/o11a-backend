@@ -50,7 +50,7 @@ pub fn analyze(
           .iter()
           .map(|n| parser::children_to_stubs(n.clone()))
           .collect(),
-        absolute_path: ast.absolute_path.clone(),
+        project_path: ast.project_path.clone(),
         source_content: ast.source_content.clone(),
       };
       audit_data
@@ -537,7 +537,7 @@ fn second_pass(
         function_properties,
       )?;
 
-      if found_in_scope_node == true {
+      if found_in_scope_node {
         source_content.insert(file_path.clone(), ast.source_content.clone());
       }
     }
@@ -681,7 +681,7 @@ fn process_second_pass_nodes(
         _ => (current_contract, current_function),
       };
 
-      process_second_pass_nodes(
+      let child_found_in_scope = process_second_pass_nodes(
         &child_nodes,
         file_path,
         new_contract,
@@ -693,6 +693,9 @@ fn process_second_pass_nodes(
         references,
         function_properties,
       )?;
+
+      // Accumulate whether any in-scope nodes were found in children
+      found_in_scope_node = found_in_scope_node || child_found_in_scope;
     }
   }
 

@@ -29,7 +29,10 @@ pub async fn get_data_context(
   Path(audit_id): Path<String>,
 ) -> Result<Json<DataContextResponse>, StatusCode> {
   println!("GET /api/v1/audits/{}/data-context", audit_id);
-  let ctx = state.data_context.lock().unwrap();
+  let ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in get_data_context: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
 
   let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
 
@@ -131,7 +134,10 @@ pub async fn list_audits(
   State(state): State<AppState>,
 ) -> Result<Json<AuditsListResponse>, StatusCode> {
   println!("GET /api/v1/audits");
-  let ctx = state.data_context.lock().unwrap();
+  let ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in list_audits: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
   let audits = ctx
     .list_audits()
     .into_iter()
@@ -188,7 +194,10 @@ pub async fn delete_audit(
   Path(audit_id): Path<String>,
 ) -> Result<Json<DeleteAuditResponse>, StatusCode> {
   println!("DELETE /api/v1/audits/{}", audit_id);
-  let mut ctx = state.data_context.lock().unwrap();
+  let mut ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in delete_audit: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
 
   if ctx.delete_audit(&audit_id) {
     Ok(Json(DeleteAuditResponse {
@@ -217,7 +226,10 @@ pub async fn get_contracts(
   Path(audit_id): Path<String>,
 ) -> Result<Json<ContractsResponse>, StatusCode> {
   println!("GET /api/v1/audits/{}/contracts", audit_id);
-  let ctx = state.data_context.lock().unwrap();
+  let ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in get_contracts: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
 
   let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
 

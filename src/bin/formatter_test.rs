@@ -107,7 +107,7 @@ fn create_assignment() -> ASTNode {
     src_location: create_source_location(0, 5, 0),
     left_hand_side: Box::new(left),
     operator: AssignmentOperator::Assign,
-    right_and_side: Box::new(right),
+    right_hand_side: Box::new(right),
   }
 }
 
