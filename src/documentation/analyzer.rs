@@ -246,7 +246,8 @@ fn process_documentation_node(
     }
 
     // For nodes with children, add the node and recurse
-    DocumentationNode::List { children, .. }
+    DocumentationNode::Sentence { children, .. }
+    | DocumentationNode::List { children, .. }
     | DocumentationNode::ListItem { children, .. }
     | DocumentationNode::Emphasis { children, .. }
     | DocumentationNode::Strong { children, .. }

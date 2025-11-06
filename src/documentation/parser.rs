@@ -1,7 +1,7 @@
 use crate::core;
 use crate::core::topic;
+use markdown::ParseOptions;
 use markdown::mdast::Node as MdNode;
-use markdown::{ParseOptions, to_mdast};
 use std::path::Path;
 use std::sync::atomic::{AtomicI32, Ordering};
 
@@ -89,7 +89,7 @@ pub fn ast_from_markdown(
   audit_data: &core::AuditData,
 ) -> Result<DocumentationAST, String> {
   // Parse markdown to mdast
-  let md_ast = to_mdast(content, &ParseOptions::default())
+  let md_ast = markdown::to_mdast(content, &ParseOptions::default())
     .map_err(|e| format!("Failed to parse markdown: {}", e))?;
 
   // Convert mdast to our DocumentationNode format
@@ -110,7 +110,6 @@ pub struct DocumentationAST {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DocumentationNode {
-  // Container for the entire document
   Root {
     node_id: i32,
     children: Vec<DocumentationNode>,
@@ -124,40 +123,41 @@ pub enum DocumentationNode {
     children: Vec<DocumentationNode>, // Content until next heading
   },
 
-  // Headings
   Heading {
     node_id: i32,
     level: u8,
     children: Vec<DocumentationNode>,
   },
 
-  // Paragraphs
   Paragraph {
     node_id: i32,
     children: Vec<DocumentationNode>,
   },
 
-  // Text content
+  // Sentence
+  Sentence {
+    node_id: i32,
+    children: Vec<DocumentationNode>,
+  },
+
   Text {
     node_id: i32,
     value: String,
   },
 
-  // Inline code (potential references to declarations)
+  // Inline code (potential references to source code declarations)
   InlineCode {
     node_id: i32,
     value: String,
     referenced_declaration: Option<topic::Topic>, // Solidity topic ID if found
   },
 
-  // Code blocks
   CodeBlock {
     node_id: i32,
     lang: Option<String>,
     value: String,
   },
 
-  // Lists
   List {
     node_id: i32,
     ordered: bool,
@@ -169,7 +169,6 @@ pub enum DocumentationNode {
     children: Vec<DocumentationNode>,
   },
 
-  // Emphasis and strong
   Emphasis {
     node_id: i32,
     children: Vec<DocumentationNode>,
@@ -180,7 +179,6 @@ pub enum DocumentationNode {
     children: Vec<DocumentationNode>,
   },
 
-  // Links
   Link {
     node_id: i32,
     url: String,
@@ -188,13 +186,11 @@ pub enum DocumentationNode {
     children: Vec<DocumentationNode>,
   },
 
-  // Block quote
   BlockQuote {
     node_id: i32,
     children: Vec<DocumentationNode>,
   },
 
-  // Thematic break (horizontal rule)
   ThematicBreak {
     node_id: i32,
   },
@@ -213,6 +209,7 @@ impl DocumentationNode {
       DocumentationNode::Section { node_id, .. } => *node_id,
       DocumentationNode::Heading { node_id, .. } => *node_id,
       DocumentationNode::Paragraph { node_id, .. } => *node_id,
+      DocumentationNode::Sentence { node_id, .. } => *node_id,
       DocumentationNode::Text { node_id, .. } => *node_id,
       DocumentationNode::InlineCode { node_id, .. } => *node_id,
       DocumentationNode::CodeBlock { node_id, .. } => *node_id,
@@ -233,6 +230,7 @@ impl DocumentationNode {
       | DocumentationNode::Section { children, .. }
       | DocumentationNode::Heading { children, .. }
       | DocumentationNode::Paragraph { children, .. }
+      | DocumentationNode::Sentence { children, .. }
       | DocumentationNode::List { children, .. }
       | DocumentationNode::ListItem { children, .. }
       | DocumentationNode::Emphasis { children, .. }
@@ -244,6 +242,90 @@ impl DocumentationNode {
       _ => vec![],
     }
   }
+}
+
+/// Splits paragraph children into sentence nodes based on periods
+/// Each sentence contains all inline nodes (Text, InlineCode, Emphasis, Strong, Link) until a period
+fn split_into_sentences(
+  children: Vec<DocumentationNode>,
+) -> Vec<DocumentationNode> {
+  let mut sentences = Vec::new();
+  let mut current_sentence_nodes = Vec::new();
+
+  for node in children {
+    match &node {
+      DocumentationNode::Text { value, .. } => {
+        // Split text by periods, keeping track of which nodes go into which sentence
+        let mut remaining_text = value.as_str();
+
+        loop {
+          if let Some(period_idx) = remaining_text.find('.') {
+            // Found a period
+            let before_period = &remaining_text[..=period_idx]; // Include the period
+
+            if !before_period.trim().is_empty() {
+              // Add text up to and including the period
+              current_sentence_nodes.push(DocumentationNode::Text {
+                node_id: next_node_id(),
+                value: before_period.to_string(),
+              });
+
+              // Complete this sentence
+              if !current_sentence_nodes.is_empty() {
+                sentences.push(DocumentationNode::Sentence {
+                  node_id: next_node_id(),
+                  children: current_sentence_nodes.drain(..).collect(),
+                });
+              }
+            }
+
+            // Move past the period
+            remaining_text = &remaining_text[period_idx + 1..];
+          } else {
+            // No more periods in this text node
+            if !remaining_text.trim().is_empty() {
+              current_sentence_nodes.push(DocumentationNode::Text {
+                node_id: next_node_id(),
+                value: remaining_text.to_string(),
+              });
+            }
+            break;
+          }
+        }
+      }
+
+      // For non-text inline nodes, add them to the current sentence
+      DocumentationNode::InlineCode { .. }
+      | DocumentationNode::Emphasis { .. }
+      | DocumentationNode::Strong { .. }
+      | DocumentationNode::Link { .. } => {
+        current_sentence_nodes.push(node);
+      }
+
+      // Other node types shouldn't appear as direct children of paragraphs,
+      // but handle them gracefully by ending the current sentence
+      _ => {
+        // End the current sentence if there is one
+        if !current_sentence_nodes.is_empty() {
+          sentences.push(DocumentationNode::Sentence {
+            node_id: next_node_id(),
+            children: current_sentence_nodes.drain(..).collect(),
+          });
+        }
+        // The unexpected node is not added to any sentence
+      }
+    }
+  }
+
+  // Add any remaining nodes as the final sentence
+  if !current_sentence_nodes.is_empty() {
+    sentences.push(DocumentationNode::Sentence {
+      node_id: next_node_id(),
+      children: current_sentence_nodes,
+    });
+  }
+
+  sentences
 }
 
 /// Groups nodes into sections based on headings
@@ -341,7 +423,13 @@ fn convert_mdast_node(
         .map(|child| convert_mdast_node(child, audit_data))
         .collect::<Result<Vec<_>, _>>()?;
 
-      Ok(DocumentationNode::Paragraph { node_id, children })
+      // Split the paragraph's children into sentences
+      let sentences = split_into_sentences(children);
+
+      Ok(DocumentationNode::Paragraph {
+        node_id,
+        children: sentences,
+      })
     }
 
     MdNode::Text(text) => Ok(DocumentationNode::Text {
@@ -503,6 +591,12 @@ pub fn children_to_stubs(node: DocumentationNode) -> DocumentationNode {
     },
     DocumentationNode::Paragraph { node_id, children } => {
       DocumentationNode::Paragraph {
+        node_id,
+        children: children.into_iter().map(node_to_stub).collect(),
+      }
+    }
+    DocumentationNode::Sentence { node_id, children } => {
+      DocumentationNode::Sentence {
         node_id,
         children: children.into_iter().map(node_to_stub).collect(),
       }

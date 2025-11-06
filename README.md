@@ -46,9 +46,9 @@ The exact data this three step process creates goes into forming the Data Contex
 
 See the collaborator section for topic ID details.
 
-Declarations are scoped by three properties: Container, Component, and Member. Using the scope, any identifier/operation or its parent can be linked to.
+Declarations are scoped by four properties: Container, Component, Member, and Statement. Using the scope, any identifier/operation or its parent can be linked to.
 
-For contract source files, the container is the source file, the component is a contract, and the member is a function. A contract's scope will only be a container, a function's scope will be a container and a component, and a local variable's scope will be a container, component, and member. For documentation, the container is the source file, the component is a section, and the member is a paragraph. For comments, the container is the comment ID, the component is a section, and the member is a paragraph.
+For contract source files, the container is the source file, the component is a contract, the member is a function and the statement is a code statement. A contract's scope will only be a container, a function's scope will be a container and a component, a parameter variable's scope will be a container, component, and member, and a local variable's scope will be a container, component, member, and statement. For documentation, the container is the source file, the component is a section, the member is a paragraph, and the statement is a sentence. For comments, the container is the comment ID, the component is a section, the member is a paragraph, and the statement is a sentence.
 
 # Formatter
 The formatter takes an AST node from the parser and the data context from the analyzer and returns an HTML string.

@@ -68,6 +68,21 @@ fn do_node_to_html(node: &DocumentationNode, indent_level: usize) -> String {
       )
     }
 
+    DocumentationNode::Sentence {
+      children, node_id, ..
+    } => {
+      let content = children
+        .iter()
+        .map(|child| do_node_to_html(child, indent_level))
+        .collect::<Vec<_>>()
+        .join("");
+
+      format!(
+        "<span class=\"sentence node-{}\" id=\"node-{}\">{}</span>",
+        node_id, node_id, content
+      )
+    }
+
     DocumentationNode::Text { value, .. } => html_escape(value),
 
     DocumentationNode::InlineCode {
