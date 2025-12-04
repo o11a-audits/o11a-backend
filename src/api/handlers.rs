@@ -2,12 +2,16 @@ use axum::{
   Json,
   extract::{Path, State},
   http::StatusCode,
+  response::{Html, IntoResponse},
 };
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
-use crate::api::AppState;
-use crate::core::project;
+use crate::core::{Node, project, topic::Topic};
+use crate::{
+  api::AppState,
+  core::topic::{new_node_topic, new_topic},
+};
 
 // Health check handler
 pub async fn health_check() -> StatusCode {
@@ -210,6 +214,7 @@ pub async fn delete_audit(
 
 #[derive(Debug, Serialize)]
 pub struct ContractInfo {
+  pub topic: Topic,
   pub name: String,
   pub kind: String,
   pub file_path: String,
@@ -226,6 +231,7 @@ pub async fn get_contracts(
   Path(audit_id): Path<String>,
 ) -> Result<Json<ContractsResponse>, StatusCode> {
   println!("GET /api/v1/audits/{}/contracts", audit_id);
+
   let ctx = state.data_context.lock().map_err(|e| {
     eprintln!("Mutex poisoned in get_contracts: {}", e);
     StatusCode::INTERNAL_SERVER_ERROR
@@ -250,12 +256,14 @@ pub async fn get_contracts(
         // Look for ContractDefinition nodes
         for node in solidity_ast.resolve_nodes(&audit_data.nodes) {
           if let crate::solidity::parser::ASTNode::ContractDefinition {
+            node_id,
             name,
             contract_kind,
             ..
           } = node
           {
             contracts.push(ContractInfo {
+              topic: new_node_topic(node_id),
               name: name.clone(),
               kind: format!("{:?}", contract_kind),
               file_path: project_path.file_path.clone(),
@@ -267,4 +275,40 @@ pub async fn get_contracts(
   }
 
   Ok(Json(ContractsResponse { contracts }))
+}
+
+// Get source text for a specific topic within an audit
+pub async fn get_source_text(
+  State(state): State<AppState>,
+  Path((audit_id, topic_id)): Path<(String, String)>,
+) -> Result<impl IntoResponse, StatusCode> {
+  println!("GET /api/v1/audits/{}/source_text/{}", audit_id, topic_id);
+
+  let ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in get_source_text: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+
+  let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+
+  // Create topic from the topic_id
+  let topic = new_topic(&topic_id);
+
+  // Get the node for this topic
+  let node = audit_data.nodes.get(&topic).ok_or_else(|| {
+    eprintln!("Topic '{}' not found in audit '{}'", topic_id, audit_id);
+    StatusCode::NOT_FOUND
+  })?;
+
+  // Convert the node to source text based on its type
+  let source_text = match node {
+    Node::Solidity(solidity_node) => {
+      crate::solidity::formatter::node_to_source_text(solidity_node)
+    }
+    Node::Documentation(doc_node) => {
+      crate::documentation::formatter::node_to_html(doc_node)
+    }
+  };
+
+  Ok(Html(source_text))
 }

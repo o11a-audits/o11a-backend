@@ -1,4 +1,6 @@
-#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord)]
+use serde::Serialize;
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Serialize)]
 pub struct Topic {
   pub id: String,
 }

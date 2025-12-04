@@ -130,7 +130,13 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
         .map(|opt| do_node_to_source_text(opt, indent_level))
         .collect::<Vec<_>>()
         .join("\n");
-      format!("{}{{{}}}", expr, indent(&opts, indent_level))
+      let trailing_newline = if !opts.is_empty() { "\n" } else { "" };
+      format!(
+        "{}{{{}{}}}",
+        expr,
+        indent(&opts, indent_level),
+        trailing_newline
+      )
     }
 
     ASTNode::Identifier { name, .. } => format_identifier(name),
@@ -210,10 +216,12 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
         .map(|c| do_node_to_source_text(c, indent_level))
         .collect::<Vec<_>>()
         .join(",\n");
+      let trailing_newline = if !comps.is_empty() { "\n" } else { "" };
       format!(
-        "{}{}{}",
+        "{}{}{}{}",
         format_brace("(", indent_level),
         indent(&comps, indent_level),
+        trailing_newline,
         format_brace(")", indent_level)
       )
     }
@@ -245,10 +253,12 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
           .map(|s| do_node_to_source_text(s, indent_level))
           .collect::<Vec<_>>()
           .join("\n\n");
+        let trailing_newline = if !stmts.is_empty() { "\n" } else { "" };
         format!(
-          "{}{}{}",
+          "{}{}{}{}",
           format_brace("{", indent_level),
           indent(&stmts, indent_level),
+          trailing_newline,
           format_brace("}", indent_level),
         )
       }
@@ -389,11 +399,13 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
         .map(|s| do_node_to_source_text(s, indent_level))
         .collect::<Vec<_>>()
         .join("\n");
+      let trailing_newline = if !stmts.is_empty() { "\n" } else { "" };
       format!(
-        "{} {}{}\n{}",
+        "{} {}{}{}{}",
         format_keyword("unchecked"),
         format_brace("{", indent_level),
         indent(&stmts, indent_level),
+        trailing_newline,
         format_brace("}", indent_level)
       )
     }
@@ -525,14 +537,16 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
           .map(|n| do_node_to_source_text(n, indent_level + 1))
           .collect::<Vec<_>>()
           .join("\n\n");
+        let trailing_newline = if !members.is_empty() { "\n" } else { "" };
         format!(
-          "{}{} {}{} {}{}{}",
+          "{}{} {}{} {}{}{}{}",
           abstract_str,
           format_keyword(&html_escape(&kind)),
           format_type(&html_escape(name)),
           bases,
           format_brace("{", indent_level),
           indent(&members, indent_level + 1),
+          trailing_newline,
           format_brace("}", indent_level)
         )
       }
@@ -672,12 +686,14 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
         .map(|m| do_node_to_source_text(m, indent_level))
         .collect::<Vec<_>>()
         .join("\n");
+      let trailing_newline = if !members_str.is_empty() { "\n" } else { "" };
       format!(
-        "{} {} {} {{{}}}",
+        "{} {} {} {{{}{}}}",
         visibility_str,
         format_keyword("struct"),
         format_user_defined_type(name),
-        indent(&members_str, indent_level)
+        indent(&members_str, indent_level),
+        trailing_newline
       )
     }
 
@@ -689,11 +705,13 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
         .map(|m| do_node_to_source_text(m, indent_level))
         .collect::<Vec<_>>()
         .join("\n");
+      let trailing_newline = if !members_str.is_empty() { "\n" } else { "" };
       format!(
-        "{} {} {{{}}}",
+        "{} {} {{{}{}}}",
         format_keyword("enum"),
         format_user_defined_type(name),
-        indent(&members_str, indent_level)
+        indent(&members_str, indent_level),
+        trailing_newline
       )
     }
 
@@ -791,7 +809,8 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
           .map(|p| do_node_to_source_text(p, indent_level))
           .collect::<Vec<_>>()
           .join("\n");
-        format!("({})", indent(&params, indent_level))
+        let trailing_newline = if !params.is_empty() { "\n" } else { "" };
+        format!("({}{})", indent(&params, indent_level), trailing_newline)
       }
     }
 

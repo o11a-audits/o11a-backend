@@ -24,12 +24,17 @@ pub fn create_router(state: AppState) -> Router {
       "/api/v1/audits/:audit_id/boundaries",
       get(handlers::get_boundaries),
     )
+    // Chat endpoints (global for now)
+    .route("/api/v1/chats", get(handlers::get_chats))
+    .route("/api/v1/chats", post(handlers::create_chat))
+    // Implemented
     .route(
       "/api/v1/audits/:audit_id/contracts",
       get(handlers::get_contracts),
     )
-    // Chat endpoints (global for now)
-    .route("/api/v1/chats", get(handlers::get_chats))
-    .route("/api/v1/chats", post(handlers::create_chat))
+    .route(
+      "/api/v1/audits/:audit_id/source_text/:topic_id",
+      get(handlers::get_source_text),
+    )
     .with_state(state)
 }
