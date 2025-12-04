@@ -2861,6 +2861,34 @@ fn generate_node_id() -> i32 {
   }
 }
 
+/// Wraps a single statement in a Block containing a SemanticBlock.
+/// If the statement is already a Block, returns it unchanged.
+fn wrap_statement_in_block(statement: Box<ASTNode>) -> Box<ASTNode> {
+  match &*statement {
+    // If it's already a Block, return it as-is
+    ASTNode::Block { .. } => statement,
+    // Otherwise, wrap the single statement in a SemanticBlock and Block
+    _ => {
+      let stmt_src_location = statement.src_location().clone();
+
+      // Create a SemanticBlock containing the single statement
+      let semantic_block = ASTNode::SemanticBlock {
+        node_id: generate_node_id(),
+        src_location: stmt_src_location.clone(),
+        documentation: None,
+        statements: vec![*statement],
+      };
+
+      // Wrap the SemanticBlock in a Block
+      Box::new(ASTNode::Block {
+        node_id: generate_node_id(),
+        src_location: stmt_src_location,
+        statements: vec![semantic_block],
+      })
+    }
+  }
+}
+
 fn group_statements_into_semantic_blocks(
   statements: Vec<ASTNode>,
   source: &str,
@@ -3463,6 +3491,10 @@ pub fn node_from_json(
         node_type_str,
         source_content,
       )?;
+
+      // Wrap single statements in Block and SemanticBlock
+      let true_body = wrap_statement_in_block(true_body);
+      let false_body = false_body.map(wrap_statement_in_block);
 
       Ok(ASTNode::IfStatement {
         node_id,
