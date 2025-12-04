@@ -2404,12 +2404,20 @@ fn get_optional_string_with_context(
       if v.is_null() {
         Ok(None)
       } else {
-        v.as_str().map(|s| Some(s.to_string())).ok_or_else(|| {
-          format!(
-            "Error parsing {} node: Invalid {} field type",
-            node_type, field_name
-          )
-        })
+        v.as_str()
+          .map(|s| {
+            if s.is_empty() {
+              None
+            } else {
+              Some(s.to_string())
+            }
+          })
+          .ok_or_else(|| {
+            format!(
+              "Error parsing {} node: Invalid {} field type",
+              node_type, field_name
+            )
+          })
       }
     }
     None => Ok(None),

@@ -472,16 +472,17 @@ fn do_node_to_source_text(
       let visibility_str = variable_visibility_to_string(visibility);
       let mutability_str = variable_mutability_to_string(mutability);
 
-      let mut parts = vec![type_str];
-      if !storage.is_empty() {
-        parts.push(format_keyword(&storage));
-      }
+      let mut parts = vec![];
       if !visibility_str.is_empty() {
         parts.push(format_keyword(&visibility_str));
       }
       if !mutability_str.is_empty() {
         parts.push(format_keyword(&mutability_str));
       }
+      if !storage.is_empty() {
+        parts.push(format_keyword(&storage));
+      }
+      parts.push(type_str);
       parts.push(format_identifier(name));
 
       let decl = parts.join(" ");
@@ -889,7 +890,7 @@ fn do_node_to_source_text(
         value = format!("{} {}", value, name)
       }
       format!(
-        "{}({})",
+        "{} ({}\n)",
         format_keyword("map"),
         indent(
           &format!("{} {} {}", key, format_operator("=>"), value),
