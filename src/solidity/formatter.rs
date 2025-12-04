@@ -115,6 +115,7 @@ fn do_node_to_source_text(
       arguments,
       ..
     } => {
+      let expression = expression.resolve(nodes_map);
       let expr = do_node_to_source_text(expression, indent_level, nodes_map);
 
       let indent_level = indent_level + 1;
@@ -127,7 +128,22 @@ fn do_node_to_source_text(
       if arguments.is_empty() {
         format!("{}()", expr)
       } else {
-        format!("{}({})", expr, indent(&args, indent_level))
+        let indented_args = match expression {
+          // If the expression is a member access, indent the arguments twice to
+          // match the member access indent
+          ASTNode::MemberAccess { .. } => {
+            format!(
+              "({}",
+              indent(
+                &format!("{}\n)", inline_indent(&args, indent_level)),
+                indent_level
+              )
+            )
+          }
+          _ => format!("({}\n)", indent(&args, indent_level)),
+        };
+
+        format!("{}{}", expr, indented_args)
       }
     }
 
@@ -338,8 +354,8 @@ fn do_node_to_source_text(
       } else {
         String::new()
       };
-      let cond = if let Some(cond_expr) = condition {
-        do_node_to_source_text(cond_expr, indent_level, nodes_map)
+      let cond = if let Some(_cond_expr) = condition {
+        "LoopExprPlaceholder".to_string()
       } else {
         String::new()
       };
@@ -377,7 +393,7 @@ fn do_node_to_source_text(
         String::new()
       };
       format!(
-        "{} ({}) {}{}",
+        "{} ({}\n) {}{}",
         format_keyword("if"),
         indent(&cond, indent_level + 1),
         true_b,
@@ -435,15 +451,20 @@ fn do_node_to_source_text(
       initial_value,
       ..
     } => {
+      let indent_level = indent_level + 1;
+
       if let Some(init) = initial_value {
         declarations
           .iter()
           .map(|d| {
             format!(
-              "{} {} {}",
+              "{} {}{}",
               do_node_to_source_text(d, indent_level, nodes_map),
               format_operator("="),
-              do_node_to_source_text(init, indent_level, nodes_map),
+              indent(
+                &do_node_to_source_text(init, indent_level, nodes_map),
+                indent_level
+              ),
             )
           })
           .collect::<Vec<_>>()
@@ -614,7 +635,9 @@ fn do_node_to_source_text(
           .map(|m| do_node_to_source_text(m, indent_level, nodes_map))
           .collect::<Vec<_>>()
           .join("\n");
-        indent(&mods, indent_level)
+        let trailing_newline = if !mods.is_empty() { "\n" } else { "" };
+
+        format!("{}{}", indent(&mods, indent_level), trailing_newline)
       } else {
         String::new()
       };
@@ -855,7 +878,7 @@ fn do_node_to_source_text(
             .map(|a| do_node_to_source_text(a, indent_level, nodes_map))
             .collect::<Vec<_>>()
             .join("\n");
-          format!("{}({})", name, indent(&args_str, indent_level + 1))
+          format!("{}({}\n)", name, indent(&args_str, indent_level + 1))
         }
       } else {
         name
@@ -980,8 +1003,13 @@ fn format_brace(brace: &str, indent_level: usize) -> String {
 ///   border-left: solid grey 1px;
 /// }
 fn indent(content: &str, indent_level: usize) -> String {
+  format!("\n{}", inline_indent(content, indent_level))
+}
+
+/// Creates an indent with no newline
+fn inline_indent(content: &str, indent_level: usize) -> String {
   format!(
-    "\n<span class=\"indent indent-level-{}\">{}</span>",
+    "<span class=\"indent indent-level-{}\">{}</span>",
     indent_level, content
   )
 }

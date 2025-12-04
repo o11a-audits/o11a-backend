@@ -1207,7 +1207,9 @@ impl ASTNode {
         Some(false_expr) => vec![condition, true_expression, false_expr],
         None => vec![condition, true_expression],
       },
-      ASTNode::ElementaryTypeNameExpression { .. } => vec![],
+      ASTNode::ElementaryTypeNameExpression { type_name, .. } => {
+        vec![type_name]
+      }
       ASTNode::FunctionCall {
         arguments,
         expression,

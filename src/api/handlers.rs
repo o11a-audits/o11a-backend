@@ -313,5 +313,148 @@ pub async fn get_source_text(
     }
   };
 
-  Ok(Html(source_text))
+  // Add CSS styling to the HTML response
+  let html_with_css = format!(
+    r#"<style>
+/**
+ * Atom One Dark Theme for Code Syntax Highlighting
+ *
+ * This stylesheet provides syntax highlighting for code rendered with
+ * the Solidity formatter, using the Atom One Dark color scheme.
+ */
+
+/* Base code block styling */
+pre {{
+  background-color: #282c34;
+  color: #abb2bf;
+  font-family: 'Fira Code', 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 14px;
+  line-height: 1.6;
+}}
+
+code {{
+  background-color: #282c34;
+  color: #abb2bf;
+  font-family: 'Fira Code', 'Consolas', 'Monaco', 'Courier New', monospace;
+}}
+
+/* Keywords (if, else, for, while, return, function, contract, etc.) */
+.keyword {{
+  color: #c678dd;
+  font-weight: 600;
+}}
+
+/* Operators (+, -, *, /, =>, ==, etc.) */
+.operator {{
+  color: #56b6c2;
+}}
+
+/* Types (uint256, address, bool, string, etc.) */
+.type {{
+  color: #e5c07b;
+}}
+
+/* User-defined types (custom structs, contracts) */
+.user-type {{
+  color: #e5c07b;
+}}
+
+/* Function names */
+.function {{
+  color: #61afef;
+}}
+
+/* Identifiers (variable names) */
+.identifier {{
+  color: #e06c75;
+}}
+
+/* Member access (property names) */
+.member {{
+  color: #e06c75;
+}}
+
+/* Global variables (msg, block, tx, etc.) */
+.global {{
+  color: #d19a66;
+}}
+
+/* Enum values */
+.enum-value {{
+  color: #d19a66;
+}}
+
+/* String literals */
+.string {{
+  color: #98c379;
+}}
+
+/* Number literals */
+.number {{
+  color: #d19a66;
+}}
+
+/* Comments */
+.comment {{
+  color: #5c6370;
+  font-style: italic;
+}}
+
+/* Braces and brackets */
+.brace {{
+  color: #abb2bf;
+}}
+
+/* Indentation styling */
+.indent {{
+  display: inline-block;
+  padding-left: 12px;
+  border-left: 1px solid #3e4451;
+}}
+
+/* Different indentation levels (optional - for visual depth cues) */
+.indent-level-0 {{
+  border-left-color: #3e4451;
+}}
+
+.indent-level-1 {{
+  border-left-color: #3e4451;
+}}
+
+.indent-level-2 {{
+  border-left-color: #3e4451;
+}}
+
+.indent-level-3 {{
+  border-left-color: #3e4451;
+}}
+
+.indent-level-4 {{
+  border-left-color: #3e4451;
+}}
+
+/* Optional: Add subtle hover effects for nodes (for debugging/interaction) */
+.node:hover {{
+  background-color: #2c313a;
+  cursor: default;
+}}
+
+/* Selection styling */
+pre::selection,
+code::selection,
+.keyword::selection,
+.operator::selection,
+.type::selection,
+.function::selection,
+.identifier::selection,
+.string::selection,
+.number::selection {{
+  background-color: #3e4451;
+}}
+</style>
+{}"#,
+    source_text
+  );
+
+  Ok(Html(html_with_css))
 }
