@@ -58,10 +58,56 @@ pub enum AST {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Scope {
-  pub container: ProjectPath,
-  pub component: Option<topic::Topic>,
-  pub member: Option<topic::Topic>,
+pub enum Scope {
+  Container {
+    container: ProjectPath,
+  },
+  Component {
+    container: ProjectPath,
+    component: topic::Topic,
+  },
+  Member {
+    container: ProjectPath,
+    component: topic::Topic,
+    member: topic::Topic,
+  },
+  Statement {
+    container: ProjectPath,
+    component: topic::Topic,
+    member: topic::Topic,
+    statement: topic::Topic,
+  },
+}
+
+pub fn add_to_scope(scope: &Scope, topic: topic::Topic) -> Scope {
+  match scope {
+    Scope::Container { container } => Scope::Component {
+      container: container.clone(),
+      component: topic,
+    },
+    Scope::Component {
+      container,
+      component,
+    } => Scope::Member {
+      container: container.clone(),
+      component: component.clone(),
+      member: topic,
+    },
+    Scope::Member {
+      container,
+      component,
+      member,
+    } => Scope::Statement {
+      container: container.clone(),
+      component: component.clone(),
+      member: member.clone(),
+      statement: topic,
+    },
+    Scope::Statement { .. } => panic!(
+      "Cannot add to statement scope. Scope: {:?}, Topic: {:?}",
+      scope, topic
+    ),
+  }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,30 +137,61 @@ pub struct Declaration {
 
 impl Declaration {
   /// Returns the qualified name of the declaration
-  /// Format: component.member.name or member.name or name
-  /// Uses the declaration names from the scope components, not topic IDs
+  /// Format: component::member::statement::name, component::member::name, component::name, or name
+  /// Uses the declaration names from the scope components, falling back to topic IDs if not found
   pub fn qualified_name(&self, audit_data: &AuditData) -> String {
-    let mut parts = Vec::new();
-
-    // Add component name if it exists
-    if let Some(component_topic) = &self.scope.component {
-      if let Some(component_decl) = audit_data.declarations.get(component_topic)
-      {
-        parts.push(component_decl.name.clone());
+    match &self.scope {
+      Scope::Container { .. } => self.name.clone(),
+      Scope::Component { component, .. } => {
+        let component_name = audit_data
+          .declarations
+          .get(component)
+          .map(|d| d.name.clone())
+          .unwrap_or_else(|| component.id().to_string());
+        format!("{}::{}", component_name, self.name)
+      }
+      Scope::Member {
+        component, member, ..
+      } => {
+        let component_name = audit_data
+          .declarations
+          .get(component)
+          .map(|d| d.name.clone())
+          .unwrap_or_else(|| component.id().to_string());
+        let member_name = audit_data
+          .declarations
+          .get(member)
+          .map(|d| d.name.clone())
+          .unwrap_or_else(|| member.id().to_string());
+        format!("{}::{}::{}", component_name, member_name, self.name)
+      }
+      Scope::Statement {
+        component,
+        member,
+        statement,
+        ..
+      } => {
+        let component_name = audit_data
+          .declarations
+          .get(component)
+          .map(|d| d.name.clone())
+          .unwrap_or_else(|| component.id().to_string());
+        let member_name = audit_data
+          .declarations
+          .get(member)
+          .map(|d| d.name.clone())
+          .unwrap_or_else(|| member.id().to_string());
+        let statement_name = audit_data
+          .declarations
+          .get(statement)
+          .map(|d| d.name.clone())
+          .unwrap_or_else(|| statement.id().to_string());
+        format!(
+          "{}::{}::{}::{}",
+          component_name, member_name, statement_name, self.name
+        )
       }
     }
-
-    // Add member name if it exists
-    if let Some(member_topic) = &self.scope.member {
-      if let Some(member_decl) = audit_data.declarations.get(member_topic) {
-        parts.push(member_decl.name.clone());
-      }
-    }
-
-    // Add the declaration's own name
-    parts.push(self.name.clone());
-
-    parts.join(".")
   }
 }
 

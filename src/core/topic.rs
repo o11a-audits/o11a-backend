@@ -3,6 +3,12 @@ pub struct Topic {
   pub id: String,
 }
 
+impl Topic {
+  pub fn id(&self) -> &str {
+    &self.id
+  }
+}
+
 pub fn new_topic(id: &str) -> Topic {
   Topic { id: id.to_string() }
 }

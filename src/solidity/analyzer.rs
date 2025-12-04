@@ -171,10 +171,10 @@ fn first_pass(
     for ast in asts {
       process_first_pass_ast_nodes(
         &ast.nodes.iter().collect(),
-        &path,
         is_file_in_scope,
-        None,
-        None,
+        &core::Scope::Container {
+          container: path.clone(),
+        },
         &mut first_pass_declarations,
       )?;
     }
@@ -185,10 +185,8 @@ fn first_pass(
 
 fn process_first_pass_ast_nodes(
   nodes: &Vec<&ASTNode>,
-  file_path: &core::ProjectPath,
   is_file_in_scope: bool,
-  current_contract: Option<&topic::Topic>,
-  current_function: Option<&topic::Topic>,
+  current_scope: &core::Scope,
   first_pass_declarations: &mut BTreeMap<i32, FirstPassDeclaration>,
 ) -> Result<(), String> {
   for node in nodes {
@@ -206,11 +204,7 @@ fn process_first_pass_ast_nodes(
           FirstPassDeclaration::Flat {
             is_publicly_in_scope: is_file_in_scope, // All contracts are publicly visible
             name: name.clone(),
-            scope: Scope {
-              container: file_path.clone(),
-              component: current_contract.map(|t| t.clone()),
-              member: current_function.map(|t| t.clone()),
-            },
+            scope: current_scope.clone(),
             declaration_kind,
           },
         );
@@ -218,10 +212,8 @@ fn process_first_pass_ast_nodes(
         let child_nodes = node.nodes();
         process_first_pass_ast_nodes(
           &child_nodes,
-          file_path,
           is_file_in_scope,
-          Some(&topic::new_node_topic(*node_id)),
-          current_function,
+          &core::add_to_scope(current_scope, topic::new_node_topic(*node_id)),
           first_pass_declarations,
         )?;
       }
@@ -271,11 +263,7 @@ fn process_first_pass_ast_nodes(
             is_publicly_in_scope: is_publicly_visible,
             declaration_kind: DeclarationKind::Function(*kind),
             name: name.clone(),
-            scope: Scope {
-              container: file_path.clone(),
-              component: current_contract.map(|t| t.clone()),
-              member: current_function.map(|t| t.clone()),
-            },
+            scope: current_scope.clone(),
             referenced_nodes,
             require_revert_statements,
             function_calls,
@@ -287,10 +275,8 @@ fn process_first_pass_ast_nodes(
         let child_nodes = node.nodes();
         process_first_pass_ast_nodes(
           &child_nodes,
-          &file_path,
           is_file_in_scope,
-          current_contract,
-          Some(&topic::new_node_topic(*node_id)),
+          &core::add_to_scope(current_scope, topic::new_node_topic(*node_id)),
           first_pass_declarations,
         )?;
       }
@@ -328,11 +314,7 @@ fn process_first_pass_ast_nodes(
             is_publicly_in_scope: is_publicly_visible,
             declaration_kind: DeclarationKind::Modifier,
             name: name.clone(),
-            scope: Scope {
-              container: file_path.clone(),
-              component: current_contract.map(|t| t.clone()),
-              member: current_function.map(|t| t.clone()),
-            },
+            scope: current_scope.clone(),
             referenced_nodes,
             require_revert_statements,
             function_calls,
@@ -344,10 +326,8 @@ fn process_first_pass_ast_nodes(
         let child_nodes = node.nodes();
         process_first_pass_ast_nodes(
           &child_nodes,
-          file_path,
           is_file_in_scope,
-          current_contract,
-          Some(&topic::new_node_topic(*node_id)),
+          &core::add_to_scope(current_scope, topic::new_node_topic(*node_id)),
           first_pass_declarations,
         )?;
       }
@@ -379,11 +359,7 @@ fn process_first_pass_ast_nodes(
             is_publicly_in_scope: is_publicly_visible,
             declaration_kind,
             name: name.clone(),
-            scope: Scope {
-              container: file_path.clone(),
-              component: current_contract.map(|t| t.clone()),
-              member: current_function.map(|t| t.clone()),
-            },
+            scope: current_scope.clone(),
           },
         );
       }
@@ -395,11 +371,7 @@ fn process_first_pass_ast_nodes(
             is_publicly_in_scope: false,
             declaration_kind: DeclarationKind::Event,
             name: name.clone(),
-            scope: Scope {
-              container: file_path.clone(),
-              component: current_contract.map(|t| t.clone()),
-              member: current_function.map(|t| t.clone()),
-            },
+            scope: current_scope.clone(),
           },
         );
       }
@@ -411,11 +383,7 @@ fn process_first_pass_ast_nodes(
             is_publicly_in_scope: false,
             declaration_kind: DeclarationKind::Error,
             name: name.clone(),
-            scope: Scope {
-              container: file_path.clone(),
-              component: current_contract.map(|t| t.clone()),
-              member: current_function.map(|t| t.clone()),
-            },
+            scope: current_scope.clone(),
           },
         );
       }
@@ -427,11 +395,7 @@ fn process_first_pass_ast_nodes(
             is_publicly_in_scope: false,
             declaration_kind: DeclarationKind::Struct,
             name: name.clone(),
-            scope: Scope {
-              container: file_path.clone(),
-              component: current_contract.map(|t| t.clone()),
-              member: current_function.map(|t| t.clone()),
-            },
+            scope: current_scope.clone(),
           },
         );
 
@@ -439,10 +403,8 @@ fn process_first_pass_ast_nodes(
         let member_nodes = node.nodes();
         process_first_pass_ast_nodes(
           &member_nodes,
-          file_path,
           is_file_in_scope,
-          current_contract,
-          current_function,
+          &core::add_to_scope(&current_scope, topic::new_node_topic(*node_id)),
           first_pass_declarations,
         )?;
       }
@@ -454,11 +416,7 @@ fn process_first_pass_ast_nodes(
             is_publicly_in_scope: false, // Enums are not publicly visible
             declaration_kind: DeclarationKind::Enum,
             name: name.clone(),
-            scope: Scope {
-              container: file_path.clone(),
-              component: current_contract.map(|t| t.clone()),
-              member: current_function.map(|t| t.clone()),
-            },
+            scope: current_scope.clone(),
           },
         );
 
@@ -466,10 +424,8 @@ fn process_first_pass_ast_nodes(
         let member_nodes = node.nodes();
         process_first_pass_ast_nodes(
           &member_nodes,
-          file_path,
           is_file_in_scope,
-          current_contract,
-          current_function,
+          &core::add_to_scope(&current_scope, topic::new_node_topic(*node_id)),
           first_pass_declarations,
         )?;
       }
@@ -481,11 +437,7 @@ fn process_first_pass_ast_nodes(
             is_publicly_in_scope: false, // Enum members are not publicly visible
             declaration_kind: DeclarationKind::EnumMember,
             name: name.clone(),
-            scope: Scope {
-              container: file_path.clone(),
-              component: current_contract.map(|t| t.clone()),
-              member: current_function.map(|t| t.clone()),
-            },
+            scope: current_scope.clone(),
           },
         );
       }
@@ -495,10 +447,8 @@ fn process_first_pass_ast_nodes(
         let child_nodes = node.nodes();
         process_first_pass_ast_nodes(
           &child_nodes,
-          file_path,
           is_file_in_scope,
-          current_contract,
-          current_function,
+          current_scope,
           first_pass_declarations,
         )?;
       }

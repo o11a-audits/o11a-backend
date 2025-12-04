@@ -138,10 +138,8 @@ fn process_documentation_node(
 
     DocumentationNode::Heading { children, .. } => {
       // Headings create section declarations (components in scope)
-      let scope = Scope {
+      let scope = Scope::Container {
         container: project_path.clone(),
-        component: None,
-        member: None,
       };
 
       // Extract heading text from children for the name
@@ -178,10 +176,9 @@ fn process_documentation_node(
     DocumentationNode::Paragraph { children, .. } => {
       let name = format!("Paragraph {}", topic.id);
       // Paragraphs become paragraph declarations (members in scope)
-      let scope = Scope {
+      let scope = Scope::Component {
         container: project_path.clone(),
-        component: Some(topic.clone()),
-        member: None,
+        component: topic.clone(),
       };
 
       audit_data.declarations.insert(
