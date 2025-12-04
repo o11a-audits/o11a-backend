@@ -1347,9 +1347,11 @@ impl ASTNode {
         }
         result
       }
-      ASTNode::VariableDeclaration { value, .. } => match value {
-        Some(val) => vec![val],
-        None => vec![],
+      ASTNode::VariableDeclaration {
+        type_name, value, ..
+      } => match value {
+        Some(val) => vec![type_name, val],
+        None => vec![type_name],
       },
       ASTNode::WhileStatement {
         condition, body, ..
@@ -1535,6 +1537,23 @@ impl ASTNode {
         _ => (*node).clone(),
       })
       .collect()
+  }
+
+  /// Resolve the current node if it is a node stub
+  pub fn resolve<'a>(
+    &'a self,
+    nodes_map: &'a BTreeMap<topic::Topic, core::Node>,
+  ) -> &'a ASTNode {
+    match self {
+      ASTNode::Stub { topic, .. } => {
+        if let Some(core::Node::Solidity(ast_node)) = nodes_map.get(topic) {
+          ast_node
+        } else {
+          self
+        }
+      }
+      _ => self,
+    }
   }
 }
 

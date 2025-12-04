@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 // Run with `cargo run --bin formatter_test`
 use o11a_backend::solidity::node_to_source_text;
 use o11a_backend::solidity::parser::{
@@ -9,31 +11,31 @@ fn main() {
   // Example 1: Simple identifier
   println!("=== Example 1: Simple Identifier ===");
   let identifier = create_identifier("myVariable", 1);
-  let formatted = node_to_source_text(&identifier);
+  let formatted = node_to_source_text(&identifier, &BTreeMap::new());
   println!("{}\n", formatted);
 
   // Example 2: Binary operation (a + b)
   println!("=== Example 2: Binary Operation (a + b) ===");
   let binary_op = create_binary_operation();
-  let formatted = node_to_source_text(&binary_op);
+  let formatted = node_to_source_text(&binary_op, &BTreeMap::new());
   println!("{}\n", formatted);
 
   // Example 3: Assignment (x = 5)
   println!("=== Example 3: Assignment (x = 5) ===");
   let assignment = create_assignment();
-  let formatted = node_to_source_text(&assignment);
+  let formatted = node_to_source_text(&assignment, &BTreeMap::new());
   println!("{}\n", formatted);
 
   // Example 4: Complex nested expression (a + b) * c
   println!("=== Example 4: Complex Expression ((a + b) * c) ===");
   let complex_expr = create_complex_expression();
-  let formatted = node_to_source_text(&complex_expr);
+  let formatted = node_to_source_text(&complex_expr, &BTreeMap::new());
   println!("{}\n", formatted);
 
   // Example 5: Block with multiple statements
   println!("=== Example 5: Block with Statements ===");
   let block = create_block_with_statements();
-  let formatted = node_to_source_text(&block);
+  let formatted = node_to_source_text(&block, &BTreeMap::new());
   println!("{}\n", formatted);
 }
 

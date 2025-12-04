@@ -1,35 +1,46 @@
+use crate::core;
+use crate::core::topic;
 use crate::core::{ContractKind, FunctionKind};
 use crate::solidity::parser::{
   ASTNode, AssignmentOperator, BinaryOperator, FunctionStateMutability,
   FunctionVisibility, LiteralKind, StorageLocation, UnaryOperator,
   VariableMutability, VariableVisibility,
 };
+use std::collections::BTreeMap;
 
 /// Converts an AST node and all its children to a formatted HTML string with syntax highlighting.
 ///
 /// This function recursively processes nodes and uses div-based indentation with padding.
 /// Binary operators are formatted with the left-hand side and operator on one line,
 /// and the right-hand side indented on the next line.
-pub fn node_to_source_text(node: &ASTNode) -> String {
+pub fn node_to_source_text(
+  node: &ASTNode,
+  nodes_map: &BTreeMap<topic::Topic, core::Node>,
+) -> String {
   format!(
     "<pre><code>{}</code></pre>",
-    do_node_to_source_text(node, 0)
+    do_node_to_source_text(node, 0, nodes_map)
   )
 }
 
-fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
-  let node_str = match node {
+fn do_node_to_source_text(
+  node: &ASTNode,
+  indent_level: usize,
+  nodes_map: &BTreeMap<topic::Topic, core::Node>,
+) -> String {
+  let node_str = match node.resolve(nodes_map) {
     ASTNode::Assignment {
       operator,
       left_hand_side,
       right_hand_side,
       ..
     } => {
-      let lhs = do_node_to_source_text(left_hand_side, indent_level);
+      let lhs = do_node_to_source_text(left_hand_side, indent_level, nodes_map);
       let op = assignment_operator_to_string(operator);
 
       let indent_level = indent_level + 1;
-      let rhs = do_node_to_source_text(right_hand_side, indent_level);
+      let rhs =
+        do_node_to_source_text(right_hand_side, indent_level, nodes_map);
       format!(
         "{} {}{}",
         lhs,
@@ -44,18 +55,21 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       right_expression,
       ..
     } => {
-      let lhs = do_node_to_source_text(left_expression, indent_level);
+      let lhs =
+        do_node_to_source_text(left_expression, indent_level, nodes_map);
       let op = binary_operator_to_string(operator);
 
       if is_boolean_and_or_operator(operator) || is_math_operator(operator) {
         // Boolean &&, ||, and math operators do not indent, but place the
         // operator and rhs on the next line with the same indentation level
         // of the lhs
-        let rhs = do_node_to_source_text(right_expression, indent_level);
+        let rhs =
+          do_node_to_source_text(right_expression, indent_level, nodes_map);
         format!("{}\n{}", lhs, format!("{} {}", format_operator(&op), &rhs),)
       } else {
         let indent_level = indent_level + 1;
-        let rhs = do_node_to_source_text(right_expression, indent_level);
+        let rhs =
+          do_node_to_source_text(right_expression, indent_level, nodes_map);
         format!(
           "{}{}",
           lhs,
@@ -70,22 +84,22 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       false_expression,
       ..
     } => {
-      let cond = do_node_to_source_text(condition, indent_level);
+      let cond = do_node_to_source_text(condition, indent_level, nodes_map);
 
       let indent_level = indent_level + 1;
       let part = if let Some(false_expr) = false_expression {
         format!(
           "\n{} {}\n{} {}",
           format_operator("?"),
-          do_node_to_source_text(true_expression, indent_level),
+          do_node_to_source_text(true_expression, indent_level, nodes_map),
           format_operator(":"),
-          do_node_to_source_text(false_expr, indent_level),
+          do_node_to_source_text(false_expr, indent_level, nodes_map),
         )
       } else {
         format!(
           "\n{} {}",
           format_operator("?"),
-          do_node_to_source_text(true_expression, indent_level)
+          do_node_to_source_text(true_expression, indent_level, nodes_map)
         )
       };
 
@@ -93,7 +107,7 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
     }
 
     ASTNode::ElementaryTypeNameExpression { type_name, .. } => {
-      do_node_to_source_text(type_name, indent_level)
+      do_node_to_source_text(type_name, indent_level, nodes_map)
     }
 
     ASTNode::FunctionCall {
@@ -101,12 +115,12 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       arguments,
       ..
     } => {
-      let expr = do_node_to_source_text(expression, indent_level);
+      let expr = do_node_to_source_text(expression, indent_level, nodes_map);
 
       let indent_level = indent_level + 1;
       let args = arguments
         .iter()
-        .map(|arg| do_node_to_source_text(arg, indent_level))
+        .map(|arg| do_node_to_source_text(arg, indent_level, nodes_map))
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -122,12 +136,12 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       options,
       ..
     } => {
-      let expr = do_node_to_source_text(expression, indent_level);
+      let expr = do_node_to_source_text(expression, indent_level, nodes_map);
 
       let indent_level = indent_level + 1;
       let opts = options
         .iter()
-        .map(|opt| do_node_to_source_text(opt, indent_level))
+        .map(|opt| do_node_to_source_text(opt, indent_level, nodes_map))
         .collect::<Vec<_>>()
         .join("\n");
       let trailing_newline = if !opts.is_empty() { "\n" } else { "" };
@@ -158,9 +172,14 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       index_expression,
       ..
     } => {
-      let base = do_node_to_source_text(base_expression, indent_level);
+      let base =
+        do_node_to_source_text(base_expression, indent_level, nodes_map);
       if let Some(idx) = index_expression {
-        format!("{}[{}]", base, do_node_to_source_text(idx, indent_level))
+        format!(
+          "{}[{}]",
+          base,
+          do_node_to_source_text(idx, indent_level, nodes_map)
+        )
       } else {
         base
       }
@@ -193,7 +212,7 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       member_name,
       ..
     } => {
-      let expr = do_node_to_source_text(expression, indent_level);
+      let expr = do_node_to_source_text(expression, indent_level, nodes_map);
 
       let indent_level = indent_level + 1;
       let member =
@@ -205,7 +224,7 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       format!(
         "{} {}",
         format_keyword("new"),
-        do_node_to_source_text(type_name, indent_level)
+        do_node_to_source_text(type_name, indent_level, nodes_map)
       )
     }
 
@@ -213,7 +232,7 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       let indent_level = indent_level + 1;
       let comps = components
         .iter()
-        .map(|c| do_node_to_source_text(c, indent_level))
+        .map(|c| do_node_to_source_text(c, indent_level, nodes_map))
         .collect::<Vec<_>>()
         .join(",\n");
       let trailing_newline = if !comps.is_empty() { "\n" } else { "" };
@@ -233,7 +252,8 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       ..
     } => {
       let op = unary_operator_to_string(operator);
-      let expr = do_node_to_source_text(sub_expression, indent_level);
+      let expr =
+        do_node_to_source_text(sub_expression, indent_level, nodes_map);
       if *prefix {
         format!("{}{}", format_operator(&op), expr)
       } else {
@@ -250,7 +270,7 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
         let indent_level = indent_level + 1;
         let stmts = statements
           .iter()
-          .map(|s| do_node_to_source_text(s, indent_level))
+          .map(|s| do_node_to_source_text(s, indent_level, nodes_map))
           .collect::<Vec<_>>()
           .join("\n\n");
         let trailing_newline = if !stmts.is_empty() { "\n" } else { "" };
@@ -266,7 +286,7 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
 
     ASTNode::SemanticBlock { statements, .. } => statements
       .iter()
-      .map(|s| do_node_to_source_text(s, indent_level))
+      .map(|s| do_node_to_source_text(s, indent_level, nodes_map))
       .collect::<Vec<_>>()
       .join("\n"),
 
@@ -276,12 +296,12 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
 
     ASTNode::DoWhileStatement { nodes, body, .. } => {
       let body_str = if let Some(b) = body {
-        do_node_to_source_text(b, indent_level)
+        do_node_to_source_text(b, indent_level, nodes_map)
       } else {
         String::new()
       };
       let condition = if !nodes.is_empty() {
-        do_node_to_source_text(&nodes[0], indent_level)
+        do_node_to_source_text(&nodes[0], indent_level, nodes_map)
       } else {
         String::new()
       };
@@ -298,12 +318,12 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       format!(
         "{} {}",
         format_keyword("emit"),
-        do_node_to_source_text(event_call, indent_level)
+        do_node_to_source_text(event_call, indent_level, nodes_map)
       )
     }
 
     ASTNode::ExpressionStatement { expression, .. } => {
-      do_node_to_source_text(expression, indent_level)
+      do_node_to_source_text(expression, indent_level, nodes_map)
     }
 
     ASTNode::ForStatement {
@@ -314,21 +334,21 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       ..
     } => {
       let init = if let Some(init_expr) = initialization_expression {
-        do_node_to_source_text(init_expr, indent_level)
+        do_node_to_source_text(init_expr, indent_level, nodes_map)
       } else {
         String::new()
       };
       let cond = if let Some(cond_expr) = condition {
-        do_node_to_source_text(cond_expr, indent_level)
+        do_node_to_source_text(cond_expr, indent_level, nodes_map)
       } else {
         String::new()
       };
       let loop_expr = if let Some(l_expr) = loop_expression {
-        do_node_to_source_text(l_expr, indent_level)
+        do_node_to_source_text(l_expr, indent_level, nodes_map)
       } else {
         String::new()
       };
-      let body_str = do_node_to_source_text(body, indent_level);
+      let body_str = do_node_to_source_text(body, indent_level, nodes_map);
       format!(
         "{} ({}; {}; {}) {}",
         format_keyword("for"),
@@ -345,13 +365,13 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       false_body,
       ..
     } => {
-      let cond = do_node_to_source_text(condition, indent_level);
-      let true_b = do_node_to_source_text(true_body, indent_level);
+      let cond = do_node_to_source_text(condition, indent_level, nodes_map);
+      let true_b = do_node_to_source_text(true_body, indent_level, nodes_map);
       let false_part = if let Some(false_b) = false_body {
         format!(
           " {} {}",
           format_keyword("else"),
-          do_node_to_source_text(false_b, indent_level)
+          do_node_to_source_text(false_b, indent_level, nodes_map)
         )
       } else {
         String::new()
@@ -374,7 +394,7 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
         format!(
           "{} {}",
           format_keyword("return"),
-          do_node_to_source_text(expr, indent_level)
+          do_node_to_source_text(expr, indent_level, nodes_map)
         )
       } else {
         format_keyword("return")
@@ -385,7 +405,7 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       format!(
         "{} {}",
         format_keyword("revert"),
-        do_node_to_source_text(error_call, indent_level)
+        do_node_to_source_text(error_call, indent_level, nodes_map)
       )
     }
 
@@ -396,7 +416,7 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
 
       let stmts = statements
         .iter()
-        .map(|s| do_node_to_source_text(s, indent_level))
+        .map(|s| do_node_to_source_text(s, indent_level, nodes_map))
         .collect::<Vec<_>>()
         .join("\n");
       let trailing_newline = if !stmts.is_empty() { "\n" } else { "" };
@@ -421,9 +441,9 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
           .map(|d| {
             format!(
               "{} {} {}",
-              do_node_to_source_text(d, indent_level),
+              do_node_to_source_text(d, indent_level, nodes_map),
               format_operator("="),
-              do_node_to_source_text(init, indent_level),
+              do_node_to_source_text(init, indent_level, nodes_map),
             )
           })
           .collect::<Vec<_>>()
@@ -431,7 +451,7 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       } else {
         declarations
           .iter()
-          .map(|d| do_node_to_source_text(d, indent_level))
+          .map(|d| do_node_to_source_text(d, indent_level, nodes_map))
           .collect::<Vec<_>>()
           .join("\n")
       }
@@ -447,7 +467,7 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       constant,
       ..
     } => {
-      let type_str = do_node_to_source_text(type_name, indent_level);
+      let type_str = do_node_to_source_text(type_name, indent_level, nodes_map);
       let storage = storage_location_to_string(storage_location);
       let visibility_str = variable_visibility_to_string(visibility);
       let mutability_str = variable_mutability_to_string(mutability);
@@ -468,7 +488,7 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       if let Some(val) = value
         && !constant
       {
-        let val = do_node_to_source_text(val, indent_level);
+        let val = do_node_to_source_text(val, indent_level, nodes_map);
         format!(
           "{} {} {}",
           decl,
@@ -483,9 +503,9 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
     ASTNode::WhileStatement {
       condition, body, ..
     } => {
-      let cond = do_node_to_source_text(condition, indent_level);
+      let cond = do_node_to_source_text(condition, indent_level, nodes_map);
       let body_str = if let Some(b) = body {
-        do_node_to_source_text(b, indent_level)
+        do_node_to_source_text(b, indent_level, nodes_map)
       } else {
         format_brace("{}", indent_level)
       };
@@ -514,7 +534,7 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       let bases = if !base_contracts.is_empty() {
         let base_list = base_contracts
           .iter()
-          .map(|b| do_node_to_source_text(b, indent_level))
+          .map(|b| do_node_to_source_text(b, indent_level, nodes_map))
           .collect::<Vec<_>>()
           .join(", ");
         format!(" {} {}", format_keyword("is"), base_list)
@@ -534,7 +554,7 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       } else {
         let members = nodes
           .iter()
-          .map(|n| do_node_to_source_text(n, indent_level + 1))
+          .map(|n| do_node_to_source_text(n, indent_level + 1, nodes_map))
           .collect::<Vec<_>>()
           .join("\n\n");
         let trailing_newline = if !members.is_empty() { "\n" } else { "" };
@@ -582,13 +602,15 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       } else {
         format!(" {}", format_function_name(name))
       };
-      let params =
-        format!("{} ", do_node_to_source_text(parameters, indent_level));
+      let params = format!(
+        "{} ",
+        do_node_to_source_text(parameters, indent_level, nodes_map)
+      );
       let modifiers = if !modifiers.is_empty() {
         let indent_level = indent_level + 1;
         let mods = modifiers
           .iter()
-          .map(|m| do_node_to_source_text(m, indent_level))
+          .map(|m| do_node_to_source_text(m, indent_level, nodes_map))
           .collect::<Vec<_>>()
           .join("\n");
         indent(&mods, indent_level)
@@ -598,10 +620,10 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       let returns = format!(
         "{} {} ",
         format_keyword("returns"),
-        do_node_to_source_text(return_parameters, indent_level)
+        do_node_to_source_text(return_parameters, indent_level, nodes_map)
       );
       let body = if let Some(b) = body {
-        do_node_to_source_text(b, indent_level)
+        do_node_to_source_text(b, indent_level, nodes_map)
       } else {
         String::new()
       };
@@ -623,7 +645,7 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
     ASTNode::EventDefinition {
       name, parameters, ..
     } => {
-      let params = do_node_to_source_text(parameters, indent_level);
+      let params = do_node_to_source_text(parameters, indent_level, nodes_map);
       format!(
         "{} {}{}",
         format_keyword("event"),
@@ -635,7 +657,7 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
     ASTNode::ErrorDefinition {
       name, parameters, ..
     } => {
-      let params = do_node_to_source_text(parameters, indent_level);
+      let params = do_node_to_source_text(parameters, indent_level, nodes_map);
       format!(
         "{} {}{}",
         format_keyword("error"),
@@ -652,7 +674,7 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       body,
       ..
     } => {
-      let params = do_node_to_source_text(parameters, indent_level);
+      let params = do_node_to_source_text(parameters, indent_level, nodes_map);
       let virtual_str = if *virtual_ {
         format!("{} ", format_keyword("virtual"))
       } else {
@@ -668,7 +690,7 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
         format_keyword("mod"),
         format_function_name(name),
         params,
-        do_node_to_source_text(body, indent_level)
+        do_node_to_source_text(body, indent_level, nodes_map)
       )
     }
 
@@ -683,7 +705,7 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       let indent_level = indent_level + 1;
       let members_str = members
         .iter()
-        .map(|m| do_node_to_source_text(m, indent_level))
+        .map(|m| do_node_to_source_text(m, indent_level, nodes_map))
         .collect::<Vec<_>>()
         .join("\n");
       let trailing_newline = if !members_str.is_empty() { "\n" } else { "" };
@@ -702,7 +724,7 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
 
       let members_str = members
         .iter()
-        .map(|m| do_node_to_source_text(m, indent_level))
+        .map(|m| do_node_to_source_text(m, indent_level, nodes_map))
         .collect::<Vec<_>>()
         .join("\n");
       let trailing_newline = if !members_str.is_empty() { "\n" } else { "" };
@@ -723,7 +745,7 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       format!(
         "type {} is {}",
         format_user_defined_type(name),
-        do_node_to_source_text(underlying_type, indent_level)
+        do_node_to_source_text(underlying_type, indent_level, nodes_map)
       )
     }
 
@@ -745,7 +767,7 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       ..
     } => {
       let lib = if let Some(lib_node) = library_name {
-        do_node_to_source_text(lib_node, indent_level)
+        do_node_to_source_text(lib_node, indent_level, nodes_map)
       } else {
         String::new()
       };
@@ -753,7 +775,7 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
         format!(
           " {} {}",
           format_keyword("for"),
-          do_node_to_source_text(type_node, indent_level)
+          do_node_to_source_text(type_node, indent_level, nodes_map)
         )
       } else {
         String::new()
@@ -763,12 +785,12 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
 
     ASTNode::SourceUnit { nodes, .. } => nodes
       .iter()
-      .map(|n| do_node_to_source_text(n, indent_level))
+      .map(|n| do_node_to_source_text(n, indent_level, nodes_map))
       .collect::<Vec<_>>()
       .join("\n\n"),
 
     ASTNode::InheritanceSpecifier { base_name, .. } => {
-      do_node_to_source_text(base_name, indent_level)
+      do_node_to_source_text(base_name, indent_level, nodes_map)
     }
 
     ASTNode::ElementaryTypeName { name, .. } => format_type(name),
@@ -780,13 +802,14 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       state_mutability,
       ..
     } => {
-      let params = do_node_to_source_text(parameter_types, indent_level);
+      let params =
+        do_node_to_source_text(parameter_types, indent_level, nodes_map);
       let visibility_str = function_visibility_to_string(visibility);
       let mutability_str = function_mutability_to_string(state_mutability);
       let returns_str = format!(
         "{} {}",
         format_keyword("returns"),
-        do_node_to_source_text(return_parameter_types, indent_level)
+        do_node_to_source_text(return_parameter_types, indent_level, nodes_map)
       );
 
       format!(
@@ -806,7 +829,7 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
         let indent_level = indent_level + 1;
         let params = parameters
           .iter()
-          .map(|p| do_node_to_source_text(p, indent_level))
+          .map(|p| do_node_to_source_text(p, indent_level, nodes_map))
           .collect::<Vec<_>>()
           .join("\n");
         let trailing_newline = if !params.is_empty() { "\n" } else { "" };
@@ -821,14 +844,14 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       arguments,
       ..
     } => {
-      let name = do_node_to_source_text(modifier_name, indent_level);
+      let name = do_node_to_source_text(modifier_name, indent_level, nodes_map);
       if let Some(args) = arguments {
         if args.is_empty() {
           format!("{}()", name)
         } else {
           let args_str = args
             .iter()
-            .map(|a| do_node_to_source_text(a, indent_level))
+            .map(|a| do_node_to_source_text(a, indent_level, nodes_map))
             .collect::<Vec<_>>()
             .join("\n");
           format!("{}({})", name, indent(&args_str, indent_level + 1))
@@ -839,11 +862,14 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
     }
 
     ASTNode::UserDefinedTypeName { path_node, .. } => {
-      do_node_to_source_text(path_node, indent_level)
+      do_node_to_source_text(path_node, indent_level, nodes_map)
     }
 
     ASTNode::ArrayTypeName { base_type, .. } => {
-      format!("{}[]", do_node_to_source_text(base_type, indent_level))
+      format!(
+        "{}[]",
+        do_node_to_source_text(base_type, indent_level, nodes_map)
+      )
     }
 
     ASTNode::Mapping {
@@ -853,11 +879,12 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
       value_name,
       ..
     } => {
-      let mut key = do_node_to_source_text(key_type, indent_level);
+      let mut key = do_node_to_source_text(key_type, indent_level, nodes_map);
       if let Some(name) = key_name {
         key = format!("{} {}", key, name)
       }
-      let mut value = do_node_to_source_text(value_type, indent_level);
+      let mut value =
+        do_node_to_source_text(value_type, indent_level, nodes_map);
       if let Some(name) = value_name {
         value = format!("{} {}", value, name)
       }
@@ -873,7 +900,7 @@ fn do_node_to_source_text(node: &ASTNode, indent_level: usize) -> String {
 
     ASTNode::StructuredDocumentation { .. } => String::new(),
 
-    ASTNode::Stub { .. } => String::from("NodeStub"),
+    ASTNode::Stub { topic, .. } => format!("NodeStub-{}", topic.id),
 
     ASTNode::Other { .. } => format_comment("Unknown"),
   };

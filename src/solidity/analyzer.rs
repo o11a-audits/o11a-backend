@@ -532,6 +532,7 @@ fn process_second_pass_nodes(
 
     // Process declarations only if they exist in in_scope_declarations
     if let Some(in_scope_decl) = in_scope_decl {
+      // TODO! "The decls here could be renamed to referenceable decl, and the statements that are decl but are not referenceable could be added to the dict here in the second pass once we know they are in scope"
       // Add declaration
       declarations.insert(
         topic.clone(),

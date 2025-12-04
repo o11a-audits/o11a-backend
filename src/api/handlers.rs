@@ -303,7 +303,10 @@ pub async fn get_source_text(
   // Convert the node to source text based on its type
   let source_text = match node {
     Node::Solidity(solidity_node) => {
-      crate::solidity::formatter::node_to_source_text(solidity_node)
+      crate::solidity::formatter::node_to_source_text(
+        solidity_node,
+        &audit_data.nodes,
+      )
     }
     Node::Documentation(doc_node) => {
       crate::documentation::formatter::node_to_html(doc_node)
