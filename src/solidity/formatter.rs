@@ -1162,3 +1162,154 @@ fn storage_location_to_string(location: &StorageLocation) -> String {
   }
   .to_string()
 }
+
+pub fn node_to_signature(topic: topic::Topic, node: &ASTNode) -> String {
+  let sig = match node {
+    ASTNode::FunctionDefinition {
+      kind,
+      name,
+      visibility,
+      state_mutability,
+      virtual_,
+      ..
+    } => {
+      let virtual_str = if *virtual_ {
+        format!("{} ", format_keyword("virtual"))
+      } else {
+        String::new()
+      };
+      let visibility =
+        format_keyword(&function_visibility_to_string(visibility));
+      let mutability = format!(
+        " {}",
+        format_keyword(&function_mutability_to_string(state_mutability))
+      );
+      let kind_str =
+        format!(" {}", format_keyword(&function_kind_to_string(kind)));
+      let name_str = if name.is_empty() {
+        String::new()
+      } else {
+        format!(" {}", format_function_name(name))
+      };
+
+      format!(
+        "{}{}{}{}{}",
+        virtual_str, visibility, mutability, kind_str, name_str,
+      )
+    }
+    ASTNode::ContractDefinition {
+      contract_kind,
+      name,
+      abstract_,
+      ..
+    } => {
+      let kind = contract_kind_to_string(contract_kind);
+      let abstract_str = if *abstract_ {
+        format!("{} ", format_keyword("abstract"))
+      } else {
+        String::new()
+      };
+
+      format!(
+        "{}{} {}",
+        abstract_str,
+        format_keyword(&html_escape(&kind)),
+        format_type(&html_escape(name)),
+      )
+    }
+    ASTNode::Assignment { .. } => format!("Assignment {}", topic.id),
+    ASTNode::BinaryOperation { .. } => format!("BinaryOperation {}", topic.id),
+    ASTNode::Conditional { .. } => format!("Conditional {}", topic.id),
+    ASTNode::ElementaryTypeNameExpression { .. } => {
+      format!("ElementaryTypeNameExpression {}", topic.id)
+    }
+    ASTNode::FunctionCall { .. } => format!("FunctionCall {}", topic.id),
+    ASTNode::FunctionCallOptions { .. } => {
+      format!("FunctionCallOptions {}", topic.id)
+    }
+    ASTNode::Identifier { .. } => format!("Identifier {}", topic.id),
+    ASTNode::IdentifierPath { .. } => format!("IdentifierPath {}", topic.id),
+    ASTNode::IndexAccess { .. } => format!("IndexAccess {}", topic.id),
+    ASTNode::IndexRangeAccess { .. } => {
+      format!("IndexRangeAccess {}", topic.id)
+    }
+    ASTNode::Literal { .. } => format!("Literal {}", topic.id),
+    ASTNode::MemberAccess { .. } => format!("MemberAccess {}", topic.id),
+    ASTNode::NewExpression { .. } => format!("NewExpression {}", topic.id),
+    ASTNode::TupleExpression { .. } => format!("TupleExpression {}", topic.id),
+    ASTNode::UnaryOperation { .. } => format!("UnaryOperation {}", topic.id),
+    ASTNode::EnumValue { .. } => format!("EnumValue {}", topic.id),
+    ASTNode::Block { .. } => format!("Block {}", topic.id),
+    ASTNode::SemanticBlock { .. } => format!("SemanticBlock {}", topic.id),
+    ASTNode::Break { .. } => format!("Break {}", topic.id),
+    ASTNode::Continue { .. } => format!("Continue {}", topic.id),
+    ASTNode::DoWhileStatement { .. } => {
+      format!("DoWhileStatement {}", topic.id)
+    }
+    ASTNode::EmitStatement { .. } => format!("EmitStatement {}", topic.id),
+    ASTNode::ExpressionStatement { .. } => {
+      format!("ExpressionStatement {}", topic.id)
+    }
+    ASTNode::ForStatement { .. } => format!("ForStatement {}", topic.id),
+    ASTNode::IfStatement { .. } => format!("IfStatement {}", topic.id),
+    ASTNode::InlineAssembly { .. } => format!("InlineAssembly {}", topic.id),
+    ASTNode::PlaceholderStatement { .. } => {
+      format!("PlaceholderStatement {}", topic.id)
+    }
+    ASTNode::Return { .. } => format!("Return {}", topic.id),
+    ASTNode::RevertStatement { .. } => format!("RevertStatement {}", topic.id),
+    ASTNode::TryStatement { .. } => format!("TryStatement {}", topic.id),
+    ASTNode::UncheckedBlock { .. } => format!("UncheckedBlock {}", topic.id),
+    ASTNode::VariableDeclarationStatement { .. } => {
+      format!("VariableDeclarationStatement {}", topic.id)
+    }
+    ASTNode::VariableDeclaration { .. } => {
+      format!("VariableDeclaration {}", topic.id)
+    }
+    ASTNode::WhileStatement { .. } => format!("WhileStatement {}", topic.id),
+    ASTNode::EventDefinition { .. } => format!("EventDefinition {}", topic.id),
+    ASTNode::ErrorDefinition { .. } => format!("ErrorDefinition {}", topic.id),
+    ASTNode::ModifierDefinition { .. } => {
+      format!("ModifierDefinition {}", topic.id)
+    }
+    ASTNode::StructDefinition { .. } => {
+      format!("StructDefinition {}", topic.id)
+    }
+    ASTNode::EnumDefinition { .. } => format!("EnumDefinition {}", topic.id),
+    ASTNode::UserDefinedValueTypeDefinition { .. } => {
+      format!("UserDefinedValueTypeDefinition {}", topic.id)
+    }
+    ASTNode::PragmaDirective { .. } => format!("PragmaDirective {}", topic.id),
+    ASTNode::ImportDirective { .. } => format!("ImportDirective {}", topic.id),
+    ASTNode::UsingForDirective { .. } => {
+      format!("UsingForDirective {}", topic.id)
+    }
+    ASTNode::SourceUnit { .. } => format!("SourceUnit {}", topic.id),
+    ASTNode::InheritanceSpecifier { .. } => {
+      format!("InheritanceSpecifier {}", topic.id)
+    }
+    ASTNode::ElementaryTypeName { .. } => {
+      format!("ElementaryTypeName {}", topic.id)
+    }
+    ASTNode::FunctionTypeName { .. } => {
+      format!("FunctionTypeName {}", topic.id)
+    }
+    ASTNode::ParameterList { .. } => format!("ParameterList {}", topic.id),
+    ASTNode::TryCatchClause { .. } => format!("TryCatchClause {}", topic.id),
+    ASTNode::ModifierInvocation { .. } => {
+      format!("ModifierInvocation {}", topic.id)
+    }
+    ASTNode::UserDefinedTypeName { .. } => {
+      format!("UserDefinedTypeName {}", topic.id)
+    }
+    ASTNode::ArrayTypeName { .. } => format!("ArrayTypeName {}", topic.id),
+    ASTNode::Mapping { .. } => format!("Mapping {}", topic.id),
+    ASTNode::StructuredDocumentation { .. } => {
+      format!("StructuredDocumentation {}", topic.id)
+    }
+    ASTNode::Stub { .. } => format!("Stub {}", topic.id),
+    ASTNode::Other { .. } => format!("Other {}", topic.id),
+  };
+
+  format!("<pre><code>{}</code></pre>", sig)
+}
