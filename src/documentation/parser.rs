@@ -441,7 +441,7 @@ fn convert_mdast_node(
       // Try to find a matching declaration in the solidity context
       let referenced_declaration =
         find_declaration_by_name(audit_data, &code.value)
-          .map(|decl| decl.topic.clone());
+          .map(|decl| decl.topic().clone());
 
       Ok(DocumentationNode::InlineCode {
         node_id,
@@ -543,23 +543,23 @@ fn convert_mdast_node(
 fn find_declaration_by_name<'a>(
   audit_data: &'a core::AuditData,
   value: &str,
-) -> Option<&'a crate::core::Declaration> {
+) -> Option<&'a crate::core::TopicMetadata> {
   // First try to find by topic ID (most specific)
   audit_data
-    .declarations
+    .topic_metadata
     .get(&topic::new_topic(value))
     .or_else(|| {
       // If not found by topic ID, try to find by qualified name
       audit_data
-        .declarations
+        .topic_metadata
         .values()
         .find(|decl| decl.qualified_name(audit_data) == value)
         .or_else(|| {
           // If not found by qualified name, try to find by simple name
           audit_data
-            .declarations
+            .topic_metadata
             .values()
-            .find(|decl| decl.name == value)
+            .find(|decl| decl.name() == value)
         })
     })
 }

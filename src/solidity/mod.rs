@@ -8,8 +8,8 @@ pub mod parser;
 
 // Re-export core types
 pub use crate::core::{
-  ContractKind, DataContext, Declaration, DeclarationKind, FunctionKind,
-  FunctionModProperties, Scope,
+  ContractKind, DataContext, FunctionKind, FunctionModProperties, Scope,
+  TopicKind, TopicMetadata,
 };
 
 // Re-export analyzer function

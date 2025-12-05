@@ -1,7 +1,7 @@
 use crate::core;
 use crate::core::topic;
 use crate::core::{
-  AST, AuditData, DataContext, Declaration, DeclarationKind, Node, Scope,
+  AST, AuditData, DataContext, Node, Scope, TopicKind, TopicMetadata,
 };
 use crate::documentation::parser::{self, DocumentationAST, DocumentationNode};
 use std::path::Path;
@@ -142,15 +142,11 @@ fn process_documentation_node(
         container: project_path.clone(),
       };
 
-      // Extract heading text from children for the name
-      let name = format!("Header {}", topic.id);
-
-      audit_data.declarations.insert(
+      audit_data.topic_metadata.insert(
         topic.clone(),
-        Declaration {
+        TopicMetadata::UnnamedTopic {
           topic: topic.clone(),
-          declaration_kind: DeclarationKind::DocumentationSection,
-          name,
+          kind: TopicKind::DocumentationSection,
           scope,
         },
       );
@@ -174,19 +170,17 @@ fn process_documentation_node(
     }
 
     DocumentationNode::Paragraph { children, .. } => {
-      let name = format!("Paragraph {}", topic.id);
       // Paragraphs become paragraph declarations (members in scope)
       let scope = Scope::Component {
         container: project_path.clone(),
         component: topic.clone(),
       };
 
-      audit_data.declarations.insert(
+      audit_data.topic_metadata.insert(
         topic.clone(),
-        Declaration {
+        TopicMetadata::UnnamedTopic {
           topic: topic.clone(),
-          declaration_kind: DeclarationKind::DocumentationParagraph,
-          name,
+          kind: TopicKind::DocumentationParagraph,
           scope,
         },
       );

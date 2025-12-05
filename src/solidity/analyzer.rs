@@ -1,8 +1,8 @@
 use crate::core;
 use crate::core::topic;
 use crate::core::{
-  AST, DataContext, Declaration, DeclarationKind, FunctionKind,
-  FunctionModProperties, Node, Scope,
+  AST, DataContext, FunctionKind, FunctionModProperties, Node, Scope,
+  TopicKind, TopicMetadata,
 };
 use crate::solidity::parser::{self, ASTNode, SolidityAST};
 use std::collections::{BTreeMap, HashSet};
@@ -21,20 +21,20 @@ pub fn analyze(
   // First pass: Parse all ASTs and build comprehensive declaration dictionary
   // This processes every declaration in every file, regardless of scope
   let ast_map = parser::process(project_root)?;
-  let first_pass_declarations =
+  let first_pass_source_topics =
     first_pass(&ast_map, &audit_data.in_scope_files)?;
 
   // Tree shaking: Build in-scope dictionary by following references from
   // publicly visible declarations
-  let in_scope_declarations = tree_shake(&first_pass_declarations)?;
+  let in_scope_source_topics = tree_shake(&first_pass_source_topics)?;
 
   // Second pass: Build final data structures for in-scope declarations
   // Pass mutable references to audit_data's maps directly
   second_pass(
     &ast_map,
-    &in_scope_declarations,
+    &in_scope_source_topics,
     &mut audit_data.nodes,
-    &mut audit_data.declarations,
+    &mut audit_data.topic_metadata,
     &mut audit_data.references,
     &mut audit_data.function_properties,
     &mut audit_data.source_content,
@@ -78,7 +78,7 @@ pub fn analyze(
 pub enum FirstPassDeclaration {
   FunctionMod {
     is_publicly_in_scope: bool,
-    declaration_kind: DeclarationKind,
+    declaration_kind: TopicKind,
     name: String,
     scope: Scope,
     referenced_nodes: Vec<i32>,
@@ -88,7 +88,7 @@ pub enum FirstPassDeclaration {
   },
   Flat {
     is_publicly_in_scope: bool,
-    declaration_kind: DeclarationKind,
+    declaration_kind: TopicKind,
     name: String,
     scope: Scope,
   },
@@ -97,7 +97,7 @@ pub enum FirstPassDeclaration {
 pub enum InScopeDeclaration {
   // Functions and Modifiers
   FunctionMod {
-    declaration_kind: DeclarationKind,
+    declaration_kind: TopicKind,
     name: String,
     scope: Scope,
     references: Vec<i32>,
@@ -106,7 +106,7 @@ pub enum InScopeDeclaration {
     variable_mutations: Vec<i32>,
   },
   Flat {
-    declaration_kind: DeclarationKind,
+    declaration_kind: TopicKind,
     name: String,
     scope: Scope,
     references: Vec<i32>,
@@ -125,7 +125,7 @@ impl InScopeDeclaration {
     }
   }
 
-  pub fn declaration_kind(&self) -> &DeclarationKind {
+  pub fn declaration_kind(&self) -> &TopicKind {
     match self {
       InScopeDeclaration::FunctionMod {
         declaration_kind, ..
@@ -197,7 +197,7 @@ fn process_first_pass_ast_nodes(
         contract_kind,
         ..
       } => {
-        let declaration_kind = DeclarationKind::Contract(*contract_kind);
+        let declaration_kind = TopicKind::Contract(*contract_kind);
 
         first_pass_declarations.insert(
           *node_id,
@@ -261,7 +261,7 @@ fn process_first_pass_ast_nodes(
           *node_id,
           FirstPassDeclaration::FunctionMod {
             is_publicly_in_scope: is_publicly_visible,
-            declaration_kind: DeclarationKind::Function(*kind),
+            declaration_kind: TopicKind::Function(*kind),
             name: name.clone(),
             scope: current_scope.clone(),
             referenced_nodes,
@@ -312,7 +312,7 @@ fn process_first_pass_ast_nodes(
           *node_id,
           FirstPassDeclaration::FunctionMod {
             is_publicly_in_scope: is_publicly_visible,
-            declaration_kind: DeclarationKind::Modifier,
+            declaration_kind: TopicKind::Modifier,
             name: name.clone(),
             scope: current_scope.clone(),
             referenced_nodes,
@@ -345,12 +345,12 @@ fn process_first_pass_ast_nodes(
 
         let declaration_kind = if *state_variable {
           if matches!(mutability, parser::VariableMutability::Constant) {
-            DeclarationKind::Constant
+            TopicKind::Constant
           } else {
-            DeclarationKind::StateVariable
+            TopicKind::StateVariable
           }
         } else {
-          DeclarationKind::LocalVariable
+          TopicKind::LocalVariable
         };
 
         first_pass_declarations.insert(
@@ -369,7 +369,7 @@ fn process_first_pass_ast_nodes(
           *node_id,
           FirstPassDeclaration::Flat {
             is_publicly_in_scope: false,
-            declaration_kind: DeclarationKind::Event,
+            declaration_kind: TopicKind::Event,
             name: name.clone(),
             scope: current_scope.clone(),
           },
@@ -381,7 +381,7 @@ fn process_first_pass_ast_nodes(
           *node_id,
           FirstPassDeclaration::Flat {
             is_publicly_in_scope: false,
-            declaration_kind: DeclarationKind::Error,
+            declaration_kind: TopicKind::Error,
             name: name.clone(),
             scope: current_scope.clone(),
           },
@@ -393,7 +393,7 @@ fn process_first_pass_ast_nodes(
           *node_id,
           FirstPassDeclaration::Flat {
             is_publicly_in_scope: false,
-            declaration_kind: DeclarationKind::Struct,
+            declaration_kind: TopicKind::Struct,
             name: name.clone(),
             scope: current_scope.clone(),
           },
@@ -414,7 +414,7 @@ fn process_first_pass_ast_nodes(
           *node_id,
           FirstPassDeclaration::Flat {
             is_publicly_in_scope: false, // Enums are not publicly visible
-            declaration_kind: DeclarationKind::Enum,
+            declaration_kind: TopicKind::Enum,
             name: name.clone(),
             scope: current_scope.clone(),
           },
@@ -435,7 +435,7 @@ fn process_first_pass_ast_nodes(
           *node_id,
           FirstPassDeclaration::Flat {
             is_publicly_in_scope: false, // Enum members are not publicly visible
-            declaration_kind: DeclarationKind::EnumMember,
+            declaration_kind: TopicKind::EnumMember,
             name: name.clone(),
             scope: current_scope.clone(),
           },
@@ -464,9 +464,9 @@ fn process_first_pass_ast_nodes(
 /// data structures.
 fn second_pass(
   ast_map: &BTreeMap<core::ProjectPath, Vec<SolidityAST>>,
-  in_scope_declarations: &BTreeMap<i32, InScopeDeclaration>,
+  in_scope_source_topics: &BTreeMap<i32, InScopeDeclaration>,
   nodes: &mut BTreeMap<topic::Topic, Node>,
-  declarations: &mut BTreeMap<topic::Topic, Declaration>,
+  topic_metadata: &mut BTreeMap<topic::Topic, TopicMetadata>,
   references: &mut BTreeMap<topic::Topic, Vec<topic::Topic>>,
   function_properties: &mut BTreeMap<topic::Topic, FunctionModProperties>,
   source_content: &mut BTreeMap<core::ProjectPath, String>,
@@ -476,13 +476,10 @@ fn second_pass(
     for ast in asts {
       let found_in_scope_node = process_second_pass_nodes(
         &ast.nodes.iter().collect(),
-        file_path,
-        None,  // No contract context initially
-        None,  // No function context initially
-        false, // Parent is not in scope - check each node
-        in_scope_declarations,
+        false, // Parent is not in scope automatically - check each node
+        in_scope_source_topics,
         nodes,
-        declarations,
+        topic_metadata,
         references,
         function_properties,
       )?;
@@ -500,13 +497,10 @@ fn second_pass(
 /// If parent_in_scope is true, all nodes are assumed to be in scope
 fn process_second_pass_nodes(
   ast_nodes: &Vec<&ASTNode>,
-  file_path: &core::ProjectPath,
-  current_contract: Option<&str>,
-  current_function: Option<&str>,
   parent_in_scope: bool,
-  in_scope_declarations: &BTreeMap<i32, InScopeDeclaration>,
+  in_scope_source_topics: &BTreeMap<i32, InScopeDeclaration>,
   nodes: &mut BTreeMap<topic::Topic, Node>,
-  declarations: &mut BTreeMap<topic::Topic, Declaration>,
+  topic_metadata: &mut BTreeMap<topic::Topic, TopicMetadata>,
   references: &mut BTreeMap<topic::Topic, Vec<topic::Topic>>,
   function_properties: &mut BTreeMap<topic::Topic, FunctionModProperties>,
 ) -> Result<bool, String> {
@@ -517,8 +511,8 @@ fn process_second_pass_nodes(
     let topic = topic::new_node_topic(node_id);
 
     // Check if this node should be processed (either parent is in scope or it's in the in_scope_declarations)
-    let in_scope_decl = in_scope_declarations.get(&node_id);
-    let is_in_scope = parent_in_scope || in_scope_decl.is_some();
+    let in_scope_topic_metadata = in_scope_source_topics.get(&node_id);
+    let is_in_scope = parent_in_scope || in_scope_topic_metadata.is_some();
 
     if is_in_scope {
       // Add the node with its children converted to stubs
@@ -531,28 +525,28 @@ fn process_second_pass_nodes(
     }
 
     // Process declarations only if they exist in in_scope_declarations
-    if let Some(in_scope_decl) = in_scope_decl {
+    if let Some(in_scope_topic_metadata) = in_scope_topic_metadata {
       // TODO! "The decls here could be renamed to referenceable decl, and the statements that are decl but are not referenceable could be added to the dict here in the second pass once we know they are in scope"
       // Add declaration
-      declarations.insert(
+      topic_metadata.insert(
         topic.clone(),
-        Declaration {
+        TopicMetadata::NamedTopic {
           topic: topic::new_node_topic(node_id),
-          declaration_kind: in_scope_decl.declaration_kind().clone(),
-          name: in_scope_decl.name().clone(),
-          scope: in_scope_decl.scope().clone(),
+          kind: in_scope_topic_metadata.declaration_kind().clone(),
+          name: in_scope_topic_metadata.name().clone(),
+          scope: in_scope_topic_metadata.scope().clone(),
         },
       );
 
       // Store references to this declaration
-      let ref_topics: Vec<topic::Topic> = in_scope_decl
+      let ref_topics: Vec<topic::Topic> = in_scope_topic_metadata
         .references()
         .iter()
         .map(|&id| topic::new_node_topic(id))
         .collect();
       references.insert(topic.clone(), ref_topics);
 
-      match in_scope_decl {
+      match in_scope_topic_metadata {
         InScopeDeclaration::FunctionMod {
           require_revert_statements,
           function_calls,
@@ -618,29 +612,12 @@ fn process_second_pass_nodes(
     // Process children with appropriate context
     let child_nodes = node.nodes();
     if !child_nodes.is_empty() {
-      // Update context based on node type
-      let (new_contract, new_function) = match node {
-        ASTNode::ContractDefinition { name, .. } => {
-          (Some(name.as_str()), current_function)
-        }
-        ASTNode::FunctionDefinition { name, .. } => {
-          (current_contract, Some(name.as_str()))
-        }
-        ASTNode::ModifierDefinition { .. } => {
-          (current_contract, current_function)
-        }
-        _ => (current_contract, current_function),
-      };
-
       let child_found_in_scope = process_second_pass_nodes(
         &child_nodes,
-        file_path,
-        new_contract,
-        new_function,
         is_in_scope, // Children inherit parent's in-scope status
-        in_scope_declarations,
+        in_scope_source_topics,
         nodes,
-        declarations,
+        topic_metadata,
         references,
         function_properties,
       )?;
@@ -800,7 +777,7 @@ impl FirstPassDeclaration {
   }
 
   /// Get the declaration kind for any declaration variant
-  pub fn declaration_kind(&self) -> &DeclarationKind {
+  pub fn declaration_kind(&self) -> &TopicKind {
     match self {
       FirstPassDeclaration::FunctionMod {
         declaration_kind, ..
@@ -910,9 +887,7 @@ fn process_tree_shake_declarations(
           if let Some(called_decl) = first_pass_declarations.get(&call_id) {
             !matches!(
               called_decl.declaration_kind(),
-              DeclarationKind::Event
-                | DeclarationKind::Error
-                | DeclarationKind::Modifier
+              TopicKind::Event | TopicKind::Error | TopicKind::Modifier
             )
           } else {
             // Keep calls to declarations not in our map (external references)
@@ -927,10 +902,7 @@ fn process_tree_shake_declarations(
         .iter()
         .filter(|&&var_id| {
           if let Some(var_decl) = first_pass_declarations.get(&var_id) {
-            !matches!(
-              var_decl.declaration_kind(),
-              DeclarationKind::LocalVariable
-            )
+            !matches!(var_decl.declaration_kind(), TopicKind::LocalVariable)
           } else {
             // Keep mutations of variables not in our map (external references)
             true

@@ -35,7 +35,7 @@ pub struct AuditData {
   // Contains the node for a given topic
   pub nodes: BTreeMap<topic::Topic, Node>,
   // Contains the declaration for a given topic
-  pub declarations: BTreeMap<topic::Topic, Declaration>,
+  pub topic_metadata: BTreeMap<topic::Topic, TopicMetadata>,
   // Contains the references for a given topic
   pub references: BTreeMap<topic::Topic, Vec<topic::Topic>>,
   // Contains the function properties for a given topic
@@ -111,7 +111,7 @@ pub fn add_to_scope(scope: &Scope, topic: topic::Topic) -> Scope {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DeclarationKind {
+pub enum TopicKind {
   Contract(ContractKind),
   Function(FunctionKind),
   Modifier,
@@ -123,47 +123,83 @@ pub enum DeclarationKind {
   Constant,
   StateVariable,
   LocalVariable,
+  OperatorInvocation,
   DocumentationSection,
   DocumentationParagraph,
 }
 
 #[derive(Debug, Clone)]
-pub struct Declaration {
-  pub topic: topic::Topic,
-  pub declaration_kind: DeclarationKind,
-  pub name: String,
-  pub scope: Scope,
+pub enum TopicMetadata {
+  NamedTopic {
+    topic: topic::Topic,
+    scope: Scope,
+    kind: TopicKind,
+    name: String,
+  },
+  UnnamedTopic {
+    topic: topic::Topic,
+    scope: Scope,
+    kind: TopicKind,
+  },
 }
 
-impl Declaration {
+impl TopicMetadata {
+  pub fn scope(&self) -> &Scope {
+    match self {
+      TopicMetadata::NamedTopic { scope, .. } => scope,
+      TopicMetadata::UnnamedTopic { scope, .. } => scope,
+    }
+  }
+
+  pub fn name(&self) -> &str {
+    match self {
+      TopicMetadata::NamedTopic { name, .. } => name,
+      TopicMetadata::UnnamedTopic { topic, .. } => topic.id(),
+    }
+  }
+
+  pub fn topic(&self) -> &topic::Topic {
+    match self {
+      TopicMetadata::NamedTopic { topic, .. } => topic,
+      TopicMetadata::UnnamedTopic { topic, .. } => topic,
+    }
+  }
+
+  pub fn kind(&self) -> &TopicKind {
+    match self {
+      TopicMetadata::NamedTopic { kind, .. } => kind,
+      TopicMetadata::UnnamedTopic { kind, .. } => kind,
+    }
+  }
+
   /// Returns the qualified name of the declaration
   /// Format: component::member::statement::name, component::member::name, component::name, or name
   /// Uses the declaration names from the scope components, falling back to topic IDs if not found
   pub fn qualified_name(&self, audit_data: &AuditData) -> String {
-    match &self.scope {
-      Scope::Container { .. } => self.name.clone(),
+    match &self.scope() {
+      Scope::Container { .. } => self.name().to_string(),
       Scope::Component { component, .. } => {
         let component_name = audit_data
-          .declarations
+          .topic_metadata
           .get(component)
-          .map(|d| d.name.clone())
-          .unwrap_or_else(|| component.id().to_string());
-        format!("{}::{}", component_name, self.name)
+          .map(|d| d.name())
+          .unwrap_or_else(|| component.id());
+        format!("{}::{}", component_name, self.name())
       }
       Scope::Member {
         component, member, ..
       } => {
         let component_name = audit_data
-          .declarations
+          .topic_metadata
           .get(component)
-          .map(|d| d.name.clone())
-          .unwrap_or_else(|| component.id().to_string());
+          .map(|d| d.name())
+          .unwrap_or_else(|| component.id());
         let member_name = audit_data
-          .declarations
+          .topic_metadata
           .get(member)
-          .map(|d| d.name.clone())
-          .unwrap_or_else(|| member.id().to_string());
-        format!("{}::{}::{}", component_name, member_name, self.name)
+          .map(|d| d.name())
+          .unwrap_or_else(|| member.id());
+        format!("{}::{}::{}", component_name, member_name, self.name())
       }
       Scope::Statement {
         component,
@@ -172,23 +208,26 @@ impl Declaration {
         ..
       } => {
         let component_name = audit_data
-          .declarations
+          .topic_metadata
           .get(component)
-          .map(|d| d.name.clone())
-          .unwrap_or_else(|| component.id().to_string());
+          .map(|d| d.name())
+          .unwrap_or_else(|| component.id());
         let member_name = audit_data
-          .declarations
+          .topic_metadata
           .get(member)
-          .map(|d| d.name.clone())
-          .unwrap_or_else(|| member.id().to_string());
+          .map(|d| d.name())
+          .unwrap_or_else(|| member.id());
         let statement_name = audit_data
-          .declarations
+          .topic_metadata
           .get(statement)
-          .map(|d| d.name.clone())
-          .unwrap_or_else(|| statement.id().to_string());
+          .map(|d| d.name())
+          .unwrap_or_else(|| statement.id());
         format!(
           "{}::{}::{}::{}",
-          component_name, member_name, statement_name, self.name
+          component_name,
+          member_name,
+          statement_name,
+          self.name()
         )
       }
     }
@@ -355,7 +394,7 @@ pub fn new_audit_data(
     source_content: BTreeMap::new(),
     asts: BTreeMap::new(),
     nodes: BTreeMap::new(),
-    declarations: BTreeMap::new(),
+    topic_metadata: BTreeMap::new(),
     references: BTreeMap::new(),
     function_properties: BTreeMap::new(),
   }

@@ -349,30 +349,23 @@ fn do_node_to_source_text(
       body,
       ..
     } => {
-      let init = if let Some(init_expr) = initialization_expression {
+      let _init = if let Some(init_expr) = initialization_expression {
         do_node_to_source_text(init_expr, indent_level, nodes_map)
       } else {
         String::new()
       };
-      let cond = if let Some(_cond_expr) = condition {
-        "LoopExprPlaceholder".to_string()
+      let _cond = if let Some(cond_expr) = condition {
+        do_node_to_source_text(cond_expr, indent_level, nodes_map)
       } else {
         String::new()
       };
-      let loop_expr = if let Some(l_expr) = loop_expression {
+      let _loop_expr = if let Some(l_expr) = loop_expression {
         do_node_to_source_text(l_expr, indent_level, nodes_map)
       } else {
         String::new()
       };
       let body_str = do_node_to_source_text(body, indent_level, nodes_map);
-      format!(
-        "{} ({}; {}; {}) {}",
-        format_keyword("for"),
-        init,
-        cond,
-        loop_expr,
-        body_str
-      )
+      format!("{} (LoopExpr) {}", format_keyword("for"), body_str)
     }
 
     ASTNode::IfStatement {
