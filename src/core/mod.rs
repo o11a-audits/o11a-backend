@@ -103,10 +103,17 @@ pub fn add_to_scope(scope: &Scope, topic: topic::Topic) -> Scope {
       member: member.clone(),
       statement: topic,
     },
-    Scope::Statement { .. } => panic!(
-      "Cannot add to statement scope. Scope: {:?}, Topic: {:?}",
-      scope, topic
-    ),
+    Scope::Statement {
+      container,
+      component,
+      member,
+      ..
+    } => Scope::Statement {
+      container: container.clone(),
+      component: component.clone(),
+      member: member.clone(),
+      statement: topic,
+    },
   }
 }
 
