@@ -2,6 +2,7 @@ use axum::{
   Router,
   routing::{get, post},
 };
+use tower_http::cors::CorsLayer;
 
 use crate::api::{AppState, handlers};
 
@@ -36,5 +37,6 @@ pub fn create_router(state: AppState) -> Router {
       "/api/v1/audits/:audit_id/source_text/:topic_id",
       get(handlers::get_source_text),
     )
+    .layer(CorsLayer::permissive())
     .with_state(state)
 }
