@@ -210,6 +210,20 @@ Statement chains are as follows: there is a main, same block chain. This represe
 
 To implement this, we can gather all statements that could satisfy the dependency (when a dependency is added, as many statements will have none and we do not want to waste time processing them) and store them as a tree, with the subject being the root, and tree depth representing prior statements. Then we take the statements that the user said satisfied the dependency, and search for a path to a leaf statement that does not encounter one of the satisfying statements. If we can get to a leaf without encountering a satisfying statement, then that is a path to the subject where the dependency is not satisfied, and the dependency is not satisfied as a whole. A leaf node would be some entry point to the project, like a public function. For this implementation, we would have to store an AST of statements to pull the sub-trees from to get the subject as the root.
 
+### Managing Functional Consumers
+
+A functional consumer is a statement that consumes what was set up by the current statement. A functional dependency checks that something was set up before the current statement, and a functional consumer checks that what is set up by the current statement is preperly used by later statements. A functional consumer turns into a functional dependency on the consuming statement when it is linked, and a functional dependency turns into a functional consumer on the consuming statement when it is linked, and so they can both be checked in the same way. Dependencies and consumers cannot be checked exhuastively, so checking for the existence or fullness of them is an important job of the auditor. When a statement has a side effect, at least one functional consumer must exist and should be searched for. The consumer is first added in an unsatisfied state, and added for satisfaction when a satifying statement is found. Checking for a least one consumer is a way to make sure that something is not set up, and then forgotten to be consumed, indicating a potential bug.
+
+### Managing Functional Failure Points
+
+The functional failure points are a list of things that could invalidate the current functional property. These things help the auditor enumerate what could go wrong, and serve like a checklist of things to check.
+
+### Managing Functional Failure Consequences
+
+There needs to be a way to state the severity of a functional property not holding so that the auditor can prioritize the importance of the property. Maybe the functional property can be linked to an attack vector as a defense to it, so that the consequence of a statement can be understood.
+
+What is the difference in stating an invariant and an attack vector -- are the inverses? What is the relationship between an invariant/attack vector and a convergence. Does the convergence uphold an invariant, or defend against an attack vector?
+
 ## Auditing Convergences
 
 Patterns annotate type constraint checks and can be checked by a constraint algorithm. Specification constraint checks are annotated in regular language with business logic and can only be checked by something that understands the specific business logic semantics.
