@@ -547,12 +547,28 @@ fn do_node_to_source_text(
         String::new()
       };
       let bases = if !base_contracts.is_empty() {
-        let base_list = base_contracts
-          .iter()
-          .map(|b| do_node_to_source_text(b, indent_level, nodes_map))
-          .collect::<Vec<_>>()
-          .join(", ");
-        format!(" {} {}", format_keyword("is"), base_list)
+        let base_indent_level = indent_level + 1;
+        let first_base = do_node_to_source_text(
+          &base_contracts[0],
+          base_indent_level,
+          nodes_map,
+        );
+        let remaining_bases = if base_contracts.len() > 1 {
+          let remaining = base_contracts[1..]
+            .iter()
+            .map(|b| do_node_to_source_text(b, base_indent_level, nodes_map))
+            .collect::<Vec<_>>()
+            .join("\n");
+          format!("\n{}", inline_indent(&remaining, base_indent_level))
+        } else {
+          String::new()
+        };
+        format!(
+          "{} {}{}",
+          indent(&format_keyword("is"), base_indent_level),
+          first_base,
+          remaining_bases
+        )
       } else {
         String::new()
       };
@@ -789,10 +805,11 @@ fn do_node_to_source_text(
         String::new()
       };
       let type_str = if let Some(type_node) = type_name {
+        let for_indent_level = indent_level + 1;
         format!(
-          " {} {}",
-          format_keyword("for"),
-          do_node_to_source_text(type_node, indent_level, nodes_map)
+          "{} {}",
+          indent(&format_keyword("for"), for_indent_level),
+          do_node_to_source_text(type_node, for_indent_level, nodes_map)
         )
       } else {
         String::new()
