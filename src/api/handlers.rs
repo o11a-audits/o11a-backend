@@ -7,11 +7,8 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
-use crate::core::{Node, project, topic::Topic};
-use crate::{
-  api::AppState,
-  core::topic::{new_node_topic, new_topic},
-};
+use crate::core::{Node, project};
+use crate::{api::AppState, core::topic::new_topic};
 
 // Health check handler
 pub async fn health_check() -> StatusCode {
@@ -213,16 +210,8 @@ pub async fn delete_audit(
 }
 
 #[derive(Debug, Serialize)]
-pub struct ContractInfo {
-  pub topic: Topic,
-  pub name: String,
-  pub kind: String,
-  pub file_path: String,
-}
-
-#[derive(Debug, Serialize)]
 pub struct ContractsResponse {
-  pub contracts: Vec<ContractInfo>,
+  pub contracts: Vec<TopicMetadataResponse>,
 }
 
 // Get all contracts for an audit
@@ -241,36 +230,80 @@ pub async fn get_contracts(
 
   let mut contracts = Vec::new();
 
-  // Filter for .sol files
-  let sol_files: Vec<_> = audit_data
-    .in_scope_files
-    .iter()
-    .filter(|path| path.file_path.ends_with(".sol"))
-    .collect();
-
-  // Process each .sol file
-  for project_path in sol_files {
-    if let Some(ast) = audit_data.asts.get(project_path) {
-      // Get the AST and traverse it
-      if let crate::core::AST::Solidity(solidity_ast) = ast {
-        // Look for ContractDefinition nodes
-        for node in solidity_ast.resolve_nodes(&audit_data.nodes) {
-          if let crate::solidity::parser::ASTNode::ContractDefinition {
-            node_id,
-            name,
-            contract_kind,
-            ..
-          } = node
-          {
-            contracts.push(ContractInfo {
-              topic: new_node_topic(node_id),
-              name: name.clone(),
-              kind: format!("{:?}", contract_kind),
-              file_path: project_path.file_path.clone(),
-            });
-          }
+  // Iterate through all topic metadata and filter for contracts in scope files
+  for (topic, metadata) in &audit_data.topic_metadata {
+    if let crate::core::TopicKind::Contract(contract_kind) = metadata.kind() {
+      // Check if the contract is in an in-scope file
+      let is_in_scope = match metadata.scope() {
+        crate::core::Scope::Container { container } => {
+          audit_data.in_scope_files.contains(container)
         }
+        _ => false,
+      };
+
+      if !is_in_scope {
+        continue;
       }
+
+      // Extract scope information
+      let scope_info = match metadata.scope() {
+        crate::core::Scope::Container { container } => ScopeInfo {
+          scope_type: "Container".to_string(),
+          container: Some(container.file_path.clone()),
+          component: None,
+          member: None,
+          statement: None,
+        },
+        crate::core::Scope::Component {
+          container,
+          component,
+        } => ScopeInfo {
+          scope_type: "Component".to_string(),
+          container: Some(container.file_path.clone()),
+          component: Some(component.id.clone()),
+          member: None,
+          statement: None,
+        },
+        crate::core::Scope::Member {
+          container,
+          component,
+          member,
+        } => ScopeInfo {
+          scope_type: "Member".to_string(),
+          container: Some(container.file_path.clone()),
+          component: Some(component.id.clone()),
+          member: Some(member.id.clone()),
+          statement: None,
+        },
+        crate::core::Scope::Statement {
+          container,
+          component,
+          member,
+          statement,
+        } => ScopeInfo {
+          scope_type: "Statement".to_string(),
+          container: Some(container.file_path.clone()),
+          component: Some(component.id.clone()),
+          member: Some(member.id.clone()),
+          statement: Some(statement.id.clone()),
+        },
+      };
+
+      // Only include name for NamedTopic
+      let name = match metadata {
+        crate::core::TopicMetadata::NamedTopic { name, .. } => {
+          Some(name.clone())
+        }
+        crate::core::TopicMetadata::UnnamedTopic { .. } => None,
+      };
+
+      contracts.push(TopicMetadataResponse {
+        topic_id: topic.id.clone(),
+        name,
+        kind: "Contract".to_string(),
+        sub_kind: Some(format!("{:?}", contract_kind)),
+        scope: scope_info,
+      });
     }
   }
 
