@@ -37,6 +37,10 @@ pub fn create_router(state: AppState) -> Router {
       "/api/v1/audits/:audit_id/source_text/:topic_id",
       get(handlers::get_source_text),
     )
+    .route(
+      "/api/v1/audits/:audit_id/metadata/:topic_id",
+      get(handlers::get_metadata),
+    )
     .layer(CorsLayer::permissive())
     .with_state(state)
 }

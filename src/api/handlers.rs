@@ -315,3 +315,124 @@ pub async fn get_source_text(
 
   Ok(Html(source_text))
 }
+
+// Topic metadata response
+#[derive(Debug, Serialize)]
+pub struct ScopeInfo {
+  pub scope_type: String,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub container: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub component: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub member: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub statement: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TopicMetadataResponse {
+  pub topic_id: String,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub name: Option<String>,
+  pub kind: String,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub sub_kind: Option<String>,
+  pub scope: ScopeInfo,
+}
+
+// Get metadata for a specific topic within an audit
+pub async fn get_metadata(
+  State(state): State<AppState>,
+  Path((audit_id, topic_id)): Path<(String, String)>,
+) -> Result<Json<TopicMetadataResponse>, StatusCode> {
+  println!("GET /api/v1/audits/{}/metadata/{}", audit_id, topic_id);
+
+  let ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in get_metadata: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+
+  let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+
+  // Create topic from the topic_id
+  let topic = new_topic(&topic_id);
+
+  // Get the metadata for this topic
+  let metadata = audit_data.topic_metadata.get(&topic).ok_or_else(|| {
+    eprintln!(
+      "Metadata for topic '{}' not found in audit '{}'",
+      topic_id, audit_id
+    );
+    StatusCode::NOT_FOUND
+  })?;
+
+  // Extract scope information
+  let scope_info = match metadata.scope() {
+    crate::core::Scope::Container { container } => ScopeInfo {
+      scope_type: "Container".to_string(),
+      container: Some(container.file_path.clone()),
+      component: None,
+      member: None,
+      statement: None,
+    },
+    crate::core::Scope::Component {
+      container,
+      component,
+    } => ScopeInfo {
+      scope_type: "Component".to_string(),
+      container: Some(container.file_path.clone()),
+      component: Some(component.id.clone()),
+      member: None,
+      statement: None,
+    },
+    crate::core::Scope::Member {
+      container,
+      component,
+      member,
+    } => ScopeInfo {
+      scope_type: "Member".to_string(),
+      container: Some(container.file_path.clone()),
+      component: Some(component.id.clone()),
+      member: Some(member.id.clone()),
+      statement: None,
+    },
+    crate::core::Scope::Statement {
+      container,
+      component,
+      member,
+      statement,
+    } => ScopeInfo {
+      scope_type: "Statement".to_string(),
+      container: Some(container.file_path.clone()),
+      component: Some(component.id.clone()),
+      member: Some(member.id.clone()),
+      statement: Some(statement.id.clone()),
+    },
+  };
+
+  // Format the kind and sub_kind
+  let (kind_str, sub_kind) = match metadata.kind() {
+    crate::core::TopicKind::Contract(contract_kind) => {
+      ("Contract".to_string(), Some(format!("{:?}", contract_kind)))
+    }
+    crate::core::TopicKind::Function(function_kind) => {
+      ("Function".to_string(), Some(format!("{:?}", function_kind)))
+    }
+    kind => (format!("{:?}", kind), None),
+  };
+
+  // Only include name for NamedTopic
+  let name = match metadata {
+    crate::core::TopicMetadata::NamedTopic { name, .. } => Some(name.clone()),
+    crate::core::TopicMetadata::UnnamedTopic { .. } => None,
+  };
+
+  Ok(Json(TopicMetadataResponse {
+    topic_id: topic_id.clone(),
+    name,
+    kind: kind_str,
+    sub_kind,
+    scope: scope_info,
+  }))
+}
