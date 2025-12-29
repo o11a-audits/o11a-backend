@@ -232,7 +232,7 @@ pub async fn get_contracts(
 
   // Iterate through all topic metadata and filter for contracts in scope files
   for (topic, metadata) in &audit_data.topic_metadata {
-    if let crate::core::TopicKind::Contract(contract_kind) = metadata.kind() {
+    if let crate::core::TopicKind::Contract(_) = metadata.kind() {
       // Check if the contract is in an in-scope file
       let is_in_scope = match metadata.scope() {
         crate::core::Scope::Container { container } => {
@@ -245,65 +245,7 @@ pub async fn get_contracts(
         continue;
       }
 
-      // Extract scope information
-      let scope_info = match metadata.scope() {
-        crate::core::Scope::Container { container } => ScopeInfo {
-          scope_type: "Container".to_string(),
-          container: Some(container.file_path.clone()),
-          component: None,
-          member: None,
-          statement: None,
-        },
-        crate::core::Scope::Component {
-          container,
-          component,
-        } => ScopeInfo {
-          scope_type: "Component".to_string(),
-          container: Some(container.file_path.clone()),
-          component: Some(component.id.clone()),
-          member: None,
-          statement: None,
-        },
-        crate::core::Scope::Member {
-          container,
-          component,
-          member,
-        } => ScopeInfo {
-          scope_type: "Member".to_string(),
-          container: Some(container.file_path.clone()),
-          component: Some(component.id.clone()),
-          member: Some(member.id.clone()),
-          statement: None,
-        },
-        crate::core::Scope::Statement {
-          container,
-          component,
-          member,
-          statement,
-        } => ScopeInfo {
-          scope_type: "Statement".to_string(),
-          container: Some(container.file_path.clone()),
-          component: Some(component.id.clone()),
-          member: Some(member.id.clone()),
-          statement: Some(statement.id.clone()),
-        },
-      };
-
-      // Only include name for NamedTopic
-      let name = match metadata {
-        crate::core::TopicMetadata::NamedTopic { name, .. } => {
-          Some(name.clone())
-        }
-        crate::core::TopicMetadata::UnnamedTopic { .. } => None,
-      };
-
-      contracts.push(TopicMetadataResponse {
-        topic_id: topic.id.clone(),
-        name,
-        kind: "Contract".to_string(),
-        sub_kind: Some(format!("{:?}", contract_kind)),
-        scope: scope_info,
-      });
+      contracts.push(topic_metadata_to_response(topic, metadata));
     }
   }
 
@@ -374,32 +316,11 @@ pub struct TopicMetadataResponse {
   pub scope: ScopeInfo,
 }
 
-// Get metadata for a specific topic within an audit
-pub async fn get_metadata(
-  State(state): State<AppState>,
-  Path((audit_id, topic_id)): Path<(String, String)>,
-) -> Result<Json<TopicMetadataResponse>, StatusCode> {
-  println!("GET /api/v1/audits/{}/metadata/{}", audit_id, topic_id);
-
-  let ctx = state.data_context.lock().map_err(|e| {
-    eprintln!("Mutex poisoned in get_metadata: {}", e);
-    StatusCode::INTERNAL_SERVER_ERROR
-  })?;
-
-  let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
-
-  // Create topic from the topic_id
-  let topic = new_topic(&topic_id);
-
-  // Get the metadata for this topic
-  let metadata = audit_data.topic_metadata.get(&topic).ok_or_else(|| {
-    eprintln!(
-      "Metadata for topic '{}' not found in audit '{}'",
-      topic_id, audit_id
-    );
-    StatusCode::NOT_FOUND
-  })?;
-
+// Helper function to convert TopicMetadata to TopicMetadataResponse
+fn topic_metadata_to_response(
+  topic: &crate::core::topic::Topic,
+  metadata: &crate::core::TopicMetadata,
+) -> TopicMetadataResponse {
   // Extract scope information
   let scope_info = match metadata.scope() {
     crate::core::Scope::Container { container } => ScopeInfo {
@@ -461,11 +382,40 @@ pub async fn get_metadata(
     crate::core::TopicMetadata::UnnamedTopic { .. } => None,
   };
 
-  Ok(Json(TopicMetadataResponse {
-    topic_id: topic_id.clone(),
+  TopicMetadataResponse {
+    topic_id: topic.id.clone(),
     name,
     kind: kind_str,
     sub_kind,
     scope: scope_info,
-  }))
+  }
+}
+
+// Get metadata for a specific topic within an audit
+pub async fn get_metadata(
+  State(state): State<AppState>,
+  Path((audit_id, topic_id)): Path<(String, String)>,
+) -> Result<Json<TopicMetadataResponse>, StatusCode> {
+  println!("GET /api/v1/audits/{}/metadata/{}", audit_id, topic_id);
+
+  let ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in get_metadata: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+
+  let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+
+  // Create topic from the topic_id
+  let topic = new_topic(&topic_id);
+
+  // Get the metadata for this topic
+  let metadata = audit_data.topic_metadata.get(&topic).ok_or_else(|| {
+    eprintln!(
+      "Metadata for topic '{}' not found in audit '{}'",
+      topic_id, audit_id
+    );
+    StatusCode::NOT_FOUND
+  })?;
+
+  Ok(Json(topic_metadata_to_response(&topic, metadata)))
 }
