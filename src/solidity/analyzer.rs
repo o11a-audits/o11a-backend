@@ -213,7 +213,7 @@ fn process_first_pass_ast_nodes(
         process_first_pass_ast_nodes(
           &child_nodes,
           is_file_in_scope,
-          &core::add_to_scope(current_scope, topic::new_node_topic(*node_id)),
+          &core::add_to_scope(current_scope, topic::new_node_topic(node_id)),
           first_pass_declarations,
         )?;
       }
@@ -276,7 +276,7 @@ fn process_first_pass_ast_nodes(
         process_first_pass_ast_nodes(
           &child_nodes,
           is_file_in_scope,
-          &core::add_to_scope(current_scope, topic::new_node_topic(*node_id)),
+          &core::add_to_scope(current_scope, topic::new_node_topic(node_id)),
           first_pass_declarations,
         )?;
       }
@@ -327,7 +327,7 @@ fn process_first_pass_ast_nodes(
         process_first_pass_ast_nodes(
           &child_nodes,
           is_file_in_scope,
-          &core::add_to_scope(current_scope, topic::new_node_topic(*node_id)),
+          &core::add_to_scope(current_scope, topic::new_node_topic(node_id)),
           first_pass_declarations,
         )?;
       }
@@ -404,7 +404,7 @@ fn process_first_pass_ast_nodes(
         process_first_pass_ast_nodes(
           &member_nodes,
           is_file_in_scope,
-          &core::add_to_scope(&current_scope, topic::new_node_topic(*node_id)),
+          &core::add_to_scope(&current_scope, topic::new_node_topic(node_id)),
           first_pass_declarations,
         )?;
       }
@@ -425,7 +425,7 @@ fn process_first_pass_ast_nodes(
         process_first_pass_ast_nodes(
           &member_nodes,
           is_file_in_scope,
-          &core::add_to_scope(&current_scope, topic::new_node_topic(*node_id)),
+          &core::add_to_scope(&current_scope, topic::new_node_topic(node_id)),
           first_pass_declarations,
         )?;
       }
@@ -508,7 +508,7 @@ fn process_second_pass_nodes(
 
   for node in ast_nodes {
     let node_id = node.node_id();
-    let topic = topic::new_node_topic(node_id);
+    let topic = topic::new_node_topic(&node_id);
 
     // Check if this node should be processed (either parent is in scope or it's in the in_scope_declarations)
     let in_scope_topic_metadata = in_scope_source_topics.get(&node_id);
@@ -531,7 +531,7 @@ fn process_second_pass_nodes(
       topic_metadata.insert(
         topic.clone(),
         TopicMetadata::NamedTopic {
-          topic: topic::new_node_topic(node_id),
+          topic: topic::new_node_topic(&node_id),
           kind: in_scope_topic_metadata.declaration_kind().clone(),
           name: in_scope_topic_metadata.name().clone(),
           scope: in_scope_topic_metadata.scope().clone(),
@@ -542,7 +542,7 @@ fn process_second_pass_nodes(
       let ref_topics: Vec<topic::Topic> = in_scope_topic_metadata
         .references()
         .iter()
-        .map(|&id| topic::new_node_topic(id))
+        .map(|&id| topic::new_node_topic(&id))
         .collect();
       references.insert(topic.clone(), ref_topics);
 
@@ -555,15 +555,15 @@ fn process_second_pass_nodes(
         } => {
           let revert_topics: Vec<topic::Topic> = require_revert_statements
             .iter()
-            .map(|&id| topic::new_node_topic(id))
+            .map(|&id| topic::new_node_topic(&id))
             .collect();
           let call_topics: Vec<topic::Topic> = function_calls
             .iter()
-            .map(|&id| topic::new_node_topic(id))
+            .map(|&id| topic::new_node_topic(&id))
             .collect();
           let mutation_topics: Vec<topic::Topic> = variable_mutations
             .iter()
-            .map(|&id| topic::new_node_topic(id))
+            .map(|&id| topic::new_node_topic(&id))
             .collect();
 
           match node {
@@ -636,7 +636,7 @@ fn extract_parameter_topics(parameter_list: &ASTNode) -> Vec<topic::Topic> {
 
   if let ASTNode::ParameterList { parameters, .. } = parameter_list {
     for param in parameters {
-      topics.push(topic::new_node_topic(param.node_id()));
+      topics.push(topic::new_node_topic(&param.node_id()));
     }
   }
 

@@ -1563,7 +1563,7 @@ fn node_to_stub(node: &ASTNode) -> ASTNode {
   ASTNode::Stub {
     node_id: node.node_id(),
     src_location: node.src_location().clone(),
-    topic: topic::new_node_topic(node.node_id()),
+    topic: topic::new_node_topic(&node.node_id()),
   }
 }
 

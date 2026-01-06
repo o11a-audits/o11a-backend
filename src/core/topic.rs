@@ -15,7 +15,7 @@ pub fn new_topic(id: &str) -> Topic {
   Topic { id: id.to_string() }
 }
 
-pub fn new_node_topic(node_id: i32) -> Topic {
+pub fn new_node_topic(node_id: &i32) -> Topic {
   Topic {
     id: format!("N{}", node_id),
   }

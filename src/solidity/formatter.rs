@@ -1,5 +1,5 @@
 use crate::core;
-use crate::core::topic;
+use crate::core::topic::{self, new_node_topic};
 use crate::core::{ContractKind, FunctionKind};
 use crate::solidity::parser::{
   ASTNode, AssignmentOperator, BinaryOperator, FunctionStateMutability,
@@ -30,6 +30,7 @@ fn do_node_to_source_text(
 ) -> String {
   let node_str = match node.resolve(nodes_map) {
     ASTNode::Assignment {
+      node_id,
       operator,
       left_hand_side,
       right_hand_side,
@@ -44,12 +45,13 @@ fn do_node_to_source_text(
       format!(
         "{} {}{}",
         lhs,
-        format_operator(&op),
+        format_topic_operator(&op, &new_node_topic(node_id)),
         indent(&rhs, indent_level)
       )
     }
 
     ASTNode::BinaryOperation {
+      node_id,
       left_expression,
       operator,
       right_expression,
@@ -65,7 +67,15 @@ fn do_node_to_source_text(
         // of the lhs
         let rhs =
           do_node_to_source_text(right_expression, indent_level, nodes_map);
-        format!("{}\n{}", lhs, format!("{} {}", format_operator(&op), &rhs),)
+        format!(
+          "{}\n{}",
+          lhs,
+          format!(
+            "{} {}",
+            format_topic_operator(&op, &new_node_topic(node_id)),
+            &rhs
+          ),
+        )
       } else {
         let indent_level = indent_level + 1;
         let rhs =
@@ -73,12 +83,20 @@ fn do_node_to_source_text(
         format!(
           "{}{}",
           lhs,
-          indent(&format!("{} {}", format_operator(&op), &rhs), indent_level)
+          indent(
+            &format!(
+              "{} {}",
+              format_topic_operator(&op, &new_node_topic(node_id)),
+              &rhs
+            ),
+            indent_level
+          )
         )
       }
     }
 
     ASTNode::Conditional {
+      node_id,
       condition,
       true_expression,
       false_expression,
@@ -90,7 +108,7 @@ fn do_node_to_source_text(
       let part = if let Some(false_expr) = false_expression {
         format!(
           "\n{} {}\n{} {}",
-          format_operator("?"),
+          format_topic_operator("?", &new_node_topic(node_id)),
           do_node_to_source_text(true_expression, indent_level, nodes_map),
           format_operator(":"),
           do_node_to_source_text(false_expr, indent_level, nodes_map),
@@ -98,7 +116,7 @@ fn do_node_to_source_text(
       } else {
         format!(
           "\n{} {}",
-          format_operator("?"),
+          format_topic_operator("?", &new_node_topic(node_id)),
           do_node_to_source_text(true_expression, indent_level, nodes_map)
         )
       };
@@ -169,7 +187,9 @@ fn do_node_to_source_text(
       )
     }
 
-    ASTNode::Identifier { name, .. } => format_identifier(name),
+    ASTNode::Identifier { node_id, name, .. } => {
+      format_identifier(name, &new_node_topic(node_id))
+    }
 
     ASTNode::IdentifierPath {
       name,
@@ -179,7 +199,7 @@ fn do_node_to_source_text(
       if referenced_declaration < &0 {
         format_global(&name)
       } else {
-        format_identifier(name)
+        format_identifier(name, &new_node_topic(referenced_declaration))
       }
     }
 
@@ -236,10 +256,12 @@ fn do_node_to_source_text(
       format!("{}{}", expr, indent(&member, indent_level),)
     }
 
-    ASTNode::NewExpression { type_name, .. } => {
+    ASTNode::NewExpression {
+      node_id, type_name, ..
+    } => {
       format!(
         "{} {}",
-        format_keyword("new"),
+        format_topic_keyword("new", &new_node_topic(node_id)),
         do_node_to_source_text(type_name, indent_level, nodes_map)
       )
     }
@@ -262,6 +284,7 @@ fn do_node_to_source_text(
     }
 
     ASTNode::UnaryOperation {
+      node_id,
       prefix,
       operator,
       sub_expression,
@@ -271,13 +294,23 @@ fn do_node_to_source_text(
       let expr =
         do_node_to_source_text(sub_expression, indent_level, nodes_map);
       if *prefix {
-        format!("{}{}", format_operator(&op), expr)
+        format!(
+          "{}{}",
+          format_topic_operator(&op, &new_node_topic(node_id)),
+          expr
+        )
       } else {
-        format!("{}{}", expr, format_operator(&op))
+        format!(
+          "{}{}",
+          expr,
+          format_topic_operator(&op, &new_node_topic(node_id))
+        )
       }
     }
 
-    ASTNode::EnumValue { name, .. } => format_enum_value(&html_escape(name)),
+    ASTNode::EnumValue { node_id, name, .. } => {
+      format_enum_value(&html_escape(name), &new_node_topic(node_id))
+    }
 
     ASTNode::Block { statements, .. } => {
       if statements.is_empty() {
@@ -310,7 +343,12 @@ fn do_node_to_source_text(
 
     ASTNode::Continue { .. } => format_keyword("continue"),
 
-    ASTNode::DoWhileStatement { nodes, body, .. } => {
+    ASTNode::DoWhileStatement {
+      node_id,
+      nodes,
+      body,
+      ..
+    } => {
       let body_str = if let Some(b) = body {
         do_node_to_source_text(b, indent_level, nodes_map)
       } else {
@@ -323,17 +361,21 @@ fn do_node_to_source_text(
       };
       format!(
         "{} {} {} ({})",
-        format_keyword("do"),
+        format_topic_keyword("do", &new_node_topic(node_id)),
         body_str,
         format_keyword("while"),
         condition
       )
     }
 
-    ASTNode::EmitStatement { event_call, .. } => {
+    ASTNode::EmitStatement {
+      node_id,
+      event_call,
+      ..
+    } => {
       format!(
         "{} {}",
-        format_keyword("emit"),
+        format_topic_keyword("emit", &new_node_topic(node_id)),
         do_node_to_source_text(event_call, indent_level, nodes_map)
       )
     }
@@ -343,6 +385,7 @@ fn do_node_to_source_text(
     }
 
     ASTNode::ForStatement {
+      node_id,
       initialization_expression,
       condition,
       loop_expression,
@@ -365,10 +408,15 @@ fn do_node_to_source_text(
         String::new()
       };
       let body_str = do_node_to_source_text(body, indent_level, nodes_map);
-      format!("{} (LoopExpr) {}", format_keyword("for"), body_str)
+      format!(
+        "{} (LoopExpr) {}",
+        format_topic_keyword("for", &new_node_topic(node_id)),
+        body_str
+      )
     }
 
     ASTNode::IfStatement {
+      node_id,
       condition,
       true_body,
       false_body,
@@ -387,7 +435,7 @@ fn do_node_to_source_text(
       };
       format!(
         "{} ({}\n) {}{}",
-        format_keyword("if"),
+        format_topic_keyword("if", &new_node_topic(node_id)),
         indent(&cond, indent_level + 1),
         true_b,
         false_part
@@ -396,24 +444,34 @@ fn do_node_to_source_text(
 
     ASTNode::InlineAssembly { .. } => format_keyword("assembly"),
 
-    ASTNode::PlaceholderStatement { .. } => format_keyword("placeholder"),
+    ASTNode::PlaceholderStatement { node_id, .. } => {
+      format_topic_keyword("placeholder", &new_node_topic(node_id))
+    }
 
-    ASTNode::Return { expression, .. } => {
+    ASTNode::Return {
+      node_id,
+      expression,
+      ..
+    } => {
       if let Some(expr) = expression {
         format!(
           "{} {}",
-          format_keyword("return"),
+          format_topic_keyword("return", &new_node_topic(node_id)),
           do_node_to_source_text(expr, indent_level, nodes_map)
         )
       } else {
-        format_keyword("return")
+        format_topic_keyword("return", &new_node_topic(node_id))
       }
     }
 
-    ASTNode::RevertStatement { error_call, .. } => {
+    ASTNode::RevertStatement {
+      node_id,
+      error_call,
+      ..
+    } => {
       format!(
         "{} {}",
-        format_keyword("revert"),
+        format_topic_keyword("revert", &new_node_topic(node_id)),
         do_node_to_source_text(error_call, indent_level, nodes_map)
       )
     }
@@ -472,6 +530,7 @@ fn do_node_to_source_text(
     }
 
     ASTNode::VariableDeclaration {
+      node_id,
       type_name,
       storage_location,
       name,
@@ -497,7 +556,7 @@ fn do_node_to_source_text(
         parts.push(format_keyword(&storage));
       }
       parts.push(type_str);
-      parts.push(format_identifier(name));
+      parts.push(format_identifier(name, &new_node_topic(node_id)));
 
       let decl = parts.join(" ");
       if let Some(val) = value
@@ -516,7 +575,10 @@ fn do_node_to_source_text(
     }
 
     ASTNode::WhileStatement {
-      condition, body, ..
+      node_id,
+      condition,
+      body,
+      ..
     } => {
       let cond = do_node_to_source_text(condition, indent_level, nodes_map);
       let body_str = if let Some(b) = body {
@@ -526,7 +588,7 @@ fn do_node_to_source_text(
       };
       format!(
         "{} ({}) {}",
-        format_keyword("while"),
+        format_topic_keyword("while", &new_node_topic(node_id)),
         indent(&cond, indent_level),
         body_str
       )
@@ -604,6 +666,7 @@ fn do_node_to_source_text(
     }
 
     ASTNode::FunctionDefinition {
+      node_id,
       kind,
       name,
       parameters,
@@ -631,7 +694,7 @@ fn do_node_to_source_text(
       let name_str = if name.is_empty() {
         String::new()
       } else {
-        format!(" {}", format_function_name(name))
+        format!(" {}", format_function_name(name, &new_node_topic(node_id)))
       };
       let params = format!(
         "{} ",
@@ -676,30 +739,37 @@ fn do_node_to_source_text(
     }
 
     ASTNode::EventDefinition {
-      name, parameters, ..
+      node_id,
+      name,
+      parameters,
+      ..
     } => {
       let params = do_node_to_source_text(parameters, indent_level, nodes_map);
       format!(
         "{} {}{}",
         format_keyword("event"),
-        format_user_defined_type(name),
+        format_user_defined_type(name, &new_node_topic(node_id)),
         params
       )
     }
 
     ASTNode::ErrorDefinition {
-      name, parameters, ..
+      node_id,
+      name,
+      parameters,
+      ..
     } => {
       let params = do_node_to_source_text(parameters, indent_level, nodes_map);
       format!(
         "{} {}{}",
         format_keyword("error"),
-        format_user_defined_type(name),
+        format_user_defined_type(name, &new_node_topic(node_id)),
         params
       )
     }
 
     ASTNode::ModifierDefinition {
+      node_id,
       name,
       parameters,
       virtual_,
@@ -721,13 +791,14 @@ fn do_node_to_source_text(
         virtual_str,
         visibility_str,
         format_keyword("mod"),
-        format_function_name(name),
+        format_function_name(name, &new_node_topic(node_id)),
         params,
         do_node_to_source_text(body, indent_level, nodes_map)
       )
     }
 
     ASTNode::StructDefinition {
+      node_id,
       name,
       members,
       visibility,
@@ -746,13 +817,18 @@ fn do_node_to_source_text(
         "{} {} {} {{{}{}}}",
         visibility_str,
         format_keyword("struct"),
-        format_user_defined_type(name),
+        format_user_defined_type(name, &new_node_topic(node_id)),
         indent(&members_str, indent_level),
         trailing_newline
       )
     }
 
-    ASTNode::EnumDefinition { name, members, .. } => {
+    ASTNode::EnumDefinition {
+      node_id,
+      name,
+      members,
+      ..
+    } => {
       let indent_level = indent_level + 1;
 
       let members_str = members
@@ -764,20 +840,21 @@ fn do_node_to_source_text(
       format!(
         "{} {} {{{}{}}}",
         format_keyword("enum"),
-        format_user_defined_type(name),
+        format_user_defined_type(name, &new_node_topic(node_id)),
         indent(&members_str, indent_level),
         trailing_newline
       )
     }
 
     ASTNode::UserDefinedValueTypeDefinition {
+      node_id,
       name,
       underlying_type,
       ..
     } => {
       format!(
         "type {} is {}",
-        format_user_defined_type(name),
+        format_user_defined_type(name, &new_node_topic(node_id)),
         do_node_to_source_text(underlying_type, indent_level, nodes_map)
       )
     }
@@ -946,6 +1023,19 @@ fn format_token(token: &str, class: &str) -> String {
   format!("<span class=\"{}\">{}</span>", class, token)
 }
 
+fn format_topic_token(
+  token: &str,
+  class: &str,
+  topic: &topic::Topic,
+) -> String {
+  format!(
+    "<span class=\"{}\" data-topic=\"{}\" tabindex=\"0\">{}</span>",
+    class,
+    topic.id(),
+    token
+  )
+}
+
 fn format_node(node_str: &str, id: i32, class: &str) -> String {
   format!("<span class=\"{} {}\">{}</span>", class, id, node_str)
 }
@@ -954,16 +1044,23 @@ fn format_keyword(keyword: &str) -> String {
   format_token(keyword, "keyword")
 }
 
-fn format_function_name(name: &String) -> String {
-  format_token(name, "function")
+fn format_topic_keyword(keyword: &str, topic: &topic::Topic) -> String {
+  format_topic_token(keyword, "keyword", topic)
 }
 
-fn format_identifier(name: &String) -> String {
-  format_token(name, "identifier")
+fn format_function_name(name: &String, topic: &topic::Topic) -> String {
+  format_topic_token(name, "function", topic)
 }
 
-fn format_user_defined_type(type_name: &String) -> String {
-  format_token(type_name, "user-type")
+fn format_identifier(name: &String, topic: &topic::Topic) -> String {
+  format_topic_token(name, "identifier", topic)
+}
+
+fn format_user_defined_type(
+  type_name: &String,
+  topic: &topic::Topic,
+) -> String {
+  format_topic_token(type_name, "user-type", topic)
 }
 
 fn format_type(type_name: &String) -> String {
@@ -978,8 +1075,8 @@ fn format_global(name: &str) -> String {
   format_token(name, "global")
 }
 
-fn format_enum_value(name: &str) -> String {
-  format_token(name, "enum-value")
+fn format_enum_value(name: &str, topic: &topic::Topic) -> String {
+  format_topic_token(name, "enum-value", topic)
 }
 
 fn format_comment(text: &str) -> String {
@@ -996,6 +1093,10 @@ fn format_string(val: &str) -> String {
 
 fn format_operator(op: &str) -> String {
   format_token(&html_escape(&op), "operator")
+}
+
+fn format_topic_operator(op: &str, topic: &topic::Topic) -> String {
+  format_topic_token(&html_escape(&op), "operator", topic)
 }
 
 fn format_brace(brace: &str, indent_level: usize) -> String {
@@ -1183,6 +1284,7 @@ fn storage_location_to_string(location: &StorageLocation) -> String {
 pub fn node_to_signature(topic: topic::Topic, node: &ASTNode) -> String {
   let sig = match node {
     ASTNode::FunctionDefinition {
+      node_id,
       kind,
       name,
       visibility,
@@ -1206,7 +1308,7 @@ pub fn node_to_signature(topic: topic::Topic, node: &ASTNode) -> String {
       let name_str = if name.is_empty() {
         String::new()
       } else {
-        format!(" {}", format_function_name(name))
+        format!(" {}", format_function_name(name, &new_node_topic(node_id)))
       };
 
       format!(

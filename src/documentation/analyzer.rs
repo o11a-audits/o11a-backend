@@ -80,8 +80,7 @@ fn process_documentation_node(
   current_paragraph: Option<&topic::Topic>,
   audit_data: &mut AuditData,
 ) -> Result<(), String> {
-  let node_id = node.node_id();
-  let topic = topic::new_node_topic(node_id);
+  let topic = topic::new_node_topic(&node.node_id());
 
   match node {
     DocumentationNode::Root { children, .. } => {
@@ -107,7 +106,7 @@ fn process_documentation_node(
       header, children, ..
     } => {
       // Extract the heading topic ID from the header
-      let header_topic = topic::new_node_topic(header.node_id());
+      let header_topic = topic::new_node_topic(&header.node_id());
 
       // Process the header node (which is a Heading)
       process_documentation_node(
