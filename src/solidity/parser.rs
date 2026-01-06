@@ -660,6 +660,7 @@ pub enum ASTNode {
     expression: Box<ASTNode>,
     member_location: SourceLocation,
     member_name: String,
+    referenced_declaration: Option<i32>,
   },
   NewExpression {
     node_id: i32,
@@ -1733,12 +1734,14 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       expression,
       member_location,
       member_name,
+      referenced_declaration,
     } => ASTNode::MemberAccess {
       node_id: node_id,
       src_location: src_location,
       expression: Box::new(node_to_stub(&expression)),
       member_location: member_location,
       member_name: member_name,
+      referenced_declaration: referenced_declaration,
     },
     ASTNode::NewExpression {
       node_id,
@@ -3279,6 +3282,10 @@ pub fn node_from_json(
       )?;
       let member_name =
         get_required_string_with_context(val, "memberName", node_type_str)?;
+      let referenced_declaration = val
+        .get("referencedDeclaration")
+        .and_then(|v| v.as_i64())
+        .map(|v| v as i32);
 
       Ok(ASTNode::MemberAccess {
         node_id,
@@ -3286,6 +3293,7 @@ pub fn node_from_json(
         expression,
         member_location,
         member_name,
+        referenced_declaration,
       })
     }
     "NewExpression" => {

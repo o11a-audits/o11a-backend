@@ -287,6 +287,7 @@ fn do_node_to_source_text(
     ASTNode::MemberAccess {
       expression,
       member_name,
+      referenced_declaration,
       ..
     } => {
       // Check if this is a special case like block.timestamp or msg.sender
@@ -302,19 +303,22 @@ fn do_node_to_source_text(
       if is_special_case {
         // Format as a single token with "global" class
         if let ASTNode::Identifier { name, .. } = resolved_expression {
-          let token_name = format!("{}_{}", name, member_name);
-          format_global(&token_name)
+          format!("{}.{}", format_global(name), format_global(member_name))
         } else {
           unreachable!()
         }
       } else {
         // Default formatting for other member accesses
         let expr = do_node_to_source_text(expression, indent_level, nodes_map);
+        let member = if let Some(member_node_id) = referenced_declaration {
+          format_identifier(&member_name, &new_node_topic(member_node_id))
+        } else {
+          format_member(&member_name)
+        };
 
         let indent_level = indent_level + 1;
-        let member =
-          format!("{}{}", format_operator("."), format_member(&member_name));
-        format!("{}{}", expr, indent(&member, indent_level),)
+        let member_expr = format!("{}{}", format_operator("."), member);
+        format!("{}{}", expr, indent(&member_expr, indent_level),)
       }
     }
 
