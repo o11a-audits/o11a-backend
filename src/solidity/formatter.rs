@@ -2,9 +2,9 @@ use crate::core;
 use crate::core::topic::{self, new_node_topic};
 use crate::core::{ContractKind, FunctionKind};
 use crate::solidity::parser::{
-  ASTNode, AssignmentOperator, BinaryOperator, FunctionStateMutability,
-  FunctionVisibility, LiteralKind, StorageLocation, UnaryOperator,
-  VariableMutability, VariableVisibility,
+  ASTNode, AssignmentOperator, BinaryOperator, FunctionCallKind,
+  FunctionStateMutability, FunctionVisibility, LiteralKind, StorageLocation,
+  UnaryOperator, VariableMutability, VariableVisibility,
 };
 use std::collections::BTreeMap;
 
@@ -131,37 +131,78 @@ fn do_node_to_source_text(
     ASTNode::FunctionCall {
       expression,
       arguments,
+      kind,
       ..
     } => {
       let expression = expression.resolve(nodes_map);
-      let expr = do_node_to_source_text(expression, indent_level, nodes_map);
 
-      let indent_level = indent_level + 1;
-      let args = arguments
-        .iter()
-        .map(|arg| do_node_to_source_text(arg, indent_level, nodes_map))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-      if arguments.is_empty() {
-        format!("{}()", expr)
-      } else {
-        let indented_args = match expression {
-          // If the expression is a member access, indent the arguments twice to
-          // match the member access indent
-          ASTNode::MemberAccess { .. } => {
-            format!(
-              "({}",
-              indent(
-                &format!("{}\n)", inline_indent(&args, indent_level)),
-                indent_level
-              )
-            )
-          }
-          _ => format!("({}\n)", indent(&args, indent_level)),
+      // Check if this is address(0) - a type conversion to address with literal value 0
+      let is_zero_address = if matches!(kind, FunctionCallKind::TypeConversion)
+        && arguments.len() == 1
+      {
+        let is_address_type = if let ASTNode::ElementaryTypeNameExpression {
+          type_name,
+          ..
+        } = expression
+        {
+          let resolved_type_name = type_name.resolve(nodes_map);
+          matches!(resolved_type_name, ASTNode::ElementaryTypeName { name, .. } if name == "address")
+        } else {
+          false
         };
 
-        format!("{}{}", expr, indented_args)
+        let is_zero_literal = match arguments[0].resolve(nodes_map) {
+          ASTNode::Literal {
+            kind: lit_kind,
+            value,
+            hex_value,
+            ..
+          } => {
+            matches!(lit_kind, LiteralKind::Number)
+              && (value.as_ref().map(|v| v.as_str()) == Some("0")
+                || hex_value == "30")
+          }
+          _ => false,
+        };
+
+        is_address_type && is_zero_literal
+      } else {
+        false
+      };
+
+      if is_zero_address {
+        // Format as a literal "zero_address"
+        format_number("zero_address")
+      } else {
+        let expr = do_node_to_source_text(expression, indent_level, nodes_map);
+
+        let indent_level = indent_level + 1;
+        let args = arguments
+          .iter()
+          .map(|arg| do_node_to_source_text(arg, indent_level, nodes_map))
+          .collect::<Vec<_>>()
+          .join("\n");
+
+        if arguments.is_empty() {
+          format!("{}()", expr)
+        } else {
+          let indented_args = match expression {
+            // If the expression is a member access, indent the arguments twice to
+            // match the member access indent
+            ASTNode::MemberAccess { .. } => {
+              format!(
+                "({}",
+                indent(
+                  &format!("{}\n)", inline_indent(&args, indent_level)),
+                  indent_level
+                )
+              )
+            }
+            _ => format!("({}\n)", indent(&args, indent_level)),
+          };
+
+          format!("{}{}", expr, indented_args)
+        }
       }
     }
 
@@ -248,12 +289,33 @@ fn do_node_to_source_text(
       member_name,
       ..
     } => {
-      let expr = do_node_to_source_text(expression, indent_level, nodes_map);
+      // Check if this is a special case like block.timestamp or msg.sender
+      let resolved_expression = expression.resolve(nodes_map);
+      let is_special_case =
+        if let ASTNode::Identifier { name, .. } = resolved_expression {
+          (name == "block" && member_name == "timestamp")
+            || (name == "msg" && member_name == "sender")
+        } else {
+          false
+        };
 
-      let indent_level = indent_level + 1;
-      let member =
-        format!("{}{}", format_operator("."), format_member(&member_name));
-      format!("{}{}", expr, indent(&member, indent_level),)
+      if is_special_case {
+        // Format as a single token with "global" class
+        if let ASTNode::Identifier { name, .. } = resolved_expression {
+          let token_name = format!("{}_{}", name, member_name);
+          format_global(&token_name)
+        } else {
+          unreachable!()
+        }
+      } else {
+        // Default formatting for other member accesses
+        let expr = do_node_to_source_text(expression, indent_level, nodes_map);
+
+        let indent_level = indent_level + 1;
+        let member =
+          format!("{}{}", format_operator("."), format_member(&member_name));
+        format!("{}{}", expr, indent(&member, indent_level),)
+      }
     }
 
     ASTNode::NewExpression {
