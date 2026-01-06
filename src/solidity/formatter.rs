@@ -129,6 +129,7 @@ fn do_node_to_source_text(
     }
 
     ASTNode::FunctionCall {
+      node_id,
       expression,
       arguments,
       kind,
@@ -136,43 +137,49 @@ fn do_node_to_source_text(
     } => {
       let expression = expression.resolve(nodes_map);
 
-      // Check if this is address(0) - a type conversion to address with literal value 0
-      let is_zero_address = if matches!(kind, FunctionCallKind::TypeConversion)
+      // Check if this is address(0) - a type conversion to address with
+      // literal value 0, or address(this)
+      let special_case = if matches!(kind, FunctionCallKind::TypeConversion)
         && arguments.len() == 1
       {
-        let is_address_type = if let ASTNode::ElementaryTypeNameExpression {
-          type_name,
-          ..
-        } = expression
+        if let ASTNode::ElementaryTypeNameExpression { type_name, .. } =
+          expression
         {
           let resolved_type_name = type_name.resolve(nodes_map);
-          matches!(resolved_type_name, ASTNode::ElementaryTypeName { name, .. } if name == "address")
-        } else {
-          false
-        };
+          if matches!(resolved_type_name, ASTNode::ElementaryTypeName { name, .. } if name == "address")
+          {
+            let val = match arguments[0].resolve(nodes_map) {
+              ASTNode::Identifier {
+                name,
+                referenced_declaration,
+                ..
+              } if name == "this" && *referenced_declaration == -28 => {
+                format!(
+                  "{}.{}",
+                  format_global("this"),
+                  format_global("address")
+                )
+              }
+              n => format!(
+                "{} {}",
+                format_topic_number("address", &new_node_topic(&node_id)),
+                do_node_to_source_text(n, indent_level, nodes_map)
+              ),
+            };
 
-        let is_zero_literal = match arguments[0].resolve(nodes_map) {
-          ASTNode::Literal {
-            kind: lit_kind,
-            value,
-            hex_value,
-            ..
-          } => {
-            matches!(lit_kind, LiteralKind::Number)
-              && (value.as_ref().map(|v| v.as_str()) == Some("0")
-                || hex_value == "30")
+            Option::Some(val)
+          } else {
+            Option::None
           }
-          _ => false,
-        };
-
-        is_address_type && is_zero_literal
+        } else {
+          Option::None
+        }
       } else {
-        false
+        Option::None
       };
 
-      if is_zero_address {
-        // Format as a literal "zero_address"
-        format_number("zero_address")
+      if let Some(literal) = special_case {
+        literal
       } else {
         let expr = do_node_to_source_text(expression, indent_level, nodes_map);
 
@@ -295,7 +302,20 @@ fn do_node_to_source_text(
       let is_special_case =
         if let ASTNode::Identifier { name, .. } = resolved_expression {
           (name == "block" && member_name == "timestamp")
+            || (name == "block" && member_name == "number")
+            || (name == "block" && member_name == "prevrandao")
+            || (name == "block" && member_name == "gaslimit")
+            || (name == "block" && member_name == "difficulty")
+            || (name == "block" && member_name == "coinbase")
+            || (name == "block" && member_name == "chainid")
+            || (name == "block" && member_name == "blobbasefee")
+            || (name == "block" && member_name == "basefee")
             || (name == "msg" && member_name == "sender")
+            || (name == "msg" && member_name == "value")
+            || (name == "msg" && member_name == "data")
+            || (name == "msg" && member_name == "sig")
+            || (name == "tx" && member_name == "gasprice")
+            || (name == "tx" && member_name == "origin")
         } else {
           false
         };
@@ -310,15 +330,19 @@ fn do_node_to_source_text(
       } else {
         // Default formatting for other member accesses
         let expr = do_node_to_source_text(expression, indent_level, nodes_map);
-        let member = if let Some(member_node_id) = referenced_declaration {
-          format_identifier(&member_name, &new_node_topic(member_node_id))
-        } else {
-          format_member(&member_name)
-        };
+        if let Some(member_node_id) = referenced_declaration {
+          let member =
+            format_identifier(&member_name, &new_node_topic(member_node_id));
 
-        let indent_level = indent_level + 1;
-        let member_expr = format!("{}{}", format_operator("."), member);
-        format!("{}{}", expr, indent(&member_expr, indent_level),)
+          let indent_level = indent_level + 1;
+          let member_expr = format!("{}{}", format_operator("."), member);
+          format!("{}{}", expr, indent(&member_expr, indent_level),)
+        } else {
+          let member = format_member(&member_name);
+
+          let member_expr = format!("{}{}", format_operator("."), member);
+          format!("{}{}", expr, member_expr)
+        }
       }
     }
 
@@ -1151,6 +1175,10 @@ fn format_comment(text: &str) -> String {
 
 fn format_number(val: &str) -> String {
   format_token(val, "number")
+}
+
+fn format_topic_number(val: &str, topic: &topic::Topic) -> String {
+  format_topic_token(val, "number", topic)
 }
 
 fn format_string(val: &str) -> String {
