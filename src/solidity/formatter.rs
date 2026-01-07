@@ -235,9 +235,11 @@ fn do_node_to_source_text(
       )
     }
 
-    ASTNode::Identifier { node_id, name, .. } => {
-      format_identifier(name, &new_node_topic(node_id))
-    }
+    ASTNode::Identifier {
+      referenced_declaration,
+      name,
+      ..
+    } => format_identifier(name, &new_node_topic(referenced_declaration)),
 
     ASTNode::IdentifierPath {
       name,
