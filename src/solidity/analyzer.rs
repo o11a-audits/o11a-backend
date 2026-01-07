@@ -2,7 +2,7 @@ use crate::core;
 use crate::core::topic;
 use crate::core::{
   AST, DataContext, FunctionKind, FunctionModProperties, Node, Scope,
-  TopicKind, TopicMetadata,
+  TopicKind, TopicMetadata, VariableProperties,
 };
 use crate::solidity::parser::{self, ASTNode, SolidityAST};
 use std::collections::{BTreeMap, HashSet};
@@ -37,6 +37,7 @@ pub fn analyze(
     &mut audit_data.topic_metadata,
     &mut audit_data.references,
     &mut audit_data.function_properties,
+    &mut audit_data.variable_properties,
     &mut audit_data.source_content,
   )?;
 
@@ -84,7 +85,7 @@ pub enum FirstPassDeclaration {
     referenced_nodes: Vec<i32>,
     require_revert_statements: Vec<i32>,
     function_calls: Vec<i32>,
-    variable_mutations: Vec<i32>,
+    variable_mutations: Vec<ReferencedNode>,
   },
   Flat {
     is_publicly_in_scope: bool,
@@ -92,6 +93,12 @@ pub enum FirstPassDeclaration {
     name: String,
     scope: Scope,
   },
+}
+
+#[derive(Debug, Clone)]
+pub struct ReferencedNode {
+  statement_node: i32,
+  referenced_node: i32,
 }
 
 pub enum InScopeDeclaration {
@@ -103,8 +110,9 @@ pub enum InScopeDeclaration {
     references: Vec<i32>,
     require_revert_statements: Vec<i32>,
     function_calls: Vec<i32>,
-    variable_mutations: Vec<i32>,
+    variable_mutations: Vec<ReferencedNode>,
   },
+  // All other declarations
   Flat {
     declaration_kind: TopicKind,
     name: String,
@@ -469,6 +477,7 @@ fn second_pass(
   topic_metadata: &mut BTreeMap<topic::Topic, TopicMetadata>,
   references: &mut BTreeMap<topic::Topic, Vec<topic::Topic>>,
   function_properties: &mut BTreeMap<topic::Topic, FunctionModProperties>,
+  variable_properties: &mut BTreeMap<topic::Topic, VariableProperties>,
   source_content: &mut BTreeMap<core::ProjectPath, String>,
 ) -> Result<(), String> {
   // Process each AST file
@@ -482,6 +491,7 @@ fn second_pass(
         topic_metadata,
         references,
         function_properties,
+        variable_properties,
       )?;
 
       if found_in_scope_node {
@@ -503,6 +513,7 @@ fn process_second_pass_nodes(
   topic_metadata: &mut BTreeMap<topic::Topic, TopicMetadata>,
   references: &mut BTreeMap<topic::Topic, Vec<topic::Topic>>,
   function_properties: &mut BTreeMap<topic::Topic, FunctionModProperties>,
+  variable_properties: &mut BTreeMap<topic::Topic, VariableProperties>,
 ) -> Result<bool, String> {
   let mut found_in_scope_node = false;
 
@@ -526,7 +537,7 @@ fn process_second_pass_nodes(
 
     // Process declarations only if they exist in in_scope_declarations
     if let Some(in_scope_topic_metadata) = in_scope_topic_metadata {
-      // TODO! "The decls here could be renamed to referenceable decl, and the statements that are decl but are not referenceable could be added to the dict here in the second pass once we know they are in scope"
+      // TODO! "statements that are not referenceable could be added to the dict here in the second pass once we know they are in scope"
       // Add declaration
       topic_metadata.insert(
         topic.clone(),
@@ -563,7 +574,27 @@ fn process_second_pass_nodes(
             .collect();
           let mutation_topics: Vec<topic::Topic> = variable_mutations
             .iter()
-            .map(|&id| topic::new_node_topic(&id))
+            .map(|ref_node| {
+              // Add mutation references to the audit data
+              let variable_topic =
+                topic::new_node_topic(&ref_node.referenced_node);
+              let statement_topic =
+                topic::new_node_topic(&ref_node.statement_node);
+
+              if let Some(properties) =
+                variable_properties.get_mut(&variable_topic)
+              {
+                properties.mutations.push(statement_topic);
+              } else {
+                variable_properties.insert(
+                  variable_topic,
+                  VariableProperties {
+                    mutations: vec![statement_topic],
+                  },
+                );
+              }
+              topic::new_node_topic(&ref_node.referenced_node)
+            })
             .collect();
 
           match node {
@@ -605,6 +636,7 @@ fn process_second_pass_nodes(
             _ => (),
           }
         }
+
         _ => (),
       }
     }
@@ -620,6 +652,7 @@ fn process_second_pass_nodes(
         topic_metadata,
         references,
         function_properties,
+        variable_properties,
       )?;
 
       // Accumulate whether any in-scope nodes were found in children
@@ -648,7 +681,7 @@ fn collect_references_and_statements(
   referenced_nodes: &mut Vec<i32>,
   require_revert_statements: &mut Vec<i32>,
   function_calls: &mut Vec<i32>,
-  variable_mutations: &mut Vec<i32>,
+  variable_mutations: &mut Vec<ReferencedNode>,
 ) {
   match node {
     ASTNode::Identifier {
@@ -723,14 +756,21 @@ fn collect_references_and_statements(
         );
       }
     }
-    ASTNode::Assignment { left_hand_side, .. } => {
+    ASTNode::Assignment {
+      node_id,
+      left_hand_side,
+      ..
+    } => {
       // Check for variable mutations in assignments
       if let ASTNode::Identifier {
         referenced_declaration,
         ..
       } = left_hand_side.as_ref()
       {
-        variable_mutations.push(*referenced_declaration);
+        variable_mutations.push(ReferencedNode {
+          statement_node: *node_id,
+          referenced_node: *referenced_declaration,
+        });
       }
 
       // Continue traversing child nodes
@@ -785,16 +825,6 @@ impl FirstPassDeclaration {
       FirstPassDeclaration::Flat {
         declaration_kind, ..
       } => declaration_kind,
-    }
-  }
-
-  /// Get referenced nodes if this is a Block variant, otherwise empty slice
-  pub fn referenced_nodes(&self) -> &[i32] {
-    match self {
-      FirstPassDeclaration::FunctionMod {
-        referenced_nodes, ..
-      } => referenced_nodes,
-      FirstPassDeclaration::Flat { .. } => &[],
     }
   }
 }
@@ -855,8 +885,6 @@ fn process_tree_shake_declarations(
   let first_pass_decl = match first_pass_declarations.get(&node_id) {
     Some(decl) => decl,
     None => {
-      // Ignore references not found in our dictionary (external libraries,
-      // built-ins, etc.)
       return Ok(());
     }
   };
@@ -897,20 +925,6 @@ fn process_tree_shake_declarations(
         .cloned()
         .collect();
 
-      // Filter variable mutations to exclude local variables
-      let filtered_variable_mutations = variable_mutations
-        .iter()
-        .filter(|&&var_id| {
-          if let Some(var_decl) = first_pass_declarations.get(&var_id) {
-            !matches!(var_decl.declaration_kind(), TopicKind::LocalVariable)
-          } else {
-            // Keep mutations of variables not in our map (external references)
-            true
-          }
-        })
-        .cloned()
-        .collect();
-
       InScopeDeclaration::FunctionMod {
         declaration_kind: declaration_kind.clone(),
         name: name.clone(),
@@ -918,7 +932,7 @@ fn process_tree_shake_declarations(
         references: references,
         require_revert_statements: require_revert_statements.clone(),
         function_calls: filtered_function_calls,
-        variable_mutations: filtered_variable_mutations,
+        variable_mutations: variable_mutations.clone(),
       }
     }
     FirstPassDeclaration::Flat {
@@ -936,18 +950,24 @@ fn process_tree_shake_declarations(
 
   in_scope_declarations.insert(node_id, in_scope_decl);
 
-  // Process all referenced nodes from this declaration
-  let referenced_nodes = first_pass_decl.referenced_nodes();
-
-  for &referenced_node_id in referenced_nodes {
-    process_tree_shake_declarations(
-      referenced_node_id,
-      Some(node_id), // This node is the one referencing the next node
-      first_pass_declarations,
-      in_scope_declarations,
-      visiting,
-    )?;
-  }
+  // Process all referenced nodes from this declaration if it is a function
+  // or modifier
+  match first_pass_decl {
+    FirstPassDeclaration::FunctionMod {
+      referenced_nodes, ..
+    } => {
+      for &referenced_node_id in referenced_nodes {
+        process_tree_shake_declarations(
+          referenced_node_id,
+          Some(node_id), // This node is the one referencing the next node
+          first_pass_declarations,
+          in_scope_declarations,
+          visiting,
+        )?;
+      }
+    }
+    FirstPassDeclaration::Flat { .. } => (),
+  };
 
   // Mark as fully processed
   visiting.remove(&node_id);

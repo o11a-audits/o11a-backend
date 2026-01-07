@@ -40,6 +40,8 @@ pub struct AuditData {
   pub references: BTreeMap<topic::Topic, Vec<topic::Topic>>,
   // Contains the function properties for a given topic
   pub function_properties: BTreeMap<topic::Topic, FunctionModProperties>,
+  // Contains the variable properties for a given topic
+  pub variable_properties: BTreeMap<topic::Topic, VariableProperties>,
 }
 
 pub struct DataContext {
@@ -270,6 +272,12 @@ pub enum FunctionModProperties {
   },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct VariableProperties {
+  // The statements where the variable is mutated
+  pub mutations: Vec<topic::Topic>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 /// This type represents a path within a project, making sure that it is
 /// a relative path to the project root.
@@ -404,6 +412,7 @@ pub fn new_audit_data(
     topic_metadata: BTreeMap::new(),
     references: BTreeMap::new(),
     function_properties: BTreeMap::new(),
+    variable_properties: BTreeMap::new(),
   }
 }
 

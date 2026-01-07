@@ -281,6 +281,8 @@ pub async fn get_source_text(
       crate::solidity::formatter::node_to_source_text(
         solidity_node,
         &audit_data.nodes,
+        &audit_data.function_properties,
+        &audit_data.variable_properties,
       )
     }
     Node::Documentation(doc_node) => {
