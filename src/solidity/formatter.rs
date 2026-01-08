@@ -1104,12 +1104,20 @@ fn do_node_to_source_text(
         " {}",
         format_keyword(&function_mutability_to_string(state_mutability))
       );
-      let kind_str =
-        format!(" {}", format_keyword(&function_kind_to_string(kind)));
-      let name_str = if name.is_empty() {
-        String::new()
+      let kind_name_str = if name.is_empty() {
+        format!(
+          " {}",
+          format_topic_keyword(
+            &function_kind_to_string(kind),
+            &new_node_topic(node_id)
+          )
+        )
       } else {
-        format!(" {}", format_function_name(name, &new_node_topic(node_id)))
+        format!(
+          " {} {}",
+          format_keyword(&function_kind_to_string(kind)),
+          format_function_name(name, &new_node_topic(node_id))
+        )
       };
       let params = format!(
         "{} ",
@@ -1166,12 +1174,11 @@ fn do_node_to_source_text(
       };
 
       format!(
-        "{}{}{}{}{}{}{}{}{}",
+        "{}{}{}{}{}{}{}{}",
         virtual_str,
         visibility,
         mutability,
-        kind_str,
-        name_str,
+        kind_name_str,
         params,
         modifiers,
         returns,
