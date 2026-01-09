@@ -1,5 +1,5 @@
 use crate::core::topic::{self, new_node_topic};
-use crate::core::{self, FunctionModProperties, VariableProperties};
+use crate::core::{self, FunctionModProperties, Node, VariableProperties};
 use crate::core::{ContractKind, FunctionKind};
 use crate::solidity::parser::{
   ASTNode, AssignmentOperator, BinaryOperator, FunctionCallKind,
@@ -204,7 +204,7 @@ fn do_node_to_source_text(
       let expression = expression.resolve(nodes_map);
 
       // Check if this is address(0) - a type conversion to address with
-      // literal value 0, or address(this)
+      // literal value, or address(this)
       let special_case = if matches!(kind, FunctionCallKind::TypeConversion)
         && arguments.len() == 1
       {
@@ -337,9 +337,8 @@ fn do_node_to_source_text(
 
     ASTNode::Identifier {
       referenced_declaration,
-      name,
       ..
-    } => format_identifier(name, &new_node_topic(referenced_declaration)),
+    } => format_identifier(&new_node_topic(referenced_declaration), &nodes_map),
 
     ASTNode::IdentifierPath {
       name,
@@ -349,7 +348,7 @@ fn do_node_to_source_text(
       if referenced_declaration < &0 {
         format_global(&name)
       } else {
-        format_identifier(name, &new_node_topic(referenced_declaration))
+        format_identifier(&new_node_topic(referenced_declaration), &nodes_map)
       }
     }
 
@@ -451,7 +450,7 @@ fn do_node_to_source_text(
         );
         if let Some(member_node_id) = referenced_declaration {
           let member =
-            format_identifier(&member_name, &new_node_topic(member_node_id));
+            format_identifier(&new_node_topic(member_node_id), &nodes_map);
 
           let indent_level = indent_level + 1;
           let member_expr = format!("{}{}", format_operator("."), member);
@@ -536,8 +535,8 @@ fn do_node_to_source_text(
       }
     }
 
-    ASTNode::EnumValue { node_id, name, .. } => {
-      format_enum_value(&html_escape(name), &new_node_topic(node_id))
+    ASTNode::EnumValue { node_id, .. } => {
+      format_identifier(&new_node_topic(node_id), &nodes_map)
     }
 
     ASTNode::Block { statements, .. } => {
@@ -881,7 +880,6 @@ fn do_node_to_source_text(
       node_id,
       type_name,
       storage_location,
-      name,
       visibility,
       mutability,
       value,
@@ -935,7 +933,7 @@ fn do_node_to_source_text(
         parts.push(format_keyword(&storage));
       }
       parts.push(type_str);
-      parts.push(format_identifier(name, &new_node_topic(node_id)));
+      parts.push(format_identifier(&new_node_topic(node_id), &nodes_map));
 
       let decl = parts.join(" ");
       if let Some(val) = value
@@ -1188,7 +1186,6 @@ fn do_node_to_source_text(
 
     ASTNode::EventDefinition {
       node_id,
-      name,
       parameters,
       ..
     } => {
@@ -1202,14 +1199,13 @@ fn do_node_to_source_text(
       format!(
         "{} {}{}",
         format_keyword("event"),
-        format_user_defined_type(name, &new_node_topic(node_id)),
+        format_identifier(&new_node_topic(node_id), &nodes_map),
         params
       )
     }
 
     ASTNode::ErrorDefinition {
       node_id,
-      name,
       parameters,
       ..
     } => {
@@ -1223,7 +1219,7 @@ fn do_node_to_source_text(
       format!(
         "{} {}{}",
         format_keyword("error"),
-        format_user_defined_type(name, &new_node_topic(node_id)),
+        format_identifier(&new_node_topic(node_id), &nodes_map),
         params
       )
     }
@@ -1271,7 +1267,6 @@ fn do_node_to_source_text(
 
     ASTNode::StructDefinition {
       node_id,
-      name,
       members,
       visibility,
       ..
@@ -1297,17 +1292,14 @@ fn do_node_to_source_text(
         "{} {} {} {{{}{}}}",
         visibility_str,
         format_keyword("struct"),
-        format_user_defined_type(name, &new_node_topic(node_id)),
+        format_identifier(&new_node_topic(node_id), &nodes_map),
         indent(&members_str, indent_level),
         trailing_newline
       )
     }
 
     ASTNode::EnumDefinition {
-      node_id,
-      name,
-      members,
-      ..
+      node_id, members, ..
     } => {
       let indent_level = indent_level + 1;
 
@@ -1328,7 +1320,7 @@ fn do_node_to_source_text(
       format!(
         "{} {} {{{}{}}}",
         format_keyword("enum"),
-        format_user_defined_type(name, &new_node_topic(node_id)),
+        format_identifier(&new_node_topic(node_id), &nodes_map),
         indent(&members_str, indent_level),
         trailing_newline
       )
@@ -1336,13 +1328,12 @@ fn do_node_to_source_text(
 
     ASTNode::UserDefinedValueTypeDefinition {
       node_id,
-      name,
       underlying_type,
       ..
     } => {
       format!(
         "type {} is {}",
-        format_user_defined_type(name, &new_node_topic(node_id)),
+        format_identifier(&new_node_topic(node_id), &nodes_map),
         do_node_to_source_text(
           underlying_type,
           indent_level,
@@ -1591,6 +1582,91 @@ fn do_node_to_source_text(
   format_node(&node_str, node.node_id(), "node")
 }
 
+// This function is used in many places where the node type is already known
+// because this function has to exist for the times when the identifier is a
+// reference and the node type is not already known, and duplicating
+// identifier formatting logic could lead to inconsistencies.
+fn format_identifier(
+  topic: &topic::Topic,
+  nodes_map: &BTreeMap<topic::Topic, Node>,
+) -> String {
+  match nodes_map.get(&topic) {
+    Some(Node::Solidity(ASTNode::ContractDefinition { name, .. })) => {
+      format_topic_token(name, "contract", topic)
+    }
+
+    Some(Node::Solidity(ASTNode::StructDefinition { name, .. })) => {
+      format_topic_token(name, "struct", topic)
+    }
+
+    Some(Node::Solidity(ASTNode::EnumDefinition { name, .. })) => {
+      format_topic_token(name, "enum", topic)
+    }
+
+    Some(Node::Solidity(ASTNode::ErrorDefinition { name, .. })) => {
+      format_topic_token(name, "error", topic)
+    }
+
+    Some(Node::Solidity(ASTNode::EventDefinition { name, .. })) => {
+      format_topic_token(name, "event", topic)
+    }
+
+    Some(Node::Solidity(ASTNode::UserDefinedValueTypeDefinition {
+      name,
+      ..
+    })) => format_topic_token(name, "user-defined-type", topic),
+
+    Some(Node::Solidity(ASTNode::EnumValue { name, .. })) => {
+      format_topic_token(name, "enum-value", topic)
+    }
+
+    Some(Node::Solidity(ASTNode::VariableDeclaration {
+      name,
+      constant,
+      ..
+    }))
+      if *constant =>
+    {
+      format_topic_token(name, "constant", topic)
+    }
+
+    Some(Node::Solidity(ASTNode::VariableDeclaration {
+      name,
+      state_variable,
+      mutability,
+      ..
+    }))
+      if *state_variable && *mutability == VariableMutability::Immutable =>
+    {
+      format_topic_token(name, "immutable-state-variable", topic)
+    }
+
+    Some(Node::Solidity(ASTNode::VariableDeclaration {
+      name,
+      state_variable,
+      ..
+    }))
+      if *state_variable =>
+    {
+      format_topic_token(name, "state-variable", topic)
+    }
+
+    Some(Node::Solidity(ASTNode::VariableDeclaration { name, .. })) => {
+      format_topic_token(name, "identifier", topic)
+    }
+
+    Some(Node::Solidity(ASTNode::FunctionDefinition { name, .. })) => {
+      format_topic_token(name, "function", topic)
+    }
+
+    Some(Node::Solidity(ASTNode::ModifierDefinition { name, .. })) => {
+      format_topic_token(name, "modifier", topic)
+    }
+
+    n => format_token(&format!("{:?}-{:?}", topic.id(), n), "identifier"),
+  }
+}
+
 fn format_token(token: &str, class: &str) -> String {
   format!("<span class=\"{}\">{}</span>", class, token)
 }
@@ -1624,17 +1700,6 @@ fn format_function_name(name: &String, topic: &topic::Topic) -> String {
   format_topic_token(name, "function", topic)
 }
 
-fn format_identifier(name: &String, topic: &topic::Topic) -> String {
-  format_topic_token(name, "identifier", topic)
-}
-
-fn format_user_defined_type(
-  type_name: &String,
-  topic: &topic::Topic,
-) -> String {
-  format_topic_token(type_name, "user-type", topic)
-}
-
 fn format_type(type_name: &String) -> String {
   format_token(type_name, "type")
 }
@@ -1645,10 +1710,6 @@ fn format_member(name: &str) -> String {
 
 fn format_global(name: &str) -> String {
   format_token(name, "global")
-}
-
-fn format_enum_value(name: &str, topic: &topic::Topic) -> String {
-  format_topic_token(name, "enum-value", topic)
 }
 
 fn format_comment(text: &str) -> String {

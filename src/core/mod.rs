@@ -49,6 +49,7 @@ pub struct DataContext {
   pub audits: BTreeMap<String, AuditData>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum Node {
   Solidity(crate::solidity::parser::ASTNode),
   Documentation(crate::documentation::parser::DocumentationNode),
