@@ -263,19 +263,98 @@ fn do_node_to_source_text(
         );
 
         let indent_level = indent_level + 1;
-        let args = arguments
-          .iter()
-          .map(|arg| {
-            do_node_to_source_text(
-              arg,
-              indent_level,
-              nodes_map,
-              function_mod_properties,
-              variable_properties,
-            )
-          })
-          .collect::<Vec<_>>()
-          .join("\n");
+
+        // Try to get parameter names from function_mod_properties
+        let param_topics = match expression {
+          ASTNode::Identifier {
+            referenced_declaration,
+            ..
+          } => function_mod_properties
+            .get(&new_node_topic(referenced_declaration))
+            .and_then(|props| match props {
+              FunctionModProperties::FunctionProperties {
+                parameters, ..
+              } => Some(parameters),
+              FunctionModProperties::ModifierProperties {
+                parameters, ..
+              } => Some(parameters),
+            }),
+          ASTNode::MemberAccess {
+            referenced_declaration: Some(ref_decl),
+            ..
+          } => function_mod_properties
+            .get(&new_node_topic(ref_decl))
+            .and_then(|props| match props {
+              FunctionModProperties::FunctionProperties {
+                parameters, ..
+              } => Some(parameters),
+              FunctionModProperties::ModifierProperties {
+                parameters, ..
+              } => Some(parameters),
+            }),
+          _ => None,
+        };
+
+        // Format arguments with parameter names if available and counts match
+        let args = if let Some(params) = param_topics
+          && params.len() == arguments.len()
+        {
+          arguments
+            .iter()
+            .zip(params.iter())
+            .map(|(arg, param_topic)| {
+              let arg_str = do_node_to_source_text(
+                arg,
+                indent_level + 1,
+                nodes_map,
+                function_mod_properties,
+                variable_properties,
+              );
+
+              // Get parameter name and format as identifier
+              if let Some(Node::Solidity(ASTNode::VariableDeclaration {
+                node_id,
+                name,
+                ..
+              })) = nodes_map.get(param_topic)
+              {
+                // Only include parameter name if it's not empty
+                if name.is_empty() {
+                  arg_str
+                } else {
+                  format!(
+                    "{}:{}",
+                    format_identifier(
+                      name,
+                      &new_node_topic(node_id),
+                      nodes_map
+                    ),
+                    indent(&arg_str, indent_level + 1)
+                  )
+                }
+              } else {
+                // Fallback if parameter not found
+                arg_str
+              }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+        } else {
+          // No parameter info or count mismatch - format args only
+          arguments
+            .iter()
+            .map(|arg| {
+              do_node_to_source_text(
+                arg,
+                indent_level,
+                nodes_map,
+                function_mod_properties,
+                variable_properties,
+              )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+        };
 
         if arguments.is_empty() {
           format!("{}()", expr)
