@@ -64,7 +64,8 @@ fn do_node_to_source_text(
         variable_properties,
       );
       format!(
-        "{} {}{}",
+        "{} {} {}{}",
+        format_keyword("mut"),
         lhs,
         format_topic_operator(&op, &new_node_topic(node_id)),
         indent(&rhs, indent_level)
@@ -520,15 +521,27 @@ fn do_node_to_source_text(
         function_mod_properties,
         variable_properties,
       );
+      let keyword = match operator {
+        UnaryOperator::Increment => format!("{} ", format_keyword("mut")),
+        UnaryOperator::Decrement => format!("{} ", format_keyword("mut")),
+        UnaryOperator::Plus => String::new(),
+        UnaryOperator::Minus => String::new(),
+        UnaryOperator::BitwiseNot => String::new(),
+        UnaryOperator::Not => String::new(),
+        UnaryOperator::Delete => format!("{} ", format_keyword("mut")),
+      };
+
       if *prefix {
         format!(
-          "{}{}",
+          "{}{}{}",
+          keyword,
           format_topic_operator(&op, &new_node_topic(node_id)),
           expr
         )
       } else {
         format!(
-          "{}{}",
+          "{}{}{}",
+          keyword,
           expr,
           format_topic_operator(&op, &new_node_topic(node_id))
         )
@@ -831,14 +844,14 @@ fn do_node_to_source_text(
     } => {
       let indent_level = indent_level + 1;
 
-      if let Some(init) = initial_value {
+      if let Some(initial_val) = initial_value {
         declarations
           .iter()
-          .map(|d| {
+          .map(|declaration| {
             format!(
               "{} {}{}",
               do_node_to_source_text(
-                d,
+                declaration,
                 indent_level,
                 nodes_map,
                 function_mod_properties,
@@ -847,7 +860,7 @@ fn do_node_to_source_text(
               format_operator("="),
               indent(
                 &do_node_to_source_text(
-                  init,
+                  initial_val,
                   indent_level,
                   nodes_map,
                   function_mod_properties,
@@ -922,6 +935,9 @@ fn do_node_to_source_text(
       if *visibility != VariableVisibility::Internal {
         parts.push(format_keyword(&visibility_str));
       }
+      if *visibility == VariableVisibility::Internal {
+        parts.push(format_keyword("let"));
+      }
       // Do not render an immutable modifier for internal variables (they are
       // assumed to be immutable unless mutated)
       if !(*visibility == VariableVisibility::Internal
@@ -932,8 +948,11 @@ fn do_node_to_source_text(
       if !storage.is_empty() {
         parts.push(format_keyword(&storage));
       }
+      parts.push(format!(
+        "{}:",
+        format_identifier(&new_node_topic(node_id), &nodes_map)
+      ));
       parts.push(type_str);
-      parts.push(format_identifier(&new_node_topic(node_id), &nodes_map));
 
       let decl = parts.join(" ");
       if let Some(val) = value
