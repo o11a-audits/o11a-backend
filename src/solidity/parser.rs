@@ -292,13 +292,6 @@ pub struct TypeDescriptions {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum FunctionCallKind {
-  FunctionCall,
-  TypeConversion,
-  StructConstructor,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum UnaryOperator {
   Increment,  // ++
   Decrement,  // --
@@ -437,19 +430,6 @@ impl FromStr for LiteralKind {
       "string" => Ok(LiteralKind::String),
       "hexString" => Ok(LiteralKind::HexString),
       _ => Err(format!("Unknown literal kind: {}", s)),
-    }
-  }
-}
-
-impl FromStr for FunctionCallKind {
-  type Err = String;
-
-  fn from_str(s: &str) -> Result<Self, Self::Err> {
-    match s {
-      "functionCall" => Ok(FunctionCallKind::FunctionCall),
-      "typeConversion" => Ok(FunctionCallKind::TypeConversion),
-      "structConstructorCall" => Ok(FunctionCallKind::StructConstructor),
-      _ => Err(format!("Unknown function call kind: {}", s)),
     }
   }
 }
@@ -605,7 +585,26 @@ pub enum ASTNode {
     src_location: SourceLocation,
     arguments: Vec<ASTNode>,
     expression: Box<ASTNode>,
-    kind: FunctionCallKind,
+    name_locations: Vec<SourceLocation>,
+    names: Vec<String>,
+    try_call: bool,
+    type_descriptions: TypeDescriptions,
+  },
+  TypeConversion {
+    node_id: i32,
+    src_location: SourceLocation,
+    argument: Box<ASTNode>,
+    expression: Box<ASTNode>,
+    name_locations: Vec<SourceLocation>,
+    names: Vec<String>,
+    try_call: bool,
+    type_descriptions: TypeDescriptions,
+  },
+  StructConstructor {
+    node_id: i32,
+    src_location: SourceLocation,
+    arguments: Vec<ASTNode>,
+    expression: Box<ASTNode>,
     name_locations: Vec<SourceLocation>,
     names: Vec<String>,
     try_call: bool,
@@ -1063,6 +1062,8 @@ impl ASTNode {
       ASTNode::Conditional { node_id, .. } => *node_id,
       ASTNode::ElementaryTypeNameExpression { node_id, .. } => *node_id,
       ASTNode::FunctionCall { node_id, .. } => *node_id,
+      ASTNode::TypeConversion { node_id, .. } => *node_id,
+      ASTNode::StructConstructor { node_id, .. } => *node_id,
       ASTNode::FunctionCallOptions { node_id, .. } => *node_id,
       ASTNode::Identifier { node_id, .. } => *node_id,
       ASTNode::IdentifierPath { node_id, .. } => *node_id,
@@ -1128,6 +1129,8 @@ impl ASTNode {
         src_location
       }
       ASTNode::FunctionCall { src_location, .. } => src_location,
+      ASTNode::TypeConversion { src_location, .. } => src_location,
+      ASTNode::StructConstructor { src_location, .. } => src_location,
       ASTNode::FunctionCallOptions { src_location, .. } => src_location,
       ASTNode::Identifier { src_location, .. } => src_location,
       ASTNode::IdentifierPath { src_location, .. } => src_location,
@@ -1213,6 +1216,22 @@ impl ASTNode {
         vec![type_name]
       }
       ASTNode::FunctionCall {
+        arguments,
+        expression,
+        ..
+      } => {
+        let mut result = vec![&**expression];
+        for item in arguments {
+          result.push(item);
+        }
+        result
+      }
+      ASTNode::TypeConversion {
+        argument,
+        expression,
+        ..
+      } => vec![&**expression, &**argument],
+      ASTNode::StructConstructor {
         arguments,
         expression,
         ..
@@ -1631,7 +1650,6 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       src_location,
       arguments,
       expression,
-      kind,
       name_locations,
       names,
       try_call,
@@ -1641,7 +1659,44 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       src_location: src_location,
       arguments: arguments.iter().map(|n| node_to_stub(n)).collect(),
       expression: Box::new(node_to_stub(&expression)),
-      kind: kind,
+      name_locations: name_locations,
+      names: names,
+      try_call: try_call,
+      type_descriptions: type_descriptions,
+    },
+    ASTNode::TypeConversion {
+      node_id,
+      src_location,
+      argument,
+      expression,
+      name_locations,
+      names,
+      try_call,
+      type_descriptions,
+    } => ASTNode::TypeConversion {
+      node_id: node_id,
+      src_location: src_location,
+      argument: Box::new(node_to_stub(&argument)),
+      expression: Box::new(node_to_stub(&expression)),
+      name_locations: name_locations,
+      names: names,
+      try_call: try_call,
+      type_descriptions: type_descriptions,
+    },
+    ASTNode::StructConstructor {
+      node_id,
+      src_location,
+      arguments,
+      expression,
+      name_locations,
+      names,
+      try_call,
+      type_descriptions,
+    } => ASTNode::StructConstructor {
+      node_id: node_id,
+      src_location: src_location,
+      arguments: arguments.iter().map(|n| node_to_stub(n)).collect(),
+      expression: Box::new(node_to_stub(&expression)),
       name_locations: name_locations,
       names: names,
       try_call: try_call,
@@ -3162,7 +3217,8 @@ pub fn node_from_json(
         node_type_str,
         source_content,
       )?;
-      let kind = get_required_enum_with_context(val, "kind", node_type_str)?;
+      let kind_str =
+        get_required_string_with_context(val, "kind", node_type_str)?;
       let name_locations = get_required_source_location_vec_with_context(
         val,
         "nameLocations",
@@ -3178,17 +3234,50 @@ pub fn node_from_json(
         node_type_str,
       )?;
 
-      Ok(ASTNode::FunctionCall {
-        node_id,
-        src_location,
-        arguments,
-        expression,
-        kind,
-        name_locations,
-        names,
-        try_call,
-        type_descriptions,
-      })
+      // Create the appropriate node type based on the kind
+      match kind_str.as_str() {
+        "functionCall" => Ok(ASTNode::FunctionCall {
+          node_id,
+          src_location,
+          arguments,
+          expression,
+          name_locations,
+          names,
+          try_call,
+          type_descriptions,
+        }),
+        "typeConversion" => {
+          // Type conversions always have exactly one argument
+          if arguments.len() != 1 {
+            return Err(format!(
+              "TypeConversion expected exactly 1 argument, got {}",
+              arguments.len()
+            ));
+          }
+          let argument = arguments.into_iter().next().unwrap();
+          Ok(ASTNode::TypeConversion {
+            node_id,
+            src_location,
+            argument: Box::new(argument),
+            expression,
+            name_locations,
+            names,
+            try_call,
+            type_descriptions,
+          })
+        }
+        "structConstructorCall" => Ok(ASTNode::StructConstructor {
+          node_id,
+          src_location,
+          arguments,
+          expression,
+          name_locations,
+          names,
+          try_call,
+          type_descriptions,
+        }),
+        _ => Err(format!("Unknown function call kind: {}", kind_str)),
+      }
     }
     "FunctionCallOptions" => {
       let expression = get_required_node_with_context(

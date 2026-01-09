@@ -2,9 +2,9 @@ use crate::core::topic::{self, new_node_topic};
 use crate::core::{self, FunctionModProperties, Node, VariableProperties};
 use crate::core::{ContractKind, FunctionKind};
 use crate::solidity::parser::{
-  ASTNode, AssignmentOperator, BinaryOperator, FunctionCallKind,
-  FunctionStateMutability, FunctionVisibility, LiteralKind, StorageLocation,
-  UnaryOperator, VariableMutability, VariableVisibility,
+  ASTNode, AssignmentOperator, BinaryOperator, FunctionStateMutability,
+  FunctionVisibility, LiteralKind, StorageLocation, UnaryOperator,
+  VariableMutability, VariableVisibility,
 };
 use std::collections::BTreeMap;
 
@@ -196,187 +196,191 @@ fn do_node_to_source_text(
     }
 
     ASTNode::FunctionCall {
-      node_id,
       expression,
       arguments,
-      kind,
       ..
     } => {
       let expression = expression.resolve(nodes_map);
 
-      // Check if this is address(0) - a type conversion to address with
-      // literal value, or address(this)
-      let special_case = if matches!(kind, FunctionCallKind::TypeConversion)
-        && arguments.len() == 1
-      {
-        if let ASTNode::ElementaryTypeNameExpression { type_name, .. } =
-          expression
-        {
-          let resolved_type_name = type_name.resolve(nodes_map);
-          if matches!(resolved_type_name, ASTNode::ElementaryTypeName { name, .. } if name == "address")
-          {
-            let val = match arguments[0].resolve(nodes_map) {
-              ASTNode::Identifier {
-                name,
-                referenced_declaration,
-                ..
-              } if name == "this" && *referenced_declaration == -28 => {
-                format!(
-                  "{}.{}",
-                  format_global("this"),
-                  format_global("address")
-                )
-              }
-              n => format!(
-                "{} {}",
-                format_topic_number("address", &new_node_topic(&node_id)),
-                do_node_to_source_text(
-                  n,
-                  indent_level,
-                  nodes_map,
-                  function_mod_properties,
-                  variable_properties
-                )
-              ),
-            };
+      let expr = do_node_to_source_text(
+        expression,
+        indent_level,
+        nodes_map,
+        function_mod_properties,
+        variable_properties,
+      );
 
-            Option::Some(val)
-          } else {
-            Option::None
-          }
-        } else {
-          Option::None
-        }
-      } else {
-        Option::None
+      let indent_level = indent_level + 1;
+
+      // Try to get parameter names from function_mod_properties
+      let param_topics = match expression {
+        ASTNode::Identifier {
+          referenced_declaration,
+          ..
+        } => function_mod_properties
+          .get(&new_node_topic(referenced_declaration))
+          .and_then(|props| match props {
+            FunctionModProperties::FunctionProperties {
+              parameters, ..
+            } => Some(parameters),
+            FunctionModProperties::ModifierProperties {
+              parameters, ..
+            } => Some(parameters),
+          }),
+        ASTNode::MemberAccess {
+          referenced_declaration: Some(ref_decl),
+          ..
+        } => function_mod_properties
+          .get(&new_node_topic(ref_decl))
+          .and_then(|props| match props {
+            FunctionModProperties::FunctionProperties {
+              parameters, ..
+            } => Some(parameters),
+            FunctionModProperties::ModifierProperties {
+              parameters, ..
+            } => Some(parameters),
+          }),
+        _ => None,
       };
 
-      if let Some(literal) = special_case {
-        literal
-      } else {
-        let expr = do_node_to_source_text(
-          expression,
-          indent_level,
-          nodes_map,
-          function_mod_properties,
-          variable_properties,
-        );
+      // Format arguments with parameter names if available and counts match
+      let args = if let Some(params) = param_topics
+        && params.len() == arguments.len()
+      {
+        arguments
+          .iter()
+          .zip(params.iter())
+          .map(|(arg, param_topic)| {
+            let arg_str = do_node_to_source_text(
+              arg,
+              indent_level + 1,
+              nodes_map,
+              function_mod_properties,
+              variable_properties,
+            );
 
-        let indent_level = indent_level + 1;
-
-        // Try to get parameter names from function_mod_properties
-        let param_topics = match expression {
-          ASTNode::Identifier {
-            referenced_declaration,
-            ..
-          } => function_mod_properties
-            .get(&new_node_topic(referenced_declaration))
-            .and_then(|props| match props {
-              FunctionModProperties::FunctionProperties {
-                parameters, ..
-              } => Some(parameters),
-              FunctionModProperties::ModifierProperties {
-                parameters, ..
-              } => Some(parameters),
-            }),
-          ASTNode::MemberAccess {
-            referenced_declaration: Some(ref_decl),
-            ..
-          } => function_mod_properties
-            .get(&new_node_topic(ref_decl))
-            .and_then(|props| match props {
-              FunctionModProperties::FunctionProperties {
-                parameters, ..
-              } => Some(parameters),
-              FunctionModProperties::ModifierProperties {
-                parameters, ..
-              } => Some(parameters),
-            }),
-          _ => None,
-        };
-
-        // Format arguments with parameter names if available and counts match
-        let args = if let Some(params) = param_topics
-          && params.len() == arguments.len()
-        {
-          arguments
-            .iter()
-            .zip(params.iter())
-            .map(|(arg, param_topic)| {
-              let arg_str = do_node_to_source_text(
-                arg,
-                indent_level + 1,
-                nodes_map,
-                function_mod_properties,
-                variable_properties,
-              );
-
-              // Get parameter name and format as identifier
-              if let Some(Node::Solidity(ASTNode::VariableDeclaration {
-                node_id,
-                name,
-                ..
-              })) = nodes_map.get(param_topic)
-              {
-                // Only include parameter name if it's not empty
-                if name.is_empty() {
-                  arg_str
-                } else {
-                  format!(
-                    "{}:{}",
-                    format_identifier(
-                      name,
-                      &new_node_topic(node_id),
-                      nodes_map
-                    ),
-                    indent(&arg_str, indent_level + 1)
-                  )
-                }
-              } else {
-                // Fallback if parameter not found
+            // Get parameter name and format as identifier
+            if let Some(Node::Solidity(ASTNode::VariableDeclaration {
+              node_id,
+              name,
+              ..
+            })) = nodes_map.get(param_topic)
+            {
+              // Only include parameter name if it's not empty
+              if name.is_empty() {
                 arg_str
+              } else {
+                format!(
+                  "{}:{}",
+                  format_identifier(name, &new_node_topic(node_id), nodes_map),
+                  indent(&arg_str, indent_level + 1)
+                )
               }
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-        } else {
-          // No parameter info or count mismatch - format args only
-          arguments
-            .iter()
-            .map(|arg| {
-              do_node_to_source_text(
-                arg,
-                indent_level,
-                nodes_map,
-                function_mod_properties,
-                variable_properties,
+            } else {
+              // Fallback if parameter not found
+              arg_str
+            }
+          })
+          .collect::<Vec<_>>()
+          .join("\n")
+      } else {
+        // No parameter info or count mismatch - format args only
+        arguments
+          .iter()
+          .map(|arg| {
+            do_node_to_source_text(
+              arg,
+              indent_level,
+              nodes_map,
+              function_mod_properties,
+              variable_properties,
+            )
+          })
+          .collect::<Vec<_>>()
+          .join("\n")
+      };
+
+      if arguments.is_empty() {
+        format!("{}()", expr)
+      } else {
+        let indented_args = match expression {
+          // If the expression is a member access, indent the arguments twice to
+          // match the member access indent
+          ASTNode::MemberAccess { .. } => {
+            format!(
+              "({}",
+              indent(
+                &format!("{}\n)", inline_indent(&args, indent_level)),
+                indent_level
               )
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
+            )
+          }
+          _ => format!("({}\n)", indent(&args, indent_level)),
         };
 
-        if arguments.is_empty() {
-          format!("{}()", expr)
-        } else {
-          let indented_args = match expression {
-            // If the expression is a member access, indent the arguments twice to
-            // match the member access indent
-            ASTNode::MemberAccess { .. } => {
-              format!(
-                "({}",
-                indent(
-                  &format!("{}\n)", inline_indent(&args, indent_level)),
-                  indent_level
-                )
-              )
-            }
-            _ => format!("({}\n)", indent(&args, indent_level)),
-          };
-
-          format!("{}{}", expr, indented_args)
-        }
+        format!("{}{}", expr, indented_args)
       }
+    }
+
+    ASTNode::TypeConversion {
+      node_id,
+      expression,
+      argument,
+      ..
+    } => {
+      let expr = do_node_to_source_text(
+        expression,
+        indent_level,
+        nodes_map,
+        function_mod_properties,
+        variable_properties,
+      );
+
+      let arg_str = do_node_to_source_text(
+        argument,
+        indent_level,
+        nodes_map,
+        function_mod_properties,
+        variable_properties,
+      );
+
+      format!(
+        "{}{}{}",
+        arg_str,
+        format_topic_operator("@", &new_node_topic(node_id)),
+        expr,
+      )
+    }
+
+    ASTNode::StructConstructor {
+      expression,
+      arguments,
+      ..
+    } => {
+      let expr = do_node_to_source_text(
+        expression,
+        indent_level,
+        nodes_map,
+        function_mod_properties,
+        variable_properties,
+      );
+
+      let indent_level = indent_level + 1;
+      let args = arguments
+        .iter()
+        .map(|arg| {
+          do_node_to_source_text(
+            arg,
+            indent_level,
+            nodes_map,
+            function_mod_properties,
+            variable_properties,
+          )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+      format!("{}({}\n)", expr, indent(&args, indent_level))
     }
 
     ASTNode::FunctionCallOptions {
@@ -1843,10 +1847,6 @@ fn format_number(val: &str) -> String {
   format_token(val, "number")
 }
 
-fn format_topic_number(val: &str, topic: &topic::Topic) -> String {
-  format_topic_token(val, "number", topic)
-}
-
 fn format_string(val: &str) -> String {
   format_token(val, "string")
 }
@@ -2103,6 +2103,10 @@ pub fn node_to_signature(topic: topic::Topic, node: &ASTNode) -> String {
       format!("ElementaryTypeNameExpression {}", topic.id)
     }
     ASTNode::FunctionCall { .. } => format!("FunctionCall {}", topic.id),
+    ASTNode::TypeConversion { .. } => format!("TypeConversion {}", topic.id),
+    ASTNode::StructConstructor { .. } => {
+      format!("StructConstructor {}", topic.id)
+    }
     ASTNode::FunctionCallOptions { .. } => {
       format!("FunctionCallOptions {}", topic.id)
     }
