@@ -337,21 +337,24 @@ fn do_node_to_source_text(
     }
 
     ASTNode::Identifier {
+      name,
       referenced_declaration,
       ..
-    } => format_identifier(&new_node_topic(referenced_declaration), &nodes_map),
+    } => format_identifier(
+      name,
+      &new_node_topic(referenced_declaration),
+      &nodes_map,
+    ),
 
     ASTNode::IdentifierPath {
       name,
       referenced_declaration,
       ..
-    } => {
-      if referenced_declaration < &0 {
-        format_global(&name)
-      } else {
-        format_identifier(&new_node_topic(referenced_declaration), &nodes_map)
-      }
-    }
+    } => format_identifier(
+      name,
+      &new_node_topic(referenced_declaration),
+      &nodes_map,
+    ),
 
     ASTNode::IndexAccess {
       base_expression,
@@ -429,6 +432,8 @@ fn do_node_to_source_text(
             || (name == "msg" && member_name == "sig")
             || (name == "tx" && member_name == "gasprice")
             || (name == "tx" && member_name == "origin")
+            || (name == "abi" && member_name == "encode")
+            || (name == "abi" && member_name == "encodePacked")
         } else {
           false
         };
@@ -450,8 +455,11 @@ fn do_node_to_source_text(
           variable_properties,
         );
         if let Some(member_node_id) = referenced_declaration {
-          let member =
-            format_identifier(&new_node_topic(member_node_id), &nodes_map);
+          let member = format_identifier(
+            member_name,
+            &new_node_topic(member_node_id),
+            &nodes_map,
+          );
 
           let indent_level = indent_level + 1;
           let member_expr = format!("{}{}", format_operator("."), member);
@@ -548,8 +556,8 @@ fn do_node_to_source_text(
       }
     }
 
-    ASTNode::EnumValue { node_id, .. } => {
-      format_identifier(&new_node_topic(node_id), &nodes_map)
+    ASTNode::EnumValue { node_id, name, .. } => {
+      format_identifier(name, &new_node_topic(node_id), &nodes_map)
     }
 
     ASTNode::Block { statements, .. } => {
@@ -953,7 +961,7 @@ fn do_node_to_source_text(
       if !name.is_empty() {
         parts.push(format!(
           "{}:",
-          format_identifier(&new_node_topic(node_id), &nodes_map)
+          format_identifier(name, &new_node_topic(node_id), &nodes_map)
         ));
       }
       parts.push(type_str);
@@ -1210,6 +1218,7 @@ fn do_node_to_source_text(
     ASTNode::EventDefinition {
       node_id,
       parameters,
+      name,
       ..
     } => {
       let params = do_node_to_source_text(
@@ -1222,7 +1231,7 @@ fn do_node_to_source_text(
       format!(
         "{} {}{}",
         format_keyword("event"),
-        format_identifier(&new_node_topic(node_id), &nodes_map),
+        format_identifier(name, &new_node_topic(node_id), &nodes_map),
         params
       )
     }
@@ -1230,6 +1239,7 @@ fn do_node_to_source_text(
     ASTNode::ErrorDefinition {
       node_id,
       parameters,
+      name,
       ..
     } => {
       let params = do_node_to_source_text(
@@ -1242,7 +1252,7 @@ fn do_node_to_source_text(
       format!(
         "{} {}{}",
         format_keyword("error"),
-        format_identifier(&new_node_topic(node_id), &nodes_map),
+        format_identifier(name, &new_node_topic(node_id), &nodes_map),
         params
       )
     }
@@ -1292,6 +1302,7 @@ fn do_node_to_source_text(
       node_id,
       members,
       visibility,
+      name,
       ..
     } => {
       let visibility_str =
@@ -1315,14 +1326,17 @@ fn do_node_to_source_text(
         "{} {} {} {{{}{}}}",
         visibility_str,
         format_keyword("struct"),
-        format_identifier(&new_node_topic(node_id), &nodes_map),
+        format_identifier(name, &new_node_topic(node_id), &nodes_map),
         indent(&members_str, indent_level),
         trailing_newline
       )
     }
 
     ASTNode::EnumDefinition {
-      node_id, members, ..
+      node_id,
+      members,
+      name,
+      ..
     } => {
       let indent_level = indent_level + 1;
 
@@ -1343,7 +1357,7 @@ fn do_node_to_source_text(
       format!(
         "{} {} {{{}{}}}",
         format_keyword("enum"),
-        format_identifier(&new_node_topic(node_id), &nodes_map),
+        format_identifier(name, &new_node_topic(node_id), &nodes_map),
         indent(&members_str, indent_level),
         trailing_newline
       )
@@ -1352,11 +1366,12 @@ fn do_node_to_source_text(
     ASTNode::UserDefinedValueTypeDefinition {
       node_id,
       underlying_type,
+      name,
       ..
     } => {
       format!(
         "type {} is {}",
-        format_identifier(&new_node_topic(node_id), &nodes_map),
+        format_identifier(name, &new_node_topic(node_id), &nodes_map),
         do_node_to_source_text(
           underlying_type,
           indent_level,
@@ -1610,6 +1625,7 @@ fn do_node_to_source_text(
 // reference and the node type is not already known, and duplicating
 // identifier formatting logic could lead to inconsistencies.
 fn format_identifier(
+  name: &String,
   topic: &topic::Topic,
   nodes_map: &BTreeMap<topic::Topic, Node>,
 ) -> String {
@@ -1685,6 +1701,11 @@ fn format_identifier(
     Some(Node::Solidity(ASTNode::ModifierDefinition { name, .. })) => {
       format_topic_token(name, "modifier", topic)
     }
+
+    None => match topic.underlying_id() {
+      Ok(node_id) if node_id < 0 => format_global(name),
+      _ => format!("{}-{}", name, topic.id()),
+    },
 
     n => format_token(&format!("{:?}-{:?}", topic.id(), n), "identifier"),
   }
