@@ -788,6 +788,7 @@ pub enum ASTNode {
     type_name: Box<ASTNode>,
     value: Option<Box<ASTNode>>,
     visibility: VariableVisibility,
+    parameter_variable: bool,
   },
   WhileStatement {
     node_id: i32,
@@ -1978,6 +1979,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       type_name,
       value,
       visibility,
+      parameter_variable,
     } => ASTNode::VariableDeclaration {
       node_id: node_id,
       src_location: src_location,
@@ -1995,6 +1997,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
         None => None,
       },
       visibility: visibility,
+      parameter_variable: parameter_variable,
     },
     ASTNode::WhileStatement {
       node_id,
@@ -2507,6 +2510,57 @@ fn get_optional_node_with_context(
     }
     None => Ok(None),
   }
+}
+
+fn get_required_parameter_variable_declaration_vec_with_context(
+  val: &serde_json::Value,
+  field_name: &str,
+  node_type: &str,
+  source_content: &str,
+) -> Result<Vec<ASTNode>, String> {
+  let nodes = get_required_node_vec(val, field_name, source_content)
+    .map_err(|e| format!("Error parsing {} node: {}", node_type, e))?;
+
+  // Set parameter_variable to true for all VariableDeclaration nodes
+  let updated_nodes = nodes
+    .into_iter()
+    .map(|node| match node {
+      ASTNode::VariableDeclaration {
+        node_id,
+        src_location,
+        constant,
+        function_selector,
+        mutability,
+        name,
+        name_location,
+        scope,
+        state_variable,
+        storage_location,
+        type_name,
+        value,
+        visibility,
+        ..
+      } => ASTNode::VariableDeclaration {
+        node_id,
+        src_location,
+        constant,
+        function_selector,
+        mutability,
+        name,
+        name_location,
+        scope,
+        state_variable,
+        storage_location,
+        type_name,
+        value,
+        visibility,
+        parameter_variable: true,
+      },
+      _ => node,
+    })
+    .collect();
+
+  Ok(updated_nodes)
 }
 
 fn get_required_string_vec_with_context(
@@ -3662,6 +3716,10 @@ pub fn node_from_json(
         type_name,
         value,
         visibility,
+        // This is always set to false initially, but when this is parsed as a
+        // child to a ParameterList node, this value will be set to true before
+        // setting it into the ParameterList node variant
+        parameter_variable: false,
       })
     }
     "WhileStatement" => {
@@ -4055,12 +4113,13 @@ pub fn node_from_json(
       })
     }
     "ParameterList" => {
-      let parameters = get_required_node_vec_with_context(
-        val,
-        "parameters",
-        node_type_str,
-        source_content,
-      )?;
+      let parameters =
+        get_required_parameter_variable_declaration_vec_with_context(
+          val,
+          "parameters",
+          node_type_str,
+          source_content,
+        )?;
 
       Ok(ASTNode::ParameterList {
         node_id,

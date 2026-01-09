@@ -896,7 +896,9 @@ fn do_node_to_source_text(
       visibility,
       mutability,
       value,
+      name,
       constant,
+      parameter_variable,
       ..
     } => {
       let type_str = do_node_to_source_text(
@@ -935,7 +937,7 @@ fn do_node_to_source_text(
       if *visibility != VariableVisibility::Internal {
         parts.push(format_keyword(&visibility_str));
       }
-      if *visibility == VariableVisibility::Internal {
+      if *visibility == VariableVisibility::Internal && !parameter_variable {
         parts.push(format_keyword("let"));
       }
       // Do not render an immutable modifier for internal variables (they are
@@ -948,10 +950,12 @@ fn do_node_to_source_text(
       if !storage.is_empty() {
         parts.push(format_keyword(&storage));
       }
-      parts.push(format!(
-        "{}:",
-        format_identifier(&new_node_topic(node_id), &nodes_map)
-      ));
+      if !name.is_empty() {
+        parts.push(format!(
+          "{}:",
+          format_identifier(&new_node_topic(node_id), &nodes_map)
+        ));
+      }
       parts.push(type_str);
 
       let decl = parts.join(" ");
