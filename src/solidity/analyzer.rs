@@ -93,7 +93,8 @@ pub enum FirstPassDeclaration {
     declaration_kind: TopicKind,
     name: String,
     scope: Scope,
-    referenced_contracts: Vec<i32>,
+    base_contracts: Vec<i32>,
+    other_contracts: Vec<i32>,
     public_members: Vec<i32>,
   },
   Flat {
@@ -107,6 +108,12 @@ pub enum FirstPassDeclaration {
 pub struct ReferencedNode {
   statement_node: i32,
   referenced_node: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReferenceProcessingMethod {
+  Normal,
+  ProcessAllContractMembers,
 }
 
 pub enum InScopeDeclaration {
@@ -125,7 +132,8 @@ pub enum InScopeDeclaration {
     name: String,
     scope: Scope,
     references: Vec<i32>,
-    referenced_contracts: Vec<i32>,
+    base_contracts: Vec<i32>,
+    other_contracts: Vec<i32>,
     public_members: Vec<i32>,
   },
   // All other declarations
@@ -308,10 +316,6 @@ fn process_first_pass_ast_nodes(
           .flatten()
           .collect();
 
-        // Combine base contracts and using for contracts
-        let mut referenced_contracts = base_contract_ids;
-        referenced_contracts.extend(using_for_contracts);
-
         let public_member_ids: Vec<i32> = contract_nodes
           .iter()
           .filter_map(|node| match node {
@@ -365,7 +369,8 @@ fn process_first_pass_ast_nodes(
             name: name.clone(),
             scope: current_scope.clone(),
             declaration_kind,
-            referenced_contracts,
+            base_contracts: base_contract_ids,
+            other_contracts: using_for_contracts,
             public_members: public_member_ids,
           },
         );
@@ -937,7 +942,7 @@ fn tree_shake(
   let mut visiting = HashSet::new(); // For cycle detection
 
   // First, collect all publicly in-scope declarations as starting points
-  let publicly_in_scope: Vec<i32> = first_pass_declarations
+  let in_scope_contracts: Vec<i32> = first_pass_declarations
     .iter()
     .filter_map(|(node_id, decl)| match decl {
       FirstPassDeclaration::Contract {
@@ -949,10 +954,11 @@ fn tree_shake(
     .collect();
 
   // Process each publicly visible declaration recursively
-  for &node_id in &publicly_in_scope {
+  for &node_id in &in_scope_contracts {
     process_tree_shake_declarations(
       node_id,
       None, // No referencing node for root declarations
+      ReferenceProcessingMethod::ProcessAllContractMembers, // Process all public members of in scope contracts
       first_pass_declarations,
       &mut in_scope_declarations,
       &mut visiting,
@@ -966,6 +972,7 @@ fn tree_shake(
 fn process_tree_shake_declarations(
   node_id: i32,
   referencing_node: Option<i32>, // The node that references this declaration
+  reference_processing_method: ReferenceProcessingMethod,
   first_pass_declarations: &BTreeMap<i32, FirstPassDeclaration>,
   in_scope_declarations: &mut BTreeMap<i32, InScopeDeclaration>,
   visiting: &mut HashSet<i32>,
@@ -1054,7 +1061,8 @@ fn process_tree_shake_declarations(
       declaration_kind,
       name,
       scope,
-      referenced_contracts,
+      base_contracts,
+      other_contracts,
       public_members,
       ..
     } => InScopeDeclaration::Contract {
@@ -1062,7 +1070,8 @@ fn process_tree_shake_declarations(
       name: name.clone(),
       scope: scope.clone(),
       references,
-      referenced_contracts: referenced_contracts.clone(),
+      base_contracts: base_contracts.clone(),
+      other_contracts: other_contracts.clone(),
       public_members: public_members.clone(),
     },
   };
@@ -1079,6 +1088,7 @@ fn process_tree_shake_declarations(
         process_tree_shake_declarations(
           referenced_node_id,
           Some(node_id), // This node is the one referencing the next node
+          ReferenceProcessingMethod::Normal,
           first_pass_declarations,
           in_scope_declarations,
           visiting,
@@ -1086,28 +1096,51 @@ fn process_tree_shake_declarations(
       }
     }
     FirstPassDeclaration::Contract {
-      referenced_contracts,
+      base_contracts,
+      other_contracts,
       public_members,
       ..
     } => {
-      for &referenced_node_id in referenced_contracts {
+      // Process base contracts with BaseContract context
+      for &base_contract_id in base_contracts {
         process_tree_shake_declarations(
-          referenced_node_id,
-          Some(node_id), // This contract should be tracked referencing the next base contract
+          base_contract_id,
+          Some(node_id), // This contract references the base contract
+          ReferenceProcessingMethod::ProcessAllContractMembers,
           first_pass_declarations,
           in_scope_declarations,
           visiting,
         )?;
       }
 
-      for &public_member_id in public_members {
+      // Process other contracts (using for, type references) with NoContext
+      for &other_contract_id in other_contracts {
         process_tree_shake_declarations(
-          public_member_id,
-          None,
+          other_contract_id,
+          Some(node_id), // This contract references the other contract
+          ReferenceProcessingMethod::Normal,
           first_pass_declarations,
           in_scope_declarations,
           visiting,
         )?;
+      }
+
+      // Process public members if:
+      // 1. This contract is referenced as a BaseContract, OR
+      // 2. This contract is a root entry point (referencing_node is None)
+      if reference_processing_method
+        == ReferenceProcessingMethod::ProcessAllContractMembers
+      {
+        for &public_member_id in public_members {
+          process_tree_shake_declarations(
+            public_member_id,
+            None,
+            ReferenceProcessingMethod::Normal,
+            first_pass_declarations,
+            in_scope_declarations,
+            visiting,
+          )?;
+        }
       }
     }
     FirstPassDeclaration::Flat { .. } => (),
