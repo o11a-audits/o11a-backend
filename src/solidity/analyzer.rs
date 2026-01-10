@@ -1,10 +1,12 @@
 use crate::core;
 use crate::core::topic;
 use crate::core::{
-  AST, DataContext, FunctionKind, FunctionModProperties, Node, Scope,
-  TopicKind, TopicMetadata, VariableProperties,
+  AST, DataContext, FunctionModProperties, Node, Scope, TopicKind,
+  TopicMetadata, VariableProperties,
 };
-use crate::solidity::parser::{self, ASTNode, SolidityAST};
+use crate::solidity::parser::{
+  self, ASTNode, FunctionVisibility, SolidityAST, VariableVisibility,
+};
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
@@ -78,7 +80,6 @@ pub fn analyze(
 #[derive(Debug, Clone)]
 pub enum FirstPassDeclaration {
   FunctionMod {
-    is_publicly_in_scope: bool,
     declaration_kind: TopicKind,
     name: String,
     scope: Scope,
@@ -87,8 +88,15 @@ pub enum FirstPassDeclaration {
     function_calls: Vec<i32>,
     variable_mutations: Vec<ReferencedNode>,
   },
-  Flat {
+  Contract {
     is_publicly_in_scope: bool,
+    declaration_kind: TopicKind,
+    name: String,
+    scope: Scope,
+    referenced_contracts: Vec<i32>,
+    public_members: Vec<i32>,
+  },
+  Flat {
     declaration_kind: TopicKind,
     name: String,
     scope: Scope,
@@ -112,6 +120,14 @@ pub enum InScopeDeclaration {
     function_calls: Vec<i32>,
     variable_mutations: Vec<ReferencedNode>,
   },
+  Contract {
+    declaration_kind: TopicKind,
+    name: String,
+    scope: Scope,
+    references: Vec<i32>,
+    referenced_contracts: Vec<i32>,
+    public_members: Vec<i32>,
+  },
   // All other declarations
   Flat {
     declaration_kind: TopicKind,
@@ -125,7 +141,8 @@ impl InScopeDeclaration {
   fn add_reference_if_not_present(&mut self, reference: i32) {
     match self {
       InScopeDeclaration::FunctionMod { references, .. }
-      | InScopeDeclaration::Flat { references, .. } => {
+      | InScopeDeclaration::Flat { references, .. }
+      | InScopeDeclaration::Contract { references, .. } => {
         if !references.contains(&reference) {
           references.push(reference);
         }
@@ -140,6 +157,9 @@ impl InScopeDeclaration {
       }
       | InScopeDeclaration::Flat {
         declaration_kind, ..
+      }
+      | InScopeDeclaration::Contract {
+        declaration_kind, ..
       } => declaration_kind,
     }
   }
@@ -147,6 +167,7 @@ impl InScopeDeclaration {
   pub fn name(&self) -> &String {
     match self {
       InScopeDeclaration::FunctionMod { name, .. }
+      | InScopeDeclaration::Contract { name, .. }
       | InScopeDeclaration::Flat { name, .. } => name,
     }
   }
@@ -154,6 +175,7 @@ impl InScopeDeclaration {
   pub fn scope(&self) -> &Scope {
     match self {
       InScopeDeclaration::FunctionMod { scope, .. }
+      | InScopeDeclaration::Contract { scope, .. }
       | InScopeDeclaration::Flat { scope, .. } => scope,
     }
   }
@@ -162,6 +184,7 @@ impl InScopeDeclaration {
   pub fn references(&self) -> &[i32] {
     match self {
       InScopeDeclaration::FunctionMod { references, .. } => references,
+      InScopeDeclaration::Contract { references, .. } => references,
       InScopeDeclaration::Flat { references, .. } => references,
     }
   }
@@ -203,17 +226,147 @@ fn process_first_pass_ast_nodes(
         node_id,
         name,
         contract_kind,
+        base_contracts,
+        nodes: contract_nodes,
         ..
       } => {
         let declaration_kind = TopicKind::Contract(*contract_kind);
 
+        let base_contract_ids: Vec<i32> = base_contracts
+          .iter()
+          .map(|base_contract| {
+            // Each base_contract should be an InheritanceSpecifier
+            match base_contract {
+              ASTNode::InheritanceSpecifier { base_name, .. } => {
+                // base_name should be an IdentifierPath with a referenced_declaration
+                match base_name.as_ref() {
+                  ASTNode::IdentifierPath { referenced_declaration, .. } => {
+                    *referenced_declaration
+                  }
+                  _ => panic!(
+                    "Expected IdentifierPath in InheritanceSpecifier base_name, got: {:?}",
+                    base_name
+                  ),
+                }
+              }
+              _ => panic!(
+                "Expected InheritanceSpecifier in base_contracts, got: {:?}",
+                base_contract
+              ),
+            }
+          })
+          .collect();
+
+        let using_for_contracts: Vec<i32> = contract_nodes
+          .iter()
+          .filter_map(|node| match node {
+            ASTNode::UsingForDirective {
+              library_name,
+              type_name,
+              ..
+            } => {
+              // Helper function to extract referenced_declaration from either IdentifierPath or UserDefinedTypeName
+              let extract_reference = |node: &ASTNode| -> Option<i32> {
+                match node {
+                  ASTNode::IdentifierPath {
+                    referenced_declaration,
+                    ..
+                  } => Some(*referenced_declaration),
+                  ASTNode::UserDefinedTypeName { path_node, .. } => {
+                    match path_node.as_ref() {
+                      ASTNode::IdentifierPath {
+                        referenced_declaration,
+                        ..
+                      } => Some(*referenced_declaration),
+                      _ => None,
+                    }
+                  }
+                  _ => None,
+                }
+              };
+
+              // Extract referenced_declaration from library_name
+              let library_ref = library_name
+                .as_ref()
+                .and_then(|lib_node| extract_reference(lib_node.as_ref()));
+
+              // Extract referenced_declaration from type_name
+              let type_ref = type_name
+                .as_ref()
+                .and_then(|type_node| extract_reference(type_node.as_ref()));
+
+              // Return both references if they exist
+              match (library_ref, type_ref) {
+                (Some(lib), Some(typ)) => Some(vec![lib, typ]),
+                (Some(lib), None) => Some(vec![lib]),
+                (None, Some(typ)) => Some(vec![typ]),
+                (None, None) => None,
+              }
+            }
+            _ => None,
+          })
+          .flatten()
+          .collect();
+
+        // Combine base contracts and using for contracts
+        let mut referenced_contracts = base_contract_ids;
+        referenced_contracts.extend(using_for_contracts);
+
+        let public_member_ids: Vec<i32> = contract_nodes
+          .iter()
+          .filter_map(|node| match node {
+            // Public functions
+            ASTNode::FunctionDefinition {
+              node_id,
+              visibility,
+              ..
+            } if matches!(
+              visibility,
+              FunctionVisibility::Public | FunctionVisibility::External
+            ) =>
+            {
+              Some(*node_id)
+            }
+            // Public modifiers
+            ASTNode::ModifierDefinition {
+              node_id,
+              visibility,
+              ..
+            } if matches!(
+              visibility,
+              FunctionVisibility::Public | FunctionVisibility::External
+            ) =>
+            {
+              Some(*node_id)
+            }
+            // Events (all events are public)
+            ASTNode::EventDefinition { node_id, .. } => Some(*node_id),
+            // Errors (all errors are public)
+            ASTNode::ErrorDefinition { node_id, .. } => Some(*node_id),
+            // Public state variables
+            ASTNode::VariableDeclaration {
+              node_id,
+              visibility,
+              state_variable,
+              ..
+            } if *state_variable
+              && matches!(visibility, VariableVisibility::Public) =>
+            {
+              Some(*node_id)
+            }
+            _ => None,
+          })
+          .collect();
+
         first_pass_declarations.insert(
           *node_id,
-          FirstPassDeclaration::Flat {
+          FirstPassDeclaration::Contract {
             is_publicly_in_scope: is_file_in_scope, // All contracts are publicly visible
             name: name.clone(),
             scope: current_scope.clone(),
             declaration_kind,
+            referenced_contracts,
+            public_members: public_member_ids,
           },
         );
 
@@ -230,7 +383,6 @@ fn process_first_pass_ast_nodes(
         node_id,
         name,
         kind,
-        visibility,
         ..
       } => {
         let mut referenced_nodes = Vec::new();
@@ -247,28 +399,9 @@ fn process_first_pass_ast_nodes(
           &mut variable_mutations,
         );
 
-        // Determine if function is publicly visible
-        let is_publicly_visible = if is_file_in_scope {
-          match kind {
-            FunctionKind::Constructor
-            | FunctionKind::Fallback
-            | FunctionKind::Receive => true,
-            FunctionKind::Function | FunctionKind::FreeFunction => {
-              matches!(
-                visibility,
-                parser::FunctionVisibility::Public
-                  | parser::FunctionVisibility::External
-              )
-            }
-          }
-        } else {
-          false
-        };
-
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::FunctionMod {
-            is_publicly_in_scope: is_publicly_visible,
             declaration_kind: TopicKind::Function(*kind),
             name: name.clone(),
             scope: current_scope.clone(),
@@ -289,23 +422,11 @@ fn process_first_pass_ast_nodes(
         )?;
       }
 
-      ASTNode::ModifierDefinition {
-        node_id,
-        visibility,
-        name,
-        ..
-      } => {
+      ASTNode::ModifierDefinition { node_id, name, .. } => {
         let mut referenced_nodes = Vec::new();
         let mut require_revert_statements = Vec::new();
         let mut function_calls = Vec::new();
         let mut variable_mutations = Vec::new();
-
-        let is_publicly_visible = is_file_in_scope
-          && matches!(
-            visibility,
-            parser::FunctionVisibility::Public
-              | parser::FunctionVisibility::External
-          );
 
         // Process entire modifier node to find references and require/revert statements
         collect_references_and_statements(
@@ -319,7 +440,6 @@ fn process_first_pass_ast_nodes(
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::FunctionMod {
-            is_publicly_in_scope: is_publicly_visible,
             declaration_kind: TopicKind::Modifier,
             name: name.clone(),
             scope: current_scope.clone(),
@@ -342,15 +462,11 @@ fn process_first_pass_ast_nodes(
 
       ASTNode::VariableDeclaration {
         node_id,
-        visibility,
         state_variable,
         mutability,
         name,
         ..
       } => {
-        let is_publicly_visible = is_file_in_scope
-          && matches!(visibility, parser::VariableVisibility::Public);
-
         let declaration_kind = if *state_variable {
           if matches!(mutability, parser::VariableMutability::Constant) {
             TopicKind::Constant
@@ -364,7 +480,6 @@ fn process_first_pass_ast_nodes(
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::Flat {
-            is_publicly_in_scope: is_publicly_visible,
             declaration_kind,
             name: name.clone(),
             scope: current_scope.clone(),
@@ -376,7 +491,6 @@ fn process_first_pass_ast_nodes(
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::Flat {
-            is_publicly_in_scope: false,
             declaration_kind: TopicKind::Event,
             name: name.clone(),
             scope: current_scope.clone(),
@@ -388,7 +502,6 @@ fn process_first_pass_ast_nodes(
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::Flat {
-            is_publicly_in_scope: false,
             declaration_kind: TopicKind::Error,
             name: name.clone(),
             scope: current_scope.clone(),
@@ -400,7 +513,6 @@ fn process_first_pass_ast_nodes(
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::Flat {
-            is_publicly_in_scope: false,
             declaration_kind: TopicKind::Struct,
             name: name.clone(),
             scope: current_scope.clone(),
@@ -421,7 +533,6 @@ fn process_first_pass_ast_nodes(
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::Flat {
-            is_publicly_in_scope: false, // Enums are not publicly visible
             declaration_kind: TopicKind::Enum,
             name: name.clone(),
             scope: current_scope.clone(),
@@ -442,7 +553,6 @@ fn process_first_pass_ast_nodes(
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::Flat {
-            is_publicly_in_scope: false, // Enum members are not publicly visible
             declaration_kind: TopicKind::EnumMember,
             name: name.clone(),
             scope: current_scope.clone(),
@@ -802,24 +912,13 @@ fn collect_references_and_statements(
 }
 
 impl FirstPassDeclaration {
-  /// Get the publicly in-scope status for any declaration variant
-  pub fn is_publicly_in_scope(&self) -> bool {
-    match self {
-      FirstPassDeclaration::FunctionMod {
-        is_publicly_in_scope,
-        ..
-      } => *is_publicly_in_scope,
-      FirstPassDeclaration::Flat {
-        is_publicly_in_scope,
-        ..
-      } => *is_publicly_in_scope,
-    }
-  }
-
   /// Get the declaration kind for any declaration variant
   pub fn declaration_kind(&self) -> &TopicKind {
     match self {
       FirstPassDeclaration::FunctionMod {
+        declaration_kind, ..
+      } => declaration_kind,
+      FirstPassDeclaration::Contract {
         declaration_kind, ..
       } => declaration_kind,
       FirstPassDeclaration::Flat {
@@ -838,14 +937,19 @@ fn tree_shake(
   let mut visiting = HashSet::new(); // For cycle detection
 
   // First, collect all publicly in-scope declarations as starting points
-  let publicly_visible: Vec<i32> = first_pass_declarations
+  let publicly_in_scope: Vec<i32> = first_pass_declarations
     .iter()
-    .filter(|(_, decl)| decl.is_publicly_in_scope())
-    .map(|(node_id, _)| *node_id)
+    .filter_map(|(node_id, decl)| match decl {
+      FirstPassDeclaration::Contract {
+        is_publicly_in_scope: true,
+        ..
+      } => Some(*node_id),
+      _ => None,
+    })
     .collect();
 
   // Process each publicly visible declaration recursively
-  for &node_id in &publicly_visible {
+  for &node_id in &publicly_in_scope {
     process_tree_shake_declarations(
       node_id,
       None, // No referencing node for root declarations
@@ -946,6 +1050,21 @@ fn process_tree_shake_declarations(
       scope: scope.clone(),
       references,
     },
+    FirstPassDeclaration::Contract {
+      declaration_kind,
+      name,
+      scope,
+      referenced_contracts,
+      public_members,
+      ..
+    } => InScopeDeclaration::Contract {
+      declaration_kind: declaration_kind.clone(),
+      name: name.clone(),
+      scope: scope.clone(),
+      references,
+      referenced_contracts: referenced_contracts.clone(),
+      public_members: public_members.clone(),
+    },
   };
 
   in_scope_declarations.insert(node_id, in_scope_decl);
@@ -960,6 +1079,31 @@ fn process_tree_shake_declarations(
         process_tree_shake_declarations(
           referenced_node_id,
           Some(node_id), // This node is the one referencing the next node
+          first_pass_declarations,
+          in_scope_declarations,
+          visiting,
+        )?;
+      }
+    }
+    FirstPassDeclaration::Contract {
+      referenced_contracts,
+      public_members,
+      ..
+    } => {
+      for &referenced_node_id in referenced_contracts {
+        process_tree_shake_declarations(
+          referenced_node_id,
+          Some(node_id), // This contract should be tracked referencing the next base contract
+          first_pass_declarations,
+          in_scope_declarations,
+          visiting,
+        )?;
+      }
+
+      for &public_member_id in public_members {
+        process_tree_shake_declarations(
+          public_member_id,
+          None,
           first_pass_declarations,
           in_scope_declarations,
           visiting,
