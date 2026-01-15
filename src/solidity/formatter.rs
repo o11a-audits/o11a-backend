@@ -1104,6 +1104,7 @@ fn do_node_to_source_text(
     }
 
     ASTNode::ContractDefinition {
+      node_id,
       contract_kind,
       name,
       base_contracts,
@@ -1181,8 +1182,8 @@ fn do_node_to_source_text(
         format!(
           "{}{} {}{} {}{}{}{}",
           abstract_str,
-          format_keyword(&html_escape(&kind)),
-          format_type(&html_escape(name)),
+          format_keyword(&kind),
+          format_identifier(&name, &new_node_topic(node_id), &nodes_map),
           bases,
           format_brace("{", indent_level),
           indent(&members, indent_level + 1),
