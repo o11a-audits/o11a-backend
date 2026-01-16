@@ -1,7 +1,7 @@
 use crate::core;
 use crate::core::topic;
 use crate::core::{
-  AST, AuditData, DataContext, Node, Scope, TopicKind, TopicMetadata,
+  AST, AuditData, DataContext, Node, Scope, TopicMetadata, UnnamedTopicKind,
 };
 use crate::documentation::parser::{self, DocumentationAST, DocumentationNode};
 use std::path::Path;
@@ -145,7 +145,7 @@ fn process_documentation_node(
         topic.clone(),
         TopicMetadata::UnnamedTopic {
           topic: topic.clone(),
-          kind: TopicKind::DocumentationSection,
+          kind: UnnamedTopicKind::DocumentationSection,
           scope,
         },
       );
@@ -179,7 +179,7 @@ fn process_documentation_node(
         topic.clone(),
         TopicMetadata::UnnamedTopic {
           topic: topic.clone(),
-          kind: TopicKind::DocumentationParagraph,
+          kind: UnnamedTopicKind::DocumentationParagraph,
           scope,
         },
       );

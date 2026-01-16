@@ -120,8 +120,15 @@ pub fn add_to_scope(scope: &Scope, topic: topic::Topic) -> Scope {
   }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum VariableMutability {
+  Mutable,
+  Immutable,
+  Constant,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TopicKind {
+pub enum NamedTopicKind {
   Contract(ContractKind),
   Function(FunctionKind),
   Modifier,
@@ -130,9 +137,12 @@ pub enum TopicKind {
   Struct,
   Enum,
   EnumMember,
-  Constant,
-  StateVariable,
+  StateVariable(VariableMutability),
   LocalVariable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UnnamedTopicKind {
   OperatorInvocation,
   DocumentationSection,
   DocumentationParagraph,
@@ -143,13 +153,13 @@ pub enum TopicMetadata {
   NamedTopic {
     topic: topic::Topic,
     scope: Scope,
-    kind: TopicKind,
+    kind: NamedTopicKind,
     name: String,
   },
   UnnamedTopic {
     topic: topic::Topic,
     scope: Scope,
-    kind: TopicKind,
+    kind: UnnamedTopicKind,
   },
 }
 
@@ -172,13 +182,6 @@ impl TopicMetadata {
     match self {
       TopicMetadata::NamedTopic { topic, .. } => topic,
       TopicMetadata::UnnamedTopic { topic, .. } => topic,
-    }
-  }
-
-  pub fn kind(&self) -> &TopicKind {
-    match self {
-      TopicMetadata::NamedTopic { kind, .. } => kind,
-      TopicMetadata::UnnamedTopic { kind, .. } => kind,
     }
   }
 

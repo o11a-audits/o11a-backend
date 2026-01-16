@@ -232,7 +232,14 @@ pub async fn get_contracts(
 
   // Iterate through all topic metadata and filter for contracts in scope files
   for (topic, metadata) in &audit_data.topic_metadata {
-    if let crate::core::TopicKind::Contract(_) = metadata.kind() {
+    let is_contract = match metadata {
+      crate::core::TopicMetadata::NamedTopic { kind, .. } => {
+        matches!(kind, crate::core::NamedTopicKind::Contract(_))
+      }
+      crate::core::TopicMetadata::UnnamedTopic { .. } => false,
+    };
+
+    if is_contract {
       // Check if the contract is in an in-scope file
       let is_in_scope = match metadata.scope() {
         crate::core::Scope::Container { container } => {
@@ -281,6 +288,7 @@ pub async fn get_source_text(
       crate::solidity::formatter::node_to_source_text(
         solidity_node,
         &audit_data.nodes,
+        &audit_data.topic_metadata,
         &audit_data.function_properties,
         &audit_data.variable_properties,
       )
@@ -368,14 +376,19 @@ fn topic_metadata_to_response(
   };
 
   // Format the kind and sub_kind
-  let (kind_str, sub_kind) = match metadata.kind() {
-    crate::core::TopicKind::Contract(contract_kind) => {
-      ("Contract".to_string(), Some(format!("{:?}", contract_kind)))
+  let (kind_str, sub_kind) = match metadata {
+    crate::core::TopicMetadata::NamedTopic { kind, .. } => match kind {
+      crate::core::NamedTopicKind::Contract(contract_kind) => {
+        ("Contract".to_string(), Some(format!("{:?}", contract_kind)))
+      }
+      crate::core::NamedTopicKind::Function(function_kind) => {
+        ("Function".to_string(), Some(format!("{:?}", function_kind)))
+      }
+      kind => (format!("{:?}", kind), None),
+    },
+    crate::core::TopicMetadata::UnnamedTopic { kind, .. } => {
+      (format!("{:?}", kind), None)
     }
-    crate::core::TopicKind::Function(function_kind) => {
-      ("Function".to_string(), Some(format!("{:?}", function_kind)))
-    }
-    kind => (format!("{:?}", kind), None),
   };
 
   // Only include name for NamedTopic

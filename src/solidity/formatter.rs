@@ -1,10 +1,10 @@
 use crate::core::topic::{self, new_node_topic};
 use crate::core::{self, FunctionModProperties, Node, VariableProperties};
-use crate::core::{ContractKind, FunctionKind};
+use crate::core::{ContractKind, FunctionKind, VariableMutability};
 use crate::solidity::parser::{
   ASTNode, AssignmentOperator, BinaryOperator, FunctionStateMutability,
   FunctionVisibility, LiteralKind, StorageLocation, UnaryOperator,
-  VariableMutability, VariableVisibility,
+  VariableVisibility,
 };
 use std::collections::BTreeMap;
 
@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 pub fn node_to_source_text(
   node: &ASTNode,
   nodes_map: &BTreeMap<topic::Topic, core::Node>,
+  topic_metadata: &BTreeMap<topic::Topic, core::TopicMetadata>,
   function_mod_properties: &BTreeMap<topic::Topic, FunctionModProperties>,
   variable_properties: &BTreeMap<topic::Topic, VariableProperties>,
 ) -> String {
@@ -25,6 +26,7 @@ pub fn node_to_source_text(
       node,
       0,
       nodes_map,
+      topic_metadata,
       function_mod_properties,
       variable_properties
     )
@@ -35,6 +37,7 @@ fn do_node_to_source_text(
   node: &ASTNode,
   indent_level: usize,
   nodes_map: &BTreeMap<topic::Topic, core::Node>,
+  topic_metadata: &BTreeMap<topic::Topic, core::TopicMetadata>,
   function_mod_properties: &BTreeMap<topic::Topic, FunctionModProperties>,
   variable_properties: &BTreeMap<topic::Topic, VariableProperties>,
 ) -> String {
@@ -50,6 +53,7 @@ fn do_node_to_source_text(
         left_hand_side,
         indent_level,
         nodes_map,
+        topic_metadata,
         function_mod_properties,
         variable_properties,
       );
@@ -60,6 +64,7 @@ fn do_node_to_source_text(
         right_hand_side,
         indent_level,
         nodes_map,
+        topic_metadata,
         function_mod_properties,
         variable_properties,
       );
@@ -83,6 +88,7 @@ fn do_node_to_source_text(
         left_expression,
         indent_level,
         nodes_map,
+        topic_metadata,
         function_mod_properties,
         variable_properties,
       );
@@ -96,6 +102,7 @@ fn do_node_to_source_text(
           right_expression,
           indent_level,
           nodes_map,
+          topic_metadata,
           function_mod_properties,
           variable_properties,
         );
@@ -114,6 +121,7 @@ fn do_node_to_source_text(
           right_expression,
           indent_level,
           nodes_map,
+          topic_metadata,
           function_mod_properties,
           variable_properties,
         );
@@ -143,6 +151,7 @@ fn do_node_to_source_text(
         condition,
         indent_level,
         nodes_map,
+        topic_metadata,
         function_mod_properties,
         variable_properties,
       );
@@ -156,6 +165,7 @@ fn do_node_to_source_text(
             true_expression,
             indent_level,
             nodes_map,
+            topic_metadata,
             function_mod_properties,
             variable_properties
           ),
@@ -164,6 +174,7 @@ fn do_node_to_source_text(
             false_expr,
             indent_level,
             nodes_map,
+            topic_metadata,
             function_mod_properties,
             variable_properties
           ),
@@ -176,6 +187,7 @@ fn do_node_to_source_text(
             true_expression,
             indent_level,
             nodes_map,
+            topic_metadata,
             function_mod_properties,
             variable_properties
           )
@@ -190,6 +202,7 @@ fn do_node_to_source_text(
         type_name,
         indent_level,
         nodes_map,
+        topic_metadata,
         function_mod_properties,
         variable_properties,
       )
@@ -206,6 +219,7 @@ fn do_node_to_source_text(
         expression,
         indent_level,
         nodes_map,
+        topic_metadata,
         function_mod_properties,
         variable_properties,
       );
@@ -255,6 +269,7 @@ fn do_node_to_source_text(
               arg,
               indent_level + 1,
               nodes_map,
+              topic_metadata,
               function_mod_properties,
               variable_properties,
             );
@@ -272,7 +287,12 @@ fn do_node_to_source_text(
               } else {
                 format!(
                   "{}:{}",
-                  format_identifier(name, &new_node_topic(node_id), nodes_map),
+                  format_identifier(
+                    name,
+                    &new_node_topic(node_id),
+                    nodes_map,
+                    topic_metadata
+                  ),
                   indent(&arg_str, indent_level + 1)
                 )
               }
@@ -292,6 +312,7 @@ fn do_node_to_source_text(
               arg,
               indent_level,
               nodes_map,
+              topic_metadata,
               function_mod_properties,
               variable_properties,
             )
@@ -332,6 +353,7 @@ fn do_node_to_source_text(
         expression,
         indent_level,
         nodes_map,
+        topic_metadata,
         function_mod_properties,
         variable_properties,
       );
@@ -340,6 +362,7 @@ fn do_node_to_source_text(
         argument,
         indent_level,
         nodes_map,
+        topic_metadata,
         function_mod_properties,
         variable_properties,
       );
@@ -361,6 +384,7 @@ fn do_node_to_source_text(
         expression,
         indent_level,
         nodes_map,
+        topic_metadata,
         function_mod_properties,
         variable_properties,
       );
@@ -373,6 +397,7 @@ fn do_node_to_source_text(
             arg,
             indent_level,
             nodes_map,
+            topic_metadata,
             function_mod_properties,
             variable_properties,
           )
@@ -392,6 +417,7 @@ fn do_node_to_source_text(
         expression,
         indent_level,
         nodes_map,
+        topic_metadata,
         function_mod_properties,
         variable_properties,
       );
@@ -404,6 +430,7 @@ fn do_node_to_source_text(
             opt,
             indent_level,
             nodes_map,
+            topic_metadata,
             function_mod_properties,
             variable_properties,
           )
@@ -427,6 +454,7 @@ fn do_node_to_source_text(
       name,
       &new_node_topic(referenced_declaration),
       &nodes_map,
+      topic_metadata,
     ),
 
     ASTNode::IdentifierPath {
@@ -437,6 +465,7 @@ fn do_node_to_source_text(
       name,
       &new_node_topic(referenced_declaration),
       &nodes_map,
+      topic_metadata,
     ),
 
     ASTNode::IndexAccess {
@@ -448,6 +477,7 @@ fn do_node_to_source_text(
         base_expression,
         indent_level,
         nodes_map,
+        topic_metadata,
         function_mod_properties,
         variable_properties,
       );
@@ -459,6 +489,7 @@ fn do_node_to_source_text(
             idx,
             indent_level,
             nodes_map,
+            topic_metadata,
             function_mod_properties,
             variable_properties
           )
@@ -534,6 +565,7 @@ fn do_node_to_source_text(
           expression,
           indent_level,
           nodes_map,
+          topic_metadata,
           function_mod_properties,
           variable_properties,
         );
@@ -542,6 +574,7 @@ fn do_node_to_source_text(
             member_name,
             &new_node_topic(member_node_id),
             &nodes_map,
+            topic_metadata,
           );
 
           let indent_level = indent_level + 1;
@@ -566,6 +599,7 @@ fn do_node_to_source_text(
           type_name,
           indent_level,
           nodes_map,
+          topic_metadata,
           function_mod_properties,
           variable_properties
         )
@@ -581,6 +615,7 @@ fn do_node_to_source_text(
             c,
             indent_level,
             nodes_map,
+            topic_metadata,
             function_mod_properties,
             variable_properties,
           )
@@ -609,6 +644,7 @@ fn do_node_to_source_text(
         sub_expression,
         indent_level,
         nodes_map,
+        topic_metadata,
         function_mod_properties,
         variable_properties,
       );
@@ -639,9 +675,12 @@ fn do_node_to_source_text(
       }
     }
 
-    ASTNode::EnumValue { node_id, name, .. } => {
-      format_identifier(name, &new_node_topic(node_id), &nodes_map)
-    }
+    ASTNode::EnumValue { node_id, name, .. } => format_identifier(
+      name,
+      &new_node_topic(node_id),
+      &nodes_map,
+      topic_metadata,
+    ),
 
     ASTNode::Block { statements, .. } => {
       if statements.is_empty() {
@@ -655,6 +694,7 @@ fn do_node_to_source_text(
               s,
               indent_level,
               nodes_map,
+              topic_metadata,
               function_mod_properties,
               variable_properties,
             )
@@ -679,6 +719,7 @@ fn do_node_to_source_text(
           s,
           indent_level,
           nodes_map,
+          topic_metadata,
           function_mod_properties,
           variable_properties,
         )
@@ -701,6 +742,7 @@ fn do_node_to_source_text(
           b,
           indent_level,
           nodes_map,
+          topic_metadata,
           function_mod_properties,
           variable_properties,
         )
@@ -712,6 +754,7 @@ fn do_node_to_source_text(
           &nodes[0],
           indent_level,
           nodes_map,
+          topic_metadata,
           function_mod_properties,
           variable_properties,
         )
@@ -739,6 +782,7 @@ fn do_node_to_source_text(
           event_call,
           indent_level,
           nodes_map,
+          topic_metadata,
           function_mod_properties,
           variable_properties
         )
@@ -749,6 +793,7 @@ fn do_node_to_source_text(
       expression,
       indent_level,
       nodes_map,
+      topic_metadata,
       function_mod_properties,
       variable_properties,
     ),
@@ -766,6 +811,7 @@ fn do_node_to_source_text(
           init_expr,
           indent_level,
           nodes_map,
+          topic_metadata,
           function_mod_properties,
           variable_properties,
         )
@@ -777,6 +823,7 @@ fn do_node_to_source_text(
           cond_expr,
           indent_level,
           nodes_map,
+          topic_metadata,
           function_mod_properties,
           variable_properties,
         )
@@ -788,6 +835,7 @@ fn do_node_to_source_text(
           l_expr,
           indent_level,
           nodes_map,
+          topic_metadata,
           function_mod_properties,
           variable_properties,
         )
@@ -798,6 +846,7 @@ fn do_node_to_source_text(
         body,
         indent_level,
         nodes_map,
+        topic_metadata,
         function_mod_properties,
         variable_properties,
       );
@@ -819,6 +868,7 @@ fn do_node_to_source_text(
         condition,
         indent_level,
         nodes_map,
+        topic_metadata,
         function_mod_properties,
         variable_properties,
       );
@@ -826,6 +876,7 @@ fn do_node_to_source_text(
         true_body,
         indent_level,
         nodes_map,
+        topic_metadata,
         function_mod_properties,
         variable_properties,
       );
@@ -837,6 +888,7 @@ fn do_node_to_source_text(
             false_b,
             indent_level,
             nodes_map,
+            topic_metadata,
             function_mod_properties,
             variable_properties
           )
@@ -872,6 +924,7 @@ fn do_node_to_source_text(
             expr,
             indent_level,
             nodes_map,
+            topic_metadata,
             function_mod_properties,
             variable_properties
           )
@@ -893,6 +946,7 @@ fn do_node_to_source_text(
           error_call,
           indent_level,
           nodes_map,
+          topic_metadata,
           function_mod_properties,
           variable_properties
         )
@@ -911,6 +965,7 @@ fn do_node_to_source_text(
             s,
             indent_level,
             nodes_map,
+            topic_metadata,
             function_mod_properties,
             variable_properties,
           )
@@ -945,6 +1000,7 @@ fn do_node_to_source_text(
                 declaration,
                 indent_level,
                 nodes_map,
+                topic_metadata,
                 function_mod_properties,
                 variable_properties
               ),
@@ -954,6 +1010,7 @@ fn do_node_to_source_text(
                   initial_val,
                   indent_level,
                   nodes_map,
+                  topic_metadata,
                   function_mod_properties,
                   variable_properties
                 ),
@@ -971,6 +1028,7 @@ fn do_node_to_source_text(
               d,
               indent_level,
               nodes_map,
+              topic_metadata,
               function_mod_properties,
               variable_properties,
             )
@@ -996,6 +1054,7 @@ fn do_node_to_source_text(
         type_name,
         indent_level,
         nodes_map,
+        topic_metadata,
         function_mod_properties,
         variable_properties,
       );
@@ -1044,7 +1103,12 @@ fn do_node_to_source_text(
       if !name.is_empty() {
         parts.push(format!(
           "{}:",
-          format_identifier(name, &new_node_topic(node_id), &nodes_map)
+          format_identifier(
+            name,
+            &new_node_topic(node_id),
+            &nodes_map,
+            topic_metadata
+          )
         ));
       }
       parts.push(type_str);
@@ -1057,6 +1121,7 @@ fn do_node_to_source_text(
           val,
           indent_level,
           nodes_map,
+          topic_metadata,
           function_mod_properties,
           variable_properties,
         );
@@ -1081,6 +1146,7 @@ fn do_node_to_source_text(
         condition,
         indent_level,
         nodes_map,
+        topic_metadata,
         function_mod_properties,
         variable_properties,
       );
@@ -1089,6 +1155,7 @@ fn do_node_to_source_text(
           b,
           indent_level,
           nodes_map,
+          topic_metadata,
           function_mod_properties,
           variable_properties,
         )
@@ -1124,6 +1191,7 @@ fn do_node_to_source_text(
           &base_contracts[0],
           base_indent_level,
           nodes_map,
+          topic_metadata,
           function_mod_properties,
           variable_properties,
         );
@@ -1135,6 +1203,7 @@ fn do_node_to_source_text(
                 b,
                 base_indent_level,
                 nodes_map,
+                topic_metadata,
                 function_mod_properties,
                 variable_properties,
               )
@@ -1172,6 +1241,7 @@ fn do_node_to_source_text(
               n,
               indent_level + 1,
               nodes_map,
+              topic_metadata,
               function_mod_properties,
               variable_properties,
             )
@@ -1183,7 +1253,12 @@ fn do_node_to_source_text(
           "{}{} {}{} {}{}{}{}",
           abstract_str,
           format_keyword(&kind),
-          format_identifier(&name, &new_node_topic(node_id), &nodes_map),
+          format_identifier(
+            &name,
+            &new_node_topic(node_id),
+            &nodes_map,
+            topic_metadata
+          ),
           bases,
           format_brace("{", indent_level),
           indent(&members, indent_level + 1),
@@ -1238,6 +1313,7 @@ fn do_node_to_source_text(
           parameters,
           indent_level,
           nodes_map,
+          topic_metadata,
           function_mod_properties,
           variable_properties
         )
@@ -1251,6 +1327,7 @@ fn do_node_to_source_text(
               m,
               indent_level,
               nodes_map,
+              topic_metadata,
               function_mod_properties,
               variable_properties,
             )
@@ -1270,6 +1347,7 @@ fn do_node_to_source_text(
           return_parameters,
           indent_level,
           nodes_map,
+          topic_metadata,
           function_mod_properties,
           variable_properties
         )
@@ -1279,6 +1357,7 @@ fn do_node_to_source_text(
           b,
           indent_level,
           nodes_map,
+          topic_metadata,
           function_mod_properties,
           variable_properties,
         )
@@ -1309,13 +1388,19 @@ fn do_node_to_source_text(
         parameters,
         indent_level,
         nodes_map,
+        topic_metadata,
         function_mod_properties,
         variable_properties,
       );
       format!(
         "{} {}{}",
         format_keyword("event"),
-        format_identifier(name, &new_node_topic(node_id), &nodes_map),
+        format_identifier(
+          name,
+          &new_node_topic(node_id),
+          &nodes_map,
+          topic_metadata
+        ),
         params
       )
     }
@@ -1330,13 +1415,19 @@ fn do_node_to_source_text(
         parameters,
         indent_level,
         nodes_map,
+        topic_metadata,
         function_mod_properties,
         variable_properties,
       );
       format!(
         "{} {}{}",
         format_keyword("error"),
-        format_identifier(name, &new_node_topic(node_id), &nodes_map),
+        format_identifier(
+          name,
+          &new_node_topic(node_id),
+          &nodes_map,
+          topic_metadata
+        ),
         params
       )
     }
@@ -1354,6 +1445,7 @@ fn do_node_to_source_text(
         parameters,
         indent_level,
         nodes_map,
+        topic_metadata,
         function_mod_properties,
         variable_properties,
       );
@@ -1376,6 +1468,7 @@ fn do_node_to_source_text(
           body,
           indent_level,
           nodes_map,
+          topic_metadata,
           function_mod_properties,
           variable_properties
         )
@@ -1399,6 +1492,7 @@ fn do_node_to_source_text(
             m,
             indent_level,
             nodes_map,
+            topic_metadata,
             function_mod_properties,
             variable_properties,
           )
@@ -1410,7 +1504,12 @@ fn do_node_to_source_text(
         "{} {} {} {{{}{}}}",
         visibility_str,
         format_keyword("struct"),
-        format_identifier(name, &new_node_topic(node_id), &nodes_map),
+        format_identifier(
+          name,
+          &new_node_topic(node_id),
+          &nodes_map,
+          topic_metadata
+        ),
         indent(&members_str, indent_level),
         trailing_newline
       )
@@ -1431,6 +1530,7 @@ fn do_node_to_source_text(
             m,
             indent_level,
             nodes_map,
+            topic_metadata,
             function_mod_properties,
             variable_properties,
           )
@@ -1441,7 +1541,12 @@ fn do_node_to_source_text(
       format!(
         "{} {} {{{}{}}}",
         format_keyword("enum"),
-        format_identifier(name, &new_node_topic(node_id), &nodes_map),
+        format_identifier(
+          name,
+          &new_node_topic(node_id),
+          &nodes_map,
+          topic_metadata
+        ),
         indent(&members_str, indent_level),
         trailing_newline
       )
@@ -1455,11 +1560,17 @@ fn do_node_to_source_text(
     } => {
       format!(
         "type {} is {}",
-        format_identifier(name, &new_node_topic(node_id), &nodes_map),
+        format_identifier(
+          name,
+          &new_node_topic(node_id),
+          &nodes_map,
+          topic_metadata
+        ),
         do_node_to_source_text(
           underlying_type,
           indent_level,
           nodes_map,
+          topic_metadata,
           function_mod_properties,
           variable_properties
         )
@@ -1488,6 +1599,7 @@ fn do_node_to_source_text(
           lib_node,
           indent_level,
           nodes_map,
+          topic_metadata,
           function_mod_properties,
           variable_properties,
         )
@@ -1503,6 +1615,7 @@ fn do_node_to_source_text(
             type_node,
             for_indent_level,
             nodes_map,
+            topic_metadata,
             function_mod_properties,
             variable_properties
           )
@@ -1520,6 +1633,7 @@ fn do_node_to_source_text(
           n,
           indent_level,
           nodes_map,
+          topic_metadata,
           function_mod_properties,
           variable_properties,
         )
@@ -1531,6 +1645,7 @@ fn do_node_to_source_text(
       base_name,
       indent_level,
       nodes_map,
+      topic_metadata,
       function_mod_properties,
       variable_properties,
     ),
@@ -1548,6 +1663,7 @@ fn do_node_to_source_text(
         parameter_types,
         indent_level,
         nodes_map,
+        topic_metadata,
         function_mod_properties,
         variable_properties,
       );
@@ -1560,6 +1676,7 @@ fn do_node_to_source_text(
           return_parameter_types,
           indent_level,
           nodes_map,
+          topic_metadata,
           function_mod_properties,
           variable_properties
         )
@@ -1587,6 +1704,7 @@ fn do_node_to_source_text(
               p,
               indent_level,
               nodes_map,
+              topic_metadata,
               function_mod_properties,
               variable_properties,
             )
@@ -1609,6 +1727,7 @@ fn do_node_to_source_text(
         modifier_name,
         indent_level,
         nodes_map,
+        topic_metadata,
         function_mod_properties,
         variable_properties,
       );
@@ -1623,6 +1742,7 @@ fn do_node_to_source_text(
                 a,
                 indent_level,
                 nodes_map,
+                topic_metadata,
                 function_mod_properties,
                 variable_properties,
               )
@@ -1640,6 +1760,7 @@ fn do_node_to_source_text(
       path_node,
       indent_level,
       nodes_map,
+      topic_metadata,
       function_mod_properties,
       variable_properties,
     ),
@@ -1651,6 +1772,7 @@ fn do_node_to_source_text(
           base_type,
           indent_level,
           nodes_map,
+          topic_metadata,
           function_mod_properties,
           variable_properties
         )
@@ -1668,6 +1790,7 @@ fn do_node_to_source_text(
         key_type,
         indent_level,
         nodes_map,
+        topic_metadata,
         function_mod_properties,
         variable_properties,
       );
@@ -1678,6 +1801,7 @@ fn do_node_to_source_text(
         value_type,
         indent_level,
         nodes_map,
+        topic_metadata,
         function_mod_properties,
         variable_properties,
       );
@@ -1712,7 +1836,36 @@ fn format_identifier(
   name: &String,
   topic: &topic::Topic,
   nodes_map: &BTreeMap<topic::Topic, Node>,
+  topic_metadata: &BTreeMap<topic::Topic, core::TopicMetadata>,
 ) -> String {
+  // Prefer metadata-based classification (single source of truth)
+  if let Some(core::TopicMetadata::NamedTopic { kind, .. }) =
+    topic_metadata.get(topic)
+  {
+    let css_class = match kind {
+      core::NamedTopicKind::Contract(_) => "contract",
+      core::NamedTopicKind::Struct => "struct",
+      core::NamedTopicKind::Enum => "enum",
+      core::NamedTopicKind::EnumMember => "enum-value",
+      core::NamedTopicKind::Error => "error",
+      core::NamedTopicKind::Event => "event",
+      core::NamedTopicKind::StateVariable(
+        core::VariableMutability::Constant,
+      ) => "constant",
+      core::NamedTopicKind::StateVariable(
+        core::VariableMutability::Immutable,
+      ) => "immutable-state-variable",
+      core::NamedTopicKind::StateVariable(
+        core::VariableMutability::Mutable,
+      ) => "state-variable",
+      core::NamedTopicKind::LocalVariable => "identifier",
+      core::NamedTopicKind::Function(_) => "function",
+      core::NamedTopicKind::Modifier => "modifier",
+    };
+    return format_topic_token(name, css_class, topic);
+  }
+
+  // Fallback to AST inspection for edge cases (e.g., out-of-scope references)
   match nodes_map.get(&topic) {
     Some(Node::Solidity(ASTNode::ContractDefinition { name, .. })) => {
       format_topic_token(name, "contract", topic)

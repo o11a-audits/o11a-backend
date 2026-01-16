@@ -1,7 +1,7 @@
 use crate::core;
 use crate::core::topic;
 use crate::core::{
-  AST, DataContext, FunctionModProperties, Node, Scope, TopicKind,
+  AST, DataContext, FunctionModProperties, NamedTopicKind, Node, Scope,
   TopicMetadata, VariableProperties,
 };
 use crate::solidity::parser::{
@@ -80,7 +80,7 @@ pub fn analyze(
 #[derive(Debug, Clone)]
 pub enum FirstPassDeclaration {
   FunctionMod {
-    declaration_kind: TopicKind,
+    declaration_kind: NamedTopicKind,
     name: String,
     scope: Scope,
     referenced_nodes: Vec<i32>,
@@ -90,7 +90,7 @@ pub enum FirstPassDeclaration {
   },
   Contract {
     is_publicly_in_scope: bool,
-    declaration_kind: TopicKind,
+    declaration_kind: NamedTopicKind,
     name: String,
     scope: Scope,
     base_contracts: Vec<i32>,
@@ -98,7 +98,7 @@ pub enum FirstPassDeclaration {
     public_members: Vec<i32>,
   },
   Flat {
-    declaration_kind: TopicKind,
+    declaration_kind: NamedTopicKind,
     name: String,
     scope: Scope,
   },
@@ -119,7 +119,7 @@ pub enum ReferenceProcessingMethod {
 pub enum InScopeDeclaration {
   // Functions and Modifiers
   FunctionMod {
-    declaration_kind: TopicKind,
+    declaration_kind: NamedTopicKind,
     name: String,
     scope: Scope,
     references: Vec<i32>,
@@ -128,7 +128,7 @@ pub enum InScopeDeclaration {
     variable_mutations: Vec<ReferencedNode>,
   },
   Contract {
-    declaration_kind: TopicKind,
+    declaration_kind: NamedTopicKind,
     name: String,
     scope: Scope,
     references: Vec<i32>,
@@ -138,7 +138,7 @@ pub enum InScopeDeclaration {
   },
   // All other declarations
   Flat {
-    declaration_kind: TopicKind,
+    declaration_kind: NamedTopicKind,
     name: String,
     scope: Scope,
     references: Vec<i32>,
@@ -158,7 +158,7 @@ impl InScopeDeclaration {
     }
   }
 
-  pub fn declaration_kind(&self) -> &TopicKind {
+  pub fn declaration_kind(&self) -> &NamedTopicKind {
     match self {
       InScopeDeclaration::FunctionMod {
         declaration_kind, ..
@@ -238,7 +238,7 @@ fn process_first_pass_ast_nodes(
         nodes: contract_nodes,
         ..
       } => {
-        let declaration_kind = TopicKind::Contract(*contract_kind);
+        let declaration_kind = NamedTopicKind::Contract(*contract_kind);
 
         let base_contract_ids: Vec<i32> = base_contracts
           .iter()
@@ -407,7 +407,7 @@ fn process_first_pass_ast_nodes(
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::FunctionMod {
-            declaration_kind: TopicKind::Function(*kind),
+            declaration_kind: NamedTopicKind::Function(*kind),
             name: name.clone(),
             scope: current_scope.clone(),
             referenced_nodes,
@@ -445,7 +445,7 @@ fn process_first_pass_ast_nodes(
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::FunctionMod {
-            declaration_kind: TopicKind::Modifier,
+            declaration_kind: NamedTopicKind::Modifier,
             name: name.clone(),
             scope: current_scope.clone(),
             referenced_nodes,
@@ -473,13 +473,9 @@ fn process_first_pass_ast_nodes(
         ..
       } => {
         let declaration_kind = if *state_variable {
-          if matches!(mutability, parser::VariableMutability::Constant) {
-            TopicKind::Constant
-          } else {
-            TopicKind::StateVariable
-          }
+          NamedTopicKind::StateVariable(mutability.clone())
         } else {
-          TopicKind::LocalVariable
+          NamedTopicKind::LocalVariable
         };
 
         first_pass_declarations.insert(
@@ -496,7 +492,7 @@ fn process_first_pass_ast_nodes(
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::Flat {
-            declaration_kind: TopicKind::Event,
+            declaration_kind: NamedTopicKind::Event,
             name: name.clone(),
             scope: current_scope.clone(),
           },
@@ -507,7 +503,7 @@ fn process_first_pass_ast_nodes(
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::Flat {
-            declaration_kind: TopicKind::Error,
+            declaration_kind: NamedTopicKind::Error,
             name: name.clone(),
             scope: current_scope.clone(),
           },
@@ -518,7 +514,7 @@ fn process_first_pass_ast_nodes(
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::Flat {
-            declaration_kind: TopicKind::Struct,
+            declaration_kind: NamedTopicKind::Struct,
             name: name.clone(),
             scope: current_scope.clone(),
           },
@@ -538,7 +534,7 @@ fn process_first_pass_ast_nodes(
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::Flat {
-            declaration_kind: TopicKind::Enum,
+            declaration_kind: NamedTopicKind::Enum,
             name: name.clone(),
             scope: current_scope.clone(),
           },
@@ -558,7 +554,7 @@ fn process_first_pass_ast_nodes(
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::Flat {
-            declaration_kind: TopicKind::EnumMember,
+            declaration_kind: NamedTopicKind::EnumMember,
             name: name.clone(),
             scope: current_scope.clone(),
           },
@@ -918,7 +914,7 @@ fn collect_references_and_statements(
 
 impl FirstPassDeclaration {
   /// Get the declaration kind for any declaration variant
-  pub fn declaration_kind(&self) -> &TopicKind {
+  pub fn declaration_kind(&self) -> &NamedTopicKind {
     match self {
       FirstPassDeclaration::FunctionMod {
         declaration_kind, ..
@@ -1026,7 +1022,9 @@ fn process_tree_shake_declarations(
           if let Some(called_decl) = first_pass_declarations.get(&call_id) {
             !matches!(
               called_decl.declaration_kind(),
-              TopicKind::Event | TopicKind::Error | TopicKind::Modifier
+              NamedTopicKind::Event
+                | NamedTopicKind::Error
+                | NamedTopicKind::Modifier
             )
           } else {
             // Keep calls to declarations not in our map (external references)

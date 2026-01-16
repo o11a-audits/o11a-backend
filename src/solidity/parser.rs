@@ -1,6 +1,8 @@
 use crate::core;
 use crate::core::topic;
-use crate::core::{ContractKind, FunctionKind, ProjectPath};
+use crate::core::{
+  ContractKind, FunctionKind, ProjectPath, VariableMutability,
+};
 use serde_json;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -260,13 +262,6 @@ pub enum VariableVisibility {
   Public,
   Private,
   Internal,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum VariableMutability {
-  Mutable,
-  Immutable,
-  Constant,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
