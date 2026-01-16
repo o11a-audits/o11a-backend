@@ -384,6 +384,10 @@ fn topic_metadata_to_response(
       crate::core::NamedTopicKind::Function(function_kind) => {
         ("Function".to_string(), Some(format!("{:?}", function_kind)))
       }
+      crate::core::NamedTopicKind::StateVariable(mutability) => (
+        "StateVariable".to_string(),
+        Some(format!("{:?}", mutability)),
+      ),
       kind => (format!("{:?}", kind), None),
     },
     crate::core::TopicMetadata::UnnamedTopic { kind, .. } => {
