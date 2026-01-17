@@ -25,6 +25,10 @@ pub fn create_router(state: AppState) -> Router {
       "/api/v1/audits/:audit_id/boundaries",
       get(handlers::get_boundaries),
     )
+    .route(
+      "/api/v1/audits/:audit_id/in_scope_files",
+      get(handlers::get_in_scope_files),
+    )
     // Chat endpoints (global for now)
     .route("/api/v1/chats", get(handlers::get_chats))
     .route("/api/v1/chats", post(handlers::create_chat))

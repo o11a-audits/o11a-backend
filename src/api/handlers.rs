@@ -118,6 +118,34 @@ pub async fn get_boundaries(
   Ok(Json(BoundariesResponse { boundaries: vec![] }))
 }
 
+#[derive(Debug, Serialize)]
+pub struct InScopeFilesResponse {
+  pub in_scope_files: Vec<String>,
+}
+
+// Get in scope files for a specific audit
+pub async fn get_in_scope_files(
+  State(state): State<AppState>,
+  Path(audit_id): Path<String>,
+) -> Result<Json<InScopeFilesResponse>, StatusCode> {
+  println!("GET /api/v1/audits/{}/in_scope_files", audit_id);
+
+  let ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in get_in_scope_files: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+
+  let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+
+  let in_scope_files: Vec<String> = audit_data
+    .in_scope_files
+    .iter()
+    .map(|p| p.file_path.clone())
+    .collect();
+
+  Ok(Json(InScopeFilesResponse { in_scope_files }))
+}
+
 // Audit management handlers
 
 #[derive(Debug, Serialize)]
@@ -324,6 +352,7 @@ pub struct TopicMetadataResponse {
   #[serde(skip_serializing_if = "Option::is_none")]
   pub sub_kind: Option<String>,
   pub scope: ScopeInfo,
+  pub references: Vec<String>,
 }
 
 // Helper function to convert TopicMetadata to TopicMetadataResponse
@@ -401,12 +430,17 @@ fn topic_metadata_to_response(
     crate::core::TopicMetadata::UnnamedTopic { .. } => None,
   };
 
+  // Extract references (only NamedTopics have references)
+  let references: Vec<String> =
+    metadata.references().iter().map(|t| t.id.clone()).collect();
+
   TopicMetadataResponse {
     topic_id: topic.id.clone(),
     name,
     kind: kind_str,
     sub_kind,
     scope: scope_info,
+    references,
   }
 }
 
