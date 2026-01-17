@@ -712,20 +712,32 @@ fn do_node_to_source_text(
       }
     }
 
-    ASTNode::SemanticBlock { statements, .. } => statements
-      .iter()
-      .map(|s| {
-        do_node_to_source_text(
-          s,
-          indent_level,
-          nodes_map,
-          topic_metadata,
-          function_mod_properties,
-          variable_properties,
-        )
-      })
-      .collect::<Vec<_>>()
-      .join("\n"),
+    ASTNode::SemanticBlock {
+      node_id,
+      statements,
+      ..
+    } => {
+      let statements = statements
+        .iter()
+        .map(|s| {
+          do_node_to_source_text(
+            s,
+            indent_level,
+            nodes_map,
+            topic_metadata,
+            function_mod_properties,
+            variable_properties,
+          )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+      format_semantic_block(
+        &statements,
+        "semantic-block",
+        &topic::new_node_topic(node_id),
+      )
+    }
 
     ASTNode::Break { .. } => format_keyword("break"),
 
@@ -2017,6 +2029,19 @@ fn format_brace(brace: &str, indent_level: usize) -> String {
   format!(
     "<span class=\"brace indent-level-{}\">{}</span>",
     indent_level, brace
+  )
+}
+
+fn format_semantic_block(
+  token: &str,
+  class: &str,
+  topic: &topic::Topic,
+) -> String {
+  format!(
+    "<div class=\"{}\" data-topic=\"{}\" tabindex=\"0\">{}</div>",
+    class,
+    topic.id(),
+    token
   )
 }
 
