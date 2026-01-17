@@ -211,17 +211,15 @@ fn process_documentation_node(
         .nodes
         .insert(topic.clone(), Node::Documentation(node.clone()));
 
-      // If there's a referenced declaration, create a reference
+      // If there's a referenced declaration, add this as a reference to the NamedTopic
       if let Some(solidity_topic) = referenced_declaration {
-        // Create a reference from the solidity declaration to this inline code
-        let references = audit_data
-          .references
-          .entry(solidity_topic.clone())
-          .or_insert_with(Vec::new);
-
-        // Add this inline code as a reference to the declaration
-        if !references.contains(&topic) {
-          references.push(topic.clone());
+        // Get the existing topic metadata and add this reference
+        if let Some(TopicMetadata::NamedTopic { references, .. }) =
+          audit_data.topic_metadata.get_mut(solidity_topic)
+        {
+          if !references.contains(&topic) {
+            references.push(topic.clone());
+          }
         }
       }
     }

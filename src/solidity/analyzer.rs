@@ -37,7 +37,6 @@ pub fn analyze(
     &in_scope_source_topics,
     &mut audit_data.nodes,
     &mut audit_data.topic_metadata,
-    &mut audit_data.references,
     &mut audit_data.function_properties,
     &mut audit_data.variable_properties,
     &mut audit_data.source_content,
@@ -586,7 +585,6 @@ fn second_pass(
   in_scope_source_topics: &BTreeMap<i32, InScopeDeclaration>,
   nodes: &mut BTreeMap<topic::Topic, Node>,
   topic_metadata: &mut BTreeMap<topic::Topic, TopicMetadata>,
-  references: &mut BTreeMap<topic::Topic, Vec<topic::Topic>>,
   function_properties: &mut BTreeMap<topic::Topic, FunctionModProperties>,
   variable_properties: &mut BTreeMap<topic::Topic, VariableProperties>,
   source_content: &mut BTreeMap<core::ProjectPath, String>,
@@ -600,7 +598,6 @@ fn second_pass(
         in_scope_source_topics,
         nodes,
         topic_metadata,
-        references,
         function_properties,
         variable_properties,
       )?;
@@ -622,7 +619,6 @@ fn process_second_pass_nodes(
   in_scope_source_topics: &BTreeMap<i32, InScopeDeclaration>,
   nodes: &mut BTreeMap<topic::Topic, Node>,
   topic_metadata: &mut BTreeMap<topic::Topic, TopicMetadata>,
-  references: &mut BTreeMap<topic::Topic, Vec<topic::Topic>>,
   function_properties: &mut BTreeMap<topic::Topic, FunctionModProperties>,
   variable_properties: &mut BTreeMap<topic::Topic, VariableProperties>,
 ) -> Result<bool, String> {
@@ -649,7 +645,14 @@ fn process_second_pass_nodes(
     // Process declarations only if they exist in in_scope_declarations
     if let Some(in_scope_topic_metadata) = in_scope_topic_metadata {
       // TODO! "statements that are not referenceable could be added to the dict here in the second pass once we know they are in scope"
-      // Add declaration
+      // Build references to this declaration
+      let ref_topics: Vec<topic::Topic> = in_scope_topic_metadata
+        .references()
+        .iter()
+        .map(|&id| topic::new_node_topic(&id))
+        .collect();
+
+      // Add declaration with references
       topic_metadata.insert(
         topic.clone(),
         TopicMetadata::NamedTopic {
@@ -657,16 +660,9 @@ fn process_second_pass_nodes(
           kind: in_scope_topic_metadata.declaration_kind().clone(),
           name: in_scope_topic_metadata.name().clone(),
           scope: in_scope_topic_metadata.scope().clone(),
+          references: ref_topics,
         },
       );
-
-      // Store references to this declaration
-      let ref_topics: Vec<topic::Topic> = in_scope_topic_metadata
-        .references()
-        .iter()
-        .map(|&id| topic::new_node_topic(&id))
-        .collect();
-      references.insert(topic.clone(), ref_topics);
 
       match in_scope_topic_metadata {
         InScopeDeclaration::FunctionMod {
@@ -761,7 +757,6 @@ fn process_second_pass_nodes(
         in_scope_source_topics,
         nodes,
         topic_metadata,
-        references,
         function_properties,
         variable_properties,
       )?;

@@ -36,8 +36,6 @@ pub struct AuditData {
   pub nodes: BTreeMap<topic::Topic, Node>,
   // Contains the declaration for a given topic
   pub topic_metadata: BTreeMap<topic::Topic, TopicMetadata>,
-  // Contains the references for a given topic
-  pub references: BTreeMap<topic::Topic, Vec<topic::Topic>>,
   // Contains the function properties for a given topic
   pub function_properties: BTreeMap<topic::Topic, FunctionModProperties>,
   // Contains the variable properties for a given topic
@@ -155,6 +153,7 @@ pub enum TopicMetadata {
     scope: Scope,
     kind: NamedTopicKind,
     name: String,
+    references: Vec<topic::Topic>,
   },
   UnnamedTopic {
     topic: topic::Topic,
@@ -182,6 +181,13 @@ impl TopicMetadata {
     match self {
       TopicMetadata::NamedTopic { topic, .. } => topic,
       TopicMetadata::UnnamedTopic { topic, .. } => topic,
+    }
+  }
+
+  pub fn references(&self) -> &[topic::Topic] {
+    match self {
+      TopicMetadata::NamedTopic { references, .. } => references,
+      TopicMetadata::UnnamedTopic { .. } => &[],
     }
   }
 
@@ -414,7 +420,6 @@ pub fn new_audit_data(
     asts: BTreeMap::new(),
     nodes: BTreeMap::new(),
     topic_metadata: BTreeMap::new(),
-    references: BTreeMap::new(),
     function_properties: BTreeMap::new(),
     variable_properties: BTreeMap::new(),
   }
