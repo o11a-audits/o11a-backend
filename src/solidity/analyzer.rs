@@ -1,5 +1,5 @@
-use crate::core;
 use crate::core::topic;
+use crate::core::{self, UnnamedTopicKind};
 use crate::core::{
   AST, DataContext, FunctionModProperties, NamedTopicKind, Node, Scope,
   TopicMetadata, VariableProperties,
@@ -81,7 +81,6 @@ pub enum FirstPassDeclaration {
   FunctionMod {
     declaration_kind: NamedTopicKind,
     name: String,
-    scope: Scope,
     referenced_nodes: Vec<i32>,
     require_revert_statements: Vec<i32>,
     function_calls: Vec<i32>,
@@ -91,7 +90,6 @@ pub enum FirstPassDeclaration {
     is_publicly_in_scope: bool,
     declaration_kind: NamedTopicKind,
     name: String,
-    scope: Scope,
     base_contracts: Vec<i32>,
     other_contracts: Vec<i32>,
     public_members: Vec<i32>,
@@ -99,7 +97,6 @@ pub enum FirstPassDeclaration {
   Flat {
     declaration_kind: NamedTopicKind,
     name: String,
-    scope: Scope,
   },
 }
 
@@ -120,7 +117,6 @@ pub enum InScopeDeclaration {
   FunctionMod {
     declaration_kind: NamedTopicKind,
     name: String,
-    scope: Scope,
     references: Vec<i32>,
     require_revert_statements: Vec<i32>,
     function_calls: Vec<i32>,
@@ -129,7 +125,6 @@ pub enum InScopeDeclaration {
   Contract {
     declaration_kind: NamedTopicKind,
     name: String,
-    scope: Scope,
     references: Vec<i32>,
     base_contracts: Vec<i32>,
     other_contracts: Vec<i32>,
@@ -139,7 +134,6 @@ pub enum InScopeDeclaration {
   Flat {
     declaration_kind: NamedTopicKind,
     name: String,
-    scope: Scope,
     references: Vec<i32>,
   },
 }
@@ -179,14 +173,6 @@ impl InScopeDeclaration {
     }
   }
 
-  pub fn scope(&self) -> &Scope {
-    match self {
-      InScopeDeclaration::FunctionMod { scope, .. }
-      | InScopeDeclaration::Contract { scope, .. }
-      | InScopeDeclaration::Flat { scope, .. } => scope,
-    }
-  }
-
   /// Get the references for any declaration variant
   pub fn references(&self) -> &[i32] {
     match self {
@@ -210,9 +196,6 @@ fn first_pass(
       process_first_pass_ast_nodes(
         &ast.nodes.iter().collect(),
         is_file_in_scope,
-        &core::Scope::Container {
-          container: path.clone(),
-        },
         &mut first_pass_declarations,
       )?;
     }
@@ -224,7 +207,6 @@ fn first_pass(
 fn process_first_pass_ast_nodes(
   nodes: &Vec<&ASTNode>,
   is_file_in_scope: bool,
-  current_scope: &core::Scope,
   first_pass_declarations: &mut BTreeMap<i32, FirstPassDeclaration>,
 ) -> Result<(), String> {
   for node in nodes {
@@ -366,7 +348,6 @@ fn process_first_pass_ast_nodes(
           FirstPassDeclaration::Contract {
             is_publicly_in_scope: is_file_in_scope, // All contracts are publicly visible
             name: name.clone(),
-            scope: current_scope.clone(),
             declaration_kind,
             base_contracts: base_contract_ids,
             other_contracts: using_for_contracts,
@@ -378,7 +359,6 @@ fn process_first_pass_ast_nodes(
         process_first_pass_ast_nodes(
           &child_nodes,
           is_file_in_scope,
-          &core::add_to_scope(current_scope, topic::new_node_topic(node_id)),
           first_pass_declarations,
         )?;
       }
@@ -408,7 +388,6 @@ fn process_first_pass_ast_nodes(
           FirstPassDeclaration::FunctionMod {
             declaration_kind: NamedTopicKind::Function(*kind),
             name: name.clone(),
-            scope: current_scope.clone(),
             referenced_nodes,
             require_revert_statements,
             function_calls,
@@ -421,7 +400,6 @@ fn process_first_pass_ast_nodes(
         process_first_pass_ast_nodes(
           &child_nodes,
           is_file_in_scope,
-          &core::add_to_scope(current_scope, topic::new_node_topic(node_id)),
           first_pass_declarations,
         )?;
       }
@@ -446,7 +424,6 @@ fn process_first_pass_ast_nodes(
           FirstPassDeclaration::FunctionMod {
             declaration_kind: NamedTopicKind::Modifier,
             name: name.clone(),
-            scope: current_scope.clone(),
             referenced_nodes,
             require_revert_statements,
             function_calls,
@@ -459,7 +436,6 @@ fn process_first_pass_ast_nodes(
         process_first_pass_ast_nodes(
           &child_nodes,
           is_file_in_scope,
-          &core::add_to_scope(current_scope, topic::new_node_topic(node_id)),
           first_pass_declarations,
         )?;
       }
@@ -482,7 +458,6 @@ fn process_first_pass_ast_nodes(
           FirstPassDeclaration::Flat {
             declaration_kind,
             name: name.clone(),
-            scope: current_scope.clone(),
           },
         );
       }
@@ -493,7 +468,6 @@ fn process_first_pass_ast_nodes(
           FirstPassDeclaration::Flat {
             declaration_kind: NamedTopicKind::Event,
             name: name.clone(),
-            scope: current_scope.clone(),
           },
         );
       }
@@ -504,7 +478,6 @@ fn process_first_pass_ast_nodes(
           FirstPassDeclaration::Flat {
             declaration_kind: NamedTopicKind::Error,
             name: name.clone(),
-            scope: current_scope.clone(),
           },
         );
       }
@@ -515,7 +488,6 @@ fn process_first_pass_ast_nodes(
           FirstPassDeclaration::Flat {
             declaration_kind: NamedTopicKind::Struct,
             name: name.clone(),
-            scope: current_scope.clone(),
           },
         );
 
@@ -524,7 +496,6 @@ fn process_first_pass_ast_nodes(
         process_first_pass_ast_nodes(
           &member_nodes,
           is_file_in_scope,
-          &core::add_to_scope(&current_scope, topic::new_node_topic(node_id)),
           first_pass_declarations,
         )?;
       }
@@ -535,7 +506,6 @@ fn process_first_pass_ast_nodes(
           FirstPassDeclaration::Flat {
             declaration_kind: NamedTopicKind::Enum,
             name: name.clone(),
-            scope: current_scope.clone(),
           },
         );
 
@@ -544,7 +514,6 @@ fn process_first_pass_ast_nodes(
         process_first_pass_ast_nodes(
           &member_nodes,
           is_file_in_scope,
-          &core::add_to_scope(&current_scope, topic::new_node_topic(node_id)),
           first_pass_declarations,
         )?;
       }
@@ -555,7 +524,6 @@ fn process_first_pass_ast_nodes(
           FirstPassDeclaration::Flat {
             declaration_kind: NamedTopicKind::EnumMember,
             name: name.clone(),
-            scope: current_scope.clone(),
           },
         );
       }
@@ -566,7 +534,6 @@ fn process_first_pass_ast_nodes(
         process_first_pass_ast_nodes(
           &child_nodes,
           is_file_in_scope,
-          current_scope,
           first_pass_declarations,
         )?;
       }
@@ -597,6 +564,9 @@ fn second_pass(
         false, // Parent is not in scope automatically - check each node
         in_scope_source_topics,
         nodes,
+        &core::Scope::Container {
+          container: file_path.clone(),
+        },
         topic_metadata,
         function_properties,
         variable_properties,
@@ -618,6 +588,7 @@ fn process_second_pass_nodes(
   parent_in_scope: bool,
   in_scope_source_topics: &BTreeMap<i32, InScopeDeclaration>,
   nodes: &mut BTreeMap<topic::Topic, Node>,
+  scope: &Scope,
   topic_metadata: &mut BTreeMap<topic::Topic, TopicMetadata>,
   function_properties: &mut BTreeMap<topic::Topic, FunctionModProperties>,
   variable_properties: &mut BTreeMap<topic::Topic, VariableProperties>,
@@ -656,10 +627,10 @@ fn process_second_pass_nodes(
       topic_metadata.insert(
         topic.clone(),
         TopicMetadata::NamedTopic {
-          topic: topic::new_node_topic(&node_id),
+          topic: topic.clone(),
           kind: in_scope_topic_metadata.declaration_kind().clone(),
           name: in_scope_topic_metadata.name().clone(),
-          scope: in_scope_topic_metadata.scope().clone(),
+          scope: scope.clone(),
           references: ref_topics,
         },
       );
@@ -746,16 +717,89 @@ fn process_second_pass_nodes(
 
         _ => (),
       }
+    } else {
+      let kind = match node {
+        ASTNode::Assignment { .. } => UnnamedTopicKind::VariableMutation,
+        ASTNode::BinaryOperation { operator, .. } => match operator {
+          parser::BinaryOperator::Add => UnnamedTopicKind::Arithmetic,
+          parser::BinaryOperator::Subtract => UnnamedTopicKind::Arithmetic,
+          parser::BinaryOperator::Multiply => UnnamedTopicKind::Arithmetic,
+          parser::BinaryOperator::Divide => UnnamedTopicKind::Arithmetic,
+          parser::BinaryOperator::Modulo => UnnamedTopicKind::Arithmetic,
+          parser::BinaryOperator::Power => UnnamedTopicKind::Arithmetic,
+          parser::BinaryOperator::Equal => UnnamedTopicKind::Comparison,
+          parser::BinaryOperator::NotEqual => UnnamedTopicKind::Comparison,
+          parser::BinaryOperator::LessThan => UnnamedTopicKind::Comparison,
+          parser::BinaryOperator::LessThanOrEqual => {
+            UnnamedTopicKind::Comparison
+          }
+          parser::BinaryOperator::GreaterThan => UnnamedTopicKind::Comparison,
+          parser::BinaryOperator::GreaterThanOrEqual => {
+            UnnamedTopicKind::Comparison
+          }
+          parser::BinaryOperator::And => UnnamedTopicKind::Logical,
+          parser::BinaryOperator::Or => UnnamedTopicKind::Logical,
+          parser::BinaryOperator::BitwiseAnd => UnnamedTopicKind::Bitwise,
+          parser::BinaryOperator::BitwiseOr => UnnamedTopicKind::Bitwise,
+          parser::BinaryOperator::BitwiseXor => UnnamedTopicKind::Bitwise,
+          parser::BinaryOperator::LeftShift => UnnamedTopicKind::Bitwise,
+          parser::BinaryOperator::RightShift => UnnamedTopicKind::Bitwise,
+        },
+        ASTNode::Conditional { .. } => UnnamedTopicKind::Conditional,
+        ASTNode::FunctionCall { .. } => UnnamedTopicKind::FunctionCall,
+        ASTNode::TypeConversion { .. } => UnnamedTopicKind::TypeConversion,
+        ASTNode::StructConstructor { .. } => {
+          UnnamedTopicKind::StructConstruction
+        }
+        ASTNode::NewExpression { .. } => UnnamedTopicKind::NewExpression,
+        ASTNode::SemanticBlock { .. } => UnnamedTopicKind::SemanticBlock,
+        ASTNode::Break { .. } => UnnamedTopicKind::Break,
+        ASTNode::Continue { .. } => UnnamedTopicKind::Continue,
+        ASTNode::DoWhileStatement { .. } => UnnamedTopicKind::DoWhile,
+        ASTNode::EmitStatement { .. } => UnnamedTopicKind::Emit,
+        ASTNode::ForStatement { .. } => UnnamedTopicKind::For,
+        ASTNode::IfStatement { .. } => UnnamedTopicKind::If,
+        ASTNode::InlineAssembly { .. } => UnnamedTopicKind::InlineAssembly,
+        ASTNode::PlaceholderStatement { .. } => UnnamedTopicKind::Placeholder,
+        ASTNode::Return { .. } => UnnamedTopicKind::Return,
+        ASTNode::RevertStatement { .. } => UnnamedTopicKind::Revert,
+        ASTNode::TryStatement { .. } => UnnamedTopicKind::Try,
+        ASTNode::UncheckedBlock { .. } => UnnamedTopicKind::UncheckedBlock,
+        ASTNode::WhileStatement { .. } => UnnamedTopicKind::While,
+        _ => UnnamedTopicKind::Other,
+      };
+
+      topic_metadata.insert(
+        topic.clone(),
+        TopicMetadata::UnnamedTopic {
+          topic,
+          scope: scope.clone(),
+          kind,
+        },
+      );
     }
 
     // Process children with appropriate context
     let child_nodes = node.nodes();
     if !child_nodes.is_empty() {
+      let scope = match node {
+        ASTNode::SemanticBlock { node_id, .. }
+        | ASTNode::ContractDefinition { node_id, .. }
+        | ASTNode::FunctionDefinition { node_id, .. }
+        | ASTNode::ModifierDefinition { node_id, .. }
+        | ASTNode::StructDefinition { node_id, .. }
+        | ASTNode::EnumDefinition { node_id, .. } => {
+          &core::add_to_scope(&scope, topic::new_node_topic(node_id))
+        }
+        _ => scope,
+      };
+
       let child_found_in_scope = process_second_pass_nodes(
         &child_nodes,
         is_in_scope, // Children inherit parent's in-scope status
         in_scope_source_topics,
         nodes,
+        scope,
         topic_metadata,
         function_properties,
         variable_properties,
@@ -1004,7 +1048,6 @@ fn process_tree_shake_declarations(
     FirstPassDeclaration::FunctionMod {
       declaration_kind,
       name,
-      scope,
       require_revert_statements,
       function_calls,
       variable_mutations,
@@ -1032,7 +1075,6 @@ fn process_tree_shake_declarations(
       InScopeDeclaration::FunctionMod {
         declaration_kind: declaration_kind.clone(),
         name: name.clone(),
-        scope: scope.clone(),
         references: references,
         require_revert_statements: require_revert_statements.clone(),
         function_calls: filtered_function_calls,
@@ -1042,18 +1084,15 @@ fn process_tree_shake_declarations(
     FirstPassDeclaration::Flat {
       declaration_kind,
       name,
-      scope,
       ..
     } => InScopeDeclaration::Flat {
       declaration_kind: declaration_kind.clone(),
       name: name.clone(),
-      scope: scope.clone(),
       references,
     },
     FirstPassDeclaration::Contract {
       declaration_kind,
       name,
-      scope,
       base_contracts,
       other_contracts,
       public_members,
@@ -1061,7 +1100,6 @@ fn process_tree_shake_declarations(
     } => InScopeDeclaration::Contract {
       declaration_kind: declaration_kind.clone(),
       name: name.clone(),
-      scope: scope.clone(),
       references,
       base_contracts: base_contracts.clone(),
       other_contracts: other_contracts.clone(),

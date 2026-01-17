@@ -340,7 +340,7 @@ pub struct ScopeInfo {
   #[serde(skip_serializing_if = "Option::is_none")]
   pub member: Option<String>,
   #[serde(skip_serializing_if = "Option::is_none")]
-  pub statement: Option<String>,
+  pub semantic_block: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -367,7 +367,7 @@ fn topic_metadata_to_response(
       container: Some(container.file_path.clone()),
       component: None,
       member: None,
-      statement: None,
+      semantic_block: None,
     },
     crate::core::Scope::Component {
       container,
@@ -377,7 +377,7 @@ fn topic_metadata_to_response(
       container: Some(container.file_path.clone()),
       component: Some(component.id.clone()),
       member: None,
-      statement: None,
+      semantic_block: None,
     },
     crate::core::Scope::Member {
       container,
@@ -388,19 +388,19 @@ fn topic_metadata_to_response(
       container: Some(container.file_path.clone()),
       component: Some(component.id.clone()),
       member: Some(member.id.clone()),
-      statement: None,
+      semantic_block: None,
     },
-    crate::core::Scope::Statement {
+    crate::core::Scope::SemanticBlock {
       container,
       component,
       member,
-      statement,
+      semantic_block,
     } => ScopeInfo {
       scope_type: "Statement".to_string(),
       container: Some(container.file_path.clone()),
       component: Some(component.id.clone()),
       member: Some(member.id.clone()),
-      statement: Some(statement.id.clone()),
+      semantic_block: Some(semantic_block.id.clone()),
     },
   };
 

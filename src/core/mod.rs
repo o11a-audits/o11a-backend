@@ -72,11 +72,11 @@ pub enum Scope {
     component: topic::Topic,
     member: topic::Topic,
   },
-  Statement {
+  SemanticBlock {
     container: ProjectPath,
     component: topic::Topic,
     member: topic::Topic,
-    statement: topic::Topic,
+    semantic_block: topic::Topic,
   },
 }
 
@@ -98,22 +98,22 @@ pub fn add_to_scope(scope: &Scope, topic: topic::Topic) -> Scope {
       container,
       component,
       member,
-    } => Scope::Statement {
+    } => Scope::SemanticBlock {
       container: container.clone(),
       component: component.clone(),
       member: member.clone(),
-      statement: topic,
+      semantic_block: topic,
     },
-    Scope::Statement {
+    Scope::SemanticBlock {
       container,
       component,
       member,
       ..
-    } => Scope::Statement {
+    } => Scope::SemanticBlock {
       container: container.clone(),
       component: component.clone(),
       member: member.clone(),
-      statement: topic,
+      semantic_block: topic,
     },
   }
 }
@@ -141,9 +141,33 @@ pub enum NamedTopicKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UnnamedTopicKind {
-  OperatorInvocation,
+  VariableMutation,
+  Arithmetic,
+  Comparison,
+  Logical,
+  Bitwise,
+  Conditional,
+  FunctionCall,
+  TypeConversion,
+  StructConstruction,
+  NewExpression,
+  SemanticBlock,
+  Break,
+  Continue,
+  DoWhile,
+  Emit,
+  For,
+  If,
+  InlineAssembly,
+  Placeholder,
+  Return,
+  Revert,
+  Try,
+  UncheckedBlock,
+  While,
   DocumentationSection,
   DocumentationParagraph,
+  Other,
 }
 
 #[derive(Debug, Clone)]
@@ -220,10 +244,10 @@ impl TopicMetadata {
           .unwrap_or_else(|| member.id());
         format!("{}::{}::{}", component_name, member_name, self.name())
       }
-      Scope::Statement {
+      Scope::SemanticBlock {
         component,
         member,
-        statement,
+        semantic_block: statement,
         ..
       } => {
         let component_name = audit_data
