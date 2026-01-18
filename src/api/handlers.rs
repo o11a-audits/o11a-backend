@@ -396,7 +396,7 @@ fn topic_metadata_to_response(
       member,
       semantic_block,
     } => ScopeInfo {
-      scope_type: "Statement".to_string(),
+      scope_type: "SemanticBlock".to_string(),
       container: Some(container.file_path.clone()),
       component: Some(component.id.clone()),
       member: Some(member.id.clone()),

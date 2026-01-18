@@ -81,7 +81,7 @@ pub enum FirstPassDeclaration {
   FunctionMod {
     declaration_kind: NamedTopicKind,
     name: String,
-    referenced_nodes: Vec<i32>,
+    referenced_nodes: Vec<ReferencedNode>,
     require_revert_statements: Vec<i32>,
     function_calls: Vec<i32>,
     variable_mutations: Vec<ReferencedNode>,
@@ -176,9 +176,9 @@ impl InScopeDeclaration {
   /// Get the references for any declaration variant
   pub fn references(&self) -> &[i32] {
     match self {
-      InScopeDeclaration::FunctionMod { references, .. } => references,
-      InScopeDeclaration::Contract { references, .. } => references,
-      InScopeDeclaration::Flat { references, .. } => references,
+      InScopeDeclaration::FunctionMod { references, .. }
+      | InScopeDeclaration::Contract { references, .. }
+      | InScopeDeclaration::Flat { references, .. } => references,
     }
   }
 }
@@ -377,6 +377,7 @@ fn process_first_pass_ast_nodes(
         // Process entire function node to find references and require/revert statements
         collect_references_and_statements(
           node,
+          None, // No semantic block context initially
           &mut referenced_nodes,
           &mut require_revert_statements,
           &mut function_calls,
@@ -413,6 +414,7 @@ fn process_first_pass_ast_nodes(
         // Process entire modifier node to find references and require/revert statements
         collect_references_and_statements(
           node,
+          None, // No semantic block context initially
           &mut referenced_nodes,
           &mut require_revert_statements,
           &mut function_calls,
@@ -828,17 +830,29 @@ fn extract_parameter_topics(parameter_list: &ASTNode) -> Vec<topic::Topic> {
 
 fn collect_references_and_statements(
   node: &ASTNode,
-  referenced_nodes: &mut Vec<i32>,
+  current_semantic_block: Option<i32>,
+  referenced_nodes: &mut Vec<ReferencedNode>,
   require_revert_statements: &mut Vec<i32>,
   function_calls: &mut Vec<i32>,
   variable_mutations: &mut Vec<ReferencedNode>,
 ) {
+  // Update current_semantic_block when entering a SemanticBlock
+  let semantic_block = match node {
+    ASTNode::SemanticBlock { node_id, .. } => Some(*node_id),
+    _ => current_semantic_block,
+  };
+
   match node {
     ASTNode::Identifier {
       referenced_declaration,
       ..
     } => {
-      referenced_nodes.push(*referenced_declaration);
+      if let Some(block_id) = semantic_block {
+        referenced_nodes.push(ReferencedNode {
+          statement_node: block_id,
+          referenced_node: *referenced_declaration,
+        });
+      }
     }
     ASTNode::FunctionCall {
       expression,
@@ -867,18 +881,6 @@ fn collect_references_and_statements(
           function_calls.push(*referenced_declaration);
         }
       }
-
-      // Continue traversing child nodes
-      let child_nodes = node.nodes();
-      for child in child_nodes {
-        collect_references_and_statements(
-          child,
-          referenced_nodes,
-          require_revert_statements,
-          function_calls,
-          variable_mutations,
-        );
-      }
     }
     ASTNode::RevertStatement { error_call, .. } => {
       // For RevertStatement, extract the error identifier from the error_call
@@ -892,19 +894,7 @@ fn collect_references_and_statements(
         {
           require_revert_statements.push(*referenced_declaration);
         }
-      }
-
-      // Continue traversing child nodes
-      let child_nodes = node.nodes();
-      for child in child_nodes {
-        collect_references_and_statements(
-          child,
-          referenced_nodes,
-          require_revert_statements,
-          function_calls,
-          variable_mutations,
-        );
-      }
+      };
     }
     ASTNode::Assignment {
       node_id,
@@ -921,33 +911,22 @@ fn collect_references_and_statements(
           statement_node: *node_id,
           referenced_node: *referenced_declaration,
         });
-      }
+      };
+    }
+    _ => (),
+  }
 
-      // Continue traversing child nodes
-      let child_nodes = node.nodes();
-      for child in child_nodes {
-        collect_references_and_statements(
-          child,
-          referenced_nodes,
-          require_revert_statements,
-          function_calls,
-          variable_mutations,
-        );
-      }
-    }
-    _ => {
-      // For all other nodes, recursively traverse child nodes
-      let child_nodes = node.nodes();
-      for child in child_nodes {
-        collect_references_and_statements(
-          child,
-          referenced_nodes,
-          require_revert_statements,
-          function_calls,
-          variable_mutations,
-        );
-      }
-    }
+  // Continue traversing child nodes
+  let child_nodes = node.nodes();
+  for child in child_nodes {
+    collect_references_and_statements(
+      child,
+      semantic_block,
+      referenced_nodes,
+      require_revert_statements,
+      function_calls,
+      variable_mutations,
+    );
   }
 }
 
@@ -1039,11 +1018,6 @@ fn process_tree_shake_declarations(
   visiting.insert(node_id);
 
   // Create new in-scope declaration with direct reference
-  let mut references = Vec::new();
-  if let Some(ref_node) = referencing_node {
-    references.push(ref_node);
-  }
-
   let in_scope_decl = match first_pass_decl {
     FirstPassDeclaration::FunctionMod {
       declaration_kind,
@@ -1072,10 +1046,11 @@ fn process_tree_shake_declarations(
         .cloned()
         .collect();
 
+      let references = referencing_node.into_iter().collect();
       InScopeDeclaration::FunctionMod {
         declaration_kind: declaration_kind.clone(),
         name: name.clone(),
-        references: references,
+        references,
         require_revert_statements: require_revert_statements.clone(),
         function_calls: filtered_function_calls,
         variable_mutations: variable_mutations.clone(),
@@ -1085,11 +1060,14 @@ fn process_tree_shake_declarations(
       declaration_kind,
       name,
       ..
-    } => InScopeDeclaration::Flat {
-      declaration_kind: declaration_kind.clone(),
-      name: name.clone(),
-      references,
-    },
+    } => {
+      let references = referencing_node.into_iter().collect();
+      InScopeDeclaration::Flat {
+        declaration_kind: declaration_kind.clone(),
+        name: name.clone(),
+        references,
+      }
+    }
     FirstPassDeclaration::Contract {
       declaration_kind,
       name,
@@ -1097,14 +1075,17 @@ fn process_tree_shake_declarations(
       other_contracts,
       public_members,
       ..
-    } => InScopeDeclaration::Contract {
-      declaration_kind: declaration_kind.clone(),
-      name: name.clone(),
-      references,
-      base_contracts: base_contracts.clone(),
-      other_contracts: other_contracts.clone(),
-      public_members: public_members.clone(),
-    },
+    } => {
+      let references = referencing_node.into_iter().collect();
+      InScopeDeclaration::Contract {
+        declaration_kind: declaration_kind.clone(),
+        name: name.clone(),
+        references,
+        base_contracts: base_contracts.clone(),
+        other_contracts: other_contracts.clone(),
+        public_members: public_members.clone(),
+      }
+    }
   };
 
   in_scope_declarations.insert(node_id, in_scope_decl);
@@ -1115,10 +1096,10 @@ fn process_tree_shake_declarations(
     FirstPassDeclaration::FunctionMod {
       referenced_nodes, ..
     } => {
-      for &referenced_node_id in referenced_nodes {
+      for ref_node in referenced_nodes {
         process_tree_shake_declarations(
-          referenced_node_id,
-          Some(node_id), // This node is the one referencing the next node
+          ref_node.referenced_node,
+          Some(ref_node.statement_node), // Pass the semantic block that contains the reference
           ReferenceProcessingMethod::Normal,
           first_pass_declarations,
           in_scope_declarations,
