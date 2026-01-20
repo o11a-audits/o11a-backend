@@ -3730,7 +3730,7 @@ pub fn node_from_json(
       })
     }
     "VariableDeclarationStatement" => {
-      let declarations = get_required_node_vec_with_context(
+      let mut declarations = get_required_node_vec_with_context(
         val,
         "declarations",
         node_type_str,
@@ -3742,6 +3742,22 @@ pub fn node_from_json(
         node_type_str,
         source_content,
       )?;
+
+      // If there's exactly one declaration and an initial value, move the
+      // initial value into the VariableDeclaration's value field. This allows
+      // the VariableDeclaration to be formatted and analyzed with its initial
+      // value without needing to look up the parent VariableDeclarationStatement.
+      let initial_value = if declarations.len() == 1 && initial_value.is_some()
+      {
+        if let Some(ASTNode::VariableDeclaration { value, .. }) =
+          declarations.first_mut()
+        {
+          *value = initial_value;
+        }
+        None
+      } else {
+        initial_value
+      };
 
       Ok(ASTNode::VariableDeclarationStatement {
         node_id,
