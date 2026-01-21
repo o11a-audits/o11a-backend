@@ -369,6 +369,12 @@ fn process_first_pass_ast_nodes(
             ASTNode::EventDefinition { node_id, .. } => Some(*node_id),
             // Errors (all errors are public)
             ASTNode::ErrorDefinition { node_id, .. } => Some(*node_id),
+            ASTNode::StructDefinition {
+              node_id,
+              visibility,
+              ..
+            } if *visibility == VariableVisibility::Public => Some(*node_id),
+            ASTNode::EnumDefinition { node_id, .. } => Some(*node_id),
             // Public state variables
             ASTNode::VariableDeclaration {
               node_id,
@@ -959,6 +965,19 @@ fn collect_references_and_statements(
       }
     }
 
+    // Member access (e.g., EnumType.Value, contract.member)
+    ASTNode::MemberAccess {
+      referenced_declaration: Some(referenced_declaration),
+      ..
+    } => {
+      if let Some(block_id) = semantic_block {
+        referenced_nodes.push(ReferencedNode {
+          statement_node: block_id,
+          referenced_node: *referenced_declaration,
+        });
+      }
+    }
+
     // Function calls
     ASTNode::FunctionCall {
       expression,
@@ -1294,9 +1313,7 @@ fn process_tree_shake_declarations(
         )?;
       }
 
-      // Process public members if:
-      // 1. This contract is referenced as a BaseContract, OR
-      // 2. This contract is a root entry point (referencing_node is None)
+      // Process public members
       if reference_processing_method
         == ReferenceProcessingMethod::ProcessAllContractMembers
       {
