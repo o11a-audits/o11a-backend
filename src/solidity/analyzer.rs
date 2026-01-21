@@ -39,7 +39,6 @@ pub fn analyze(
     &mut audit_data.topic_metadata,
     &mut audit_data.function_properties,
     &mut audit_data.variable_properties,
-    &mut audit_data.source_content,
   )?;
 
   // Insert ASTs with stubbed nodes
@@ -53,7 +52,6 @@ pub fn analyze(
           .map(|n| parser::children_to_stubs(n.clone()))
           .collect(),
         project_path: ast.project_path.clone(),
-        source_content: ast.source_content.clone(),
       };
       audit_data
         .asts
@@ -563,6 +561,14 @@ fn process_first_pass_ast_nodes(
             name: name.clone(),
           },
         );
+
+        // Process event parameters
+        let child_nodes = node.nodes();
+        process_first_pass_ast_nodes(
+          &child_nodes,
+          is_file_in_scope,
+          first_pass_declarations,
+        )?;
       }
 
       ASTNode::ErrorDefinition { node_id, name, .. } => {
@@ -573,6 +579,14 @@ fn process_first_pass_ast_nodes(
             name: name.clone(),
           },
         );
+
+        // Process error parameters
+        let child_nodes = node.nodes();
+        process_first_pass_ast_nodes(
+          &child_nodes,
+          is_file_in_scope,
+          first_pass_declarations,
+        )?;
       }
 
       ASTNode::StructDefinition { node_id, name, .. } => {
@@ -647,12 +661,11 @@ fn second_pass(
   topic_metadata: &mut BTreeMap<topic::Topic, TopicMetadata>,
   function_properties: &mut BTreeMap<topic::Topic, FunctionModProperties>,
   variable_properties: &mut BTreeMap<topic::Topic, VariableProperties>,
-  source_content: &mut BTreeMap<core::ProjectPath, String>,
 ) -> Result<(), String> {
   // Process each AST file
   for (file_path, asts) in ast_map {
     for ast in asts {
-      let found_in_scope_node = process_second_pass_nodes(
+      process_second_pass_nodes(
         &ast.nodes.iter().collect(),
         false, // Parent is not in scope automatically - check each node
         in_scope_source_topics,
@@ -664,10 +677,6 @@ fn second_pass(
         function_properties,
         variable_properties,
       )?;
-
-      if found_in_scope_node {
-        source_content.insert(file_path.clone(), ast.source_content.clone());
-      }
     }
   }
 
@@ -685,9 +694,7 @@ fn process_second_pass_nodes(
   topic_metadata: &mut BTreeMap<topic::Topic, TopicMetadata>,
   function_properties: &mut BTreeMap<topic::Topic, FunctionModProperties>,
   variable_properties: &mut BTreeMap<topic::Topic, VariableProperties>,
-) -> Result<bool, String> {
-  let mut found_in_scope_node = false;
-
+) -> Result<(), String> {
   for node in ast_nodes {
     let node_id = node.node_id();
     let topic = topic::new_node_topic(&node_id);
@@ -702,8 +709,6 @@ fn process_second_pass_nodes(
         Node::Solidity(parser::children_to_stubs((*node).clone()));
 
       nodes.insert(topic.clone(), stubbed_node);
-      // Mark that a node was found so we can return this to the caller
-      found_in_scope_node = true;
     }
 
     // Process declarations only if they exist in in_scope_declarations
@@ -771,25 +776,21 @@ fn process_second_pass_nodes(
           match node {
             ASTNode::FunctionDefinition { signature, .. } => {
               // Extract parameters from the signature
-              let (parameters, return_parameters) = match signature.as_ref() {
+              let return_parameters = match signature.as_ref() {
                 ASTNode::FunctionSignature {
-                  parameters,
-                  return_parameters,
-                  ..
-                } => (parameters, return_parameters),
+                  return_parameters, ..
+                } => return_parameters,
                 _ => panic!(
                   "Expected FunctionSignature in FunctionDefinition.signature"
                 ),
               };
 
               // Extract function properties
-              let param_topics = extract_parameter_topics(parameters);
               let return_topics = extract_parameter_topics(return_parameters);
 
               function_properties.insert(
                 topic.clone(),
                 FunctionModProperties::FunctionProperties {
-                  parameters: param_topics,
                   returns: return_topics,
                   reverts: revert_topics,
                   calls: call_topics,
@@ -894,13 +895,15 @@ fn process_second_pass_nodes(
         | ASTNode::FunctionDefinition { node_id, .. }
         | ASTNode::ModifierDefinition { node_id, .. }
         | ASTNode::StructDefinition { node_id, .. }
-        | ASTNode::EnumDefinition { node_id, .. } => {
+        | ASTNode::EnumDefinition { node_id, .. }
+        | ASTNode::EventDefinition { node_id, .. }
+        | ASTNode::ErrorDefinition { node_id, .. } => {
           &core::add_to_scope(&scope, topic::new_node_topic(node_id))
         }
         _ => scope,
       };
 
-      let child_found_in_scope = process_second_pass_nodes(
+      process_second_pass_nodes(
         &child_nodes,
         is_in_scope, // Children inherit parent's in-scope status
         in_scope_source_topics,
@@ -910,13 +913,10 @@ fn process_second_pass_nodes(
         function_properties,
         variable_properties,
       )?;
-
-      // Accumulate whether any in-scope nodes were found in children
-      found_in_scope_node = found_in_scope_node || child_found_in_scope;
     }
   }
 
-  Ok(found_in_scope_node)
+  Ok(())
 }
 
 /// Extract parameter topic IDs from a ParameterList node

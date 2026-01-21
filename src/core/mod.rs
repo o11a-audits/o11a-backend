@@ -28,8 +28,6 @@ pub struct AuditData {
   pub audit_name: String,
   // A list of files that are in scope for this audit
   pub in_scope_files: HashSet<ProjectPath>,
-  // Contains the content of the original source file for a given file path
-  pub source_content: BTreeMap<ProjectPath, String>,
   // Contains the ASTs for a given file path
   pub asts: BTreeMap<ProjectPath, AST>,
   // Contains the node for a given topic
@@ -279,8 +277,6 @@ impl TopicMetadata {
 
 pub enum FunctionModProperties {
   FunctionProperties {
-    // Topic IDs of the local declarations of the function parameters
-    parameters: Vec<topic::Topic>,
     // Topic IDs of the declarations of the function return values
     returns: Vec<topic::Topic>,
     // Topic IDs of the declarations of the function revert nodes. This is either
@@ -440,7 +436,6 @@ pub fn new_audit_data(
   AuditData {
     audit_name,
     in_scope_files,
-    source_content: BTreeMap::new(),
     asts: BTreeMap::new(),
     nodes: BTreeMap::new(),
     topic_metadata: BTreeMap::new(),

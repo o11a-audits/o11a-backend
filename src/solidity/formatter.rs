@@ -1,5 +1,5 @@
 use crate::core::topic::{self, new_node_topic};
-use crate::core::{self, FunctionModProperties, Node, VariableProperties};
+use crate::core::{self, FunctionModProperties, VariableProperties};
 use crate::core::{ContractKind, FunctionKind, VariableMutability};
 use crate::solidity::parser::{
   ASTNode, AssignmentOperator, BinaryOperator, FunctionStateMutability,
@@ -226,99 +226,21 @@ fn do_node_to_source_text(
 
       let indent_level = indent_level + 1;
 
-      // Try to get parameter names from function_mod_properties
-      let param_topics = match expression {
-        ASTNode::Identifier {
-          referenced_declaration,
-          ..
-        } => function_mod_properties
-          .get(&new_node_topic(referenced_declaration))
-          .and_then(|props| match props {
-            FunctionModProperties::FunctionProperties {
-              parameters, ..
-            } => Some(parameters),
-            FunctionModProperties::ModifierProperties {
-              parameters, ..
-            } => Some(parameters),
-          }),
-        ASTNode::MemberAccess {
-          referenced_declaration: Some(ref_decl),
-          ..
-        } => function_mod_properties
-          .get(&new_node_topic(ref_decl))
-          .and_then(|props| match props {
-            FunctionModProperties::FunctionProperties {
-              parameters, ..
-            } => Some(parameters),
-            FunctionModProperties::ModifierProperties {
-              parameters, ..
-            } => Some(parameters),
-          }),
-        _ => None,
-      };
-
-      // Format arguments with parameter names if available and counts match
-      let args = if let Some(params) = param_topics
-        && params.len() == arguments.len()
-      {
-        arguments
-          .iter()
-          .zip(params.iter())
-          .map(|(arg, param_topic)| {
-            let arg_str = do_node_to_source_text(
-              arg,
-              indent_level + 1,
-              nodes_map,
-              topic_metadata,
-              function_mod_properties,
-              variable_properties,
-            );
-
-            // Get parameter name and format as identifier
-            if let Some(Node::Solidity(ASTNode::VariableDeclaration {
-              node_id,
-              name,
-              ..
-            })) = nodes_map.get(param_topic)
-            {
-              // Only include parameter name if it's not empty
-              if name.is_empty() {
-                arg_str
-              } else {
-                format!(
-                  "{}:{}",
-                  format_identifier(
-                    name,
-                    &new_node_topic(node_id),
-                    topic_metadata
-                  ),
-                  indent(&arg_str, indent_level + 1)
-                )
-              }
-            } else {
-              // Fallback if parameter not found
-              arg_str
-            }
-          })
-          .collect::<Vec<_>>()
-          .join("\n")
-      } else {
-        // No parameter info or count mismatch - format args only
-        arguments
-          .iter()
-          .map(|arg| {
-            do_node_to_source_text(
-              arg,
-              indent_level,
-              nodes_map,
-              topic_metadata,
-              function_mod_properties,
-              variable_properties,
-            )
-          })
-          .collect::<Vec<_>>()
-          .join("\n")
-      };
+      // Format arguments (Argument nodes handle parameter name formatting)
+      let args = arguments
+        .iter()
+        .map(|arg| {
+          do_node_to_source_text(
+            arg,
+            indent_level,
+            nodes_map,
+            topic_metadata,
+            function_mod_properties,
+            variable_properties,
+          )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
 
       if arguments.is_empty() {
         format!("{}()", expr)
@@ -340,6 +262,47 @@ fn do_node_to_source_text(
 
         format!("{}{}", expr, indented_args)
       }
+    }
+
+    ASTNode::Argument {
+      referenced_parameter,
+      argument,
+      ..
+    } => {
+      let arg_str = do_node_to_source_text(
+        argument,
+        indent_level + 1,
+        nodes_map,
+        topic_metadata,
+        function_mod_properties,
+        variable_properties,
+      );
+
+      // Format as "parameter:\n\targument" if parameter is available
+      if let Some(param) = referenced_parameter {
+        if let ASTNode::Identifier {
+          referenced_declaration,
+          name,
+          ..
+        } = param.as_ref()
+        {
+          // Only include parameter name if it's not empty
+          if !name.is_empty() {
+            return format!(
+              "{}:{}",
+              format_identifier(
+                name,
+                &new_node_topic(referenced_declaration),
+                topic_metadata
+              ),
+              indent(&arg_str, indent_level + 1)
+            );
+          }
+        }
+      }
+
+      // Fallback: just format the argument without parameter name
+      arg_str
     }
 
     ASTNode::TypeConversion {

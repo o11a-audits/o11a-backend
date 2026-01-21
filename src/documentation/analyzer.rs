@@ -54,11 +54,6 @@ fn process_documentation_ast(
   project_path: &core::ProjectPath,
   audit_data: &mut AuditData,
 ) -> Result<(), String> {
-  // Store source content for this file
-  audit_data
-    .source_content
-    .insert(project_path.clone(), ast.source_content.clone());
-
   // Process all nodes in the AST
   for node in &ast.nodes {
     process_documentation_node(
