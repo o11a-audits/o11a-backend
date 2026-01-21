@@ -290,7 +290,6 @@ fn do_node_to_source_text(
                   format_identifier(
                     name,
                     &new_node_topic(node_id),
-                    nodes_map,
                     topic_metadata
                   ),
                   indent(&arg_str, indent_level + 1)
@@ -453,7 +452,6 @@ fn do_node_to_source_text(
     } => format_identifier(
       name,
       &new_node_topic(referenced_declaration),
-      &nodes_map,
       topic_metadata,
     ),
 
@@ -464,7 +462,6 @@ fn do_node_to_source_text(
     } => format_identifier(
       name,
       &new_node_topic(referenced_declaration),
-      &nodes_map,
       topic_metadata,
     ),
 
@@ -573,7 +570,6 @@ fn do_node_to_source_text(
           let member = format_identifier(
             member_name,
             &new_node_topic(member_node_id),
-            &nodes_map,
             topic_metadata,
           );
 
@@ -675,12 +671,9 @@ fn do_node_to_source_text(
       }
     }
 
-    ASTNode::EnumValue { node_id, name, .. } => format_identifier(
-      name,
-      &new_node_topic(node_id),
-      &nodes_map,
-      topic_metadata,
-    ),
+    ASTNode::EnumValue { node_id, name, .. } => {
+      format_identifier(name, &new_node_topic(node_id), topic_metadata)
+    }
 
     ASTNode::Block { statements, .. } => {
       if statements.is_empty() {
@@ -1115,12 +1108,7 @@ fn do_node_to_source_text(
       if !name.is_empty() {
         parts.push(format!(
           "{}:",
-          format_identifier(
-            name,
-            &new_node_topic(node_id),
-            &nodes_map,
-            topic_metadata
-          )
+          format_identifier(name, &new_node_topic(node_id), topic_metadata)
         ));
       }
       parts.push(type_str);
@@ -1182,13 +1170,13 @@ fn do_node_to_source_text(
       )
     }
 
-    ASTNode::ContractDefinition {
-      node_id,
+    ASTNode::ContractSignature {
       contract_kind,
       name,
+      referenced_id,
       base_contracts,
-      nodes,
       abstract_,
+      directives,
       ..
     } => {
       let kind = contract_kind_to_string(contract_kind);
@@ -1197,8 +1185,8 @@ fn do_node_to_source_text(
       } else {
         String::new()
       };
+      let base_indent_level = indent_level + 1;
       let bases = if !base_contracts.is_empty() {
-        let base_indent_level = indent_level + 1;
         let first_base = do_node_to_source_text(
           &base_contracts[0],
           base_indent_level,
@@ -1236,15 +1224,54 @@ fn do_node_to_source_text(
         String::new()
       };
 
+      let directives = if directives.is_empty() {
+        String::new()
+      } else {
+        let directives_str = directives
+          .iter()
+          .map(|d| {
+            do_node_to_source_text(
+              d,
+              base_indent_level,
+              nodes_map,
+              topic_metadata,
+              function_mod_properties,
+              variable_properties,
+            )
+          })
+          .collect::<Vec<_>>()
+          .join("\n");
+        format!("\n{}", inline_indent(&directives_str, base_indent_level))
+      };
+
+      format!(
+        "{}{} {}{}{}",
+        abstract_str,
+        format_keyword(&kind),
+        format_identifier(
+          &name,
+          &new_node_topic(referenced_id),
+          topic_metadata
+        ),
+        bases,
+        directives
+      )
+    }
+
+    ASTNode::ContractDefinition {
+      signature, nodes, ..
+    } => {
+      let sig_str = do_node_to_source_text(
+        signature,
+        indent_level,
+        nodes_map,
+        topic_metadata,
+        function_mod_properties,
+        variable_properties,
+      );
+
       if nodes.is_empty() {
-        format!(
-          "{}{} {}{} {}",
-          abstract_str,
-          format_keyword(&html_escape(&kind)),
-          format_type(&html_escape(name)),
-          bases,
-          format_brace("{}", indent_level)
-        )
+        format!("{} {}", sig_str, format_brace("{}", indent_level))
       } else {
         let members = nodes
           .iter()
@@ -1262,16 +1289,8 @@ fn do_node_to_source_text(
           .join("\n\n");
         let trailing_newline = if !members.is_empty() { "\n" } else { "" };
         format!(
-          "{}{} {}{} {}{}{}{}",
-          abstract_str,
-          format_keyword(&kind),
-          format_identifier(
-            &name,
-            &new_node_topic(node_id),
-            &nodes_map,
-            topic_metadata
-          ),
-          bases,
+          "{} {}{}{}{}",
+          sig_str,
           format_brace("{", indent_level),
           indent(&members, indent_level + 1),
           trailing_newline,
@@ -1280,17 +1299,16 @@ fn do_node_to_source_text(
       }
     }
 
-    ASTNode::FunctionDefinition {
-      node_id,
+    ASTNode::FunctionSignature {
       kind,
       name,
+      referenced_id,
       parameters,
       return_parameters,
       modifiers,
       visibility,
       state_mutability,
       virtual_,
-      body,
       ..
     } => {
       let virtual_str = if *virtual_ {
@@ -1298,7 +1316,7 @@ fn do_node_to_source_text(
       } else {
         String::new()
       };
-      let visibility =
+      let visibility_str =
         format_keyword(&function_visibility_to_string(visibility));
       let mutability = format!(
         " {}",
@@ -1309,14 +1327,14 @@ fn do_node_to_source_text(
           " {}",
           format_topic_keyword(
             &function_kind_to_string(kind),
-            &new_node_topic(node_id)
+            &new_node_topic(referenced_id)
           )
         )
       } else {
         format!(
           " {} {}",
           format_keyword(&function_kind_to_string(kind)),
-          format_function_name(name, &new_node_topic(node_id))
+          format_function_name(name, &new_node_topic(referenced_id))
         )
       };
       let params = format!(
@@ -1330,7 +1348,7 @@ fn do_node_to_source_text(
           variable_properties
         )
       );
-      let modifiers = if !modifiers.is_empty() {
+      let modifiers_str = if !modifiers.is_empty() {
         let indent_level = indent_level + 1;
         let mods = modifiers
           .iter()
@@ -1364,7 +1382,32 @@ fn do_node_to_source_text(
           variable_properties
         )
       );
-      let body = if let Some(b) = body {
+
+      format!(
+        "{}{}{}{}{}{}{}",
+        virtual_str,
+        visibility_str,
+        mutability,
+        kind_name_str,
+        params,
+        modifiers_str,
+        returns,
+      )
+    }
+
+    ASTNode::FunctionDefinition {
+      signature, body, ..
+    } => {
+      let sig_str = do_node_to_source_text(
+        signature,
+        indent_level,
+        nodes_map,
+        topic_metadata,
+        function_mod_properties,
+        variable_properties,
+      );
+
+      let body_str = if let Some(b) = body {
         do_node_to_source_text(
           b,
           indent_level,
@@ -1377,17 +1420,7 @@ fn do_node_to_source_text(
         String::new()
       };
 
-      format!(
-        "{}{}{}{}{}{}{}{}",
-        virtual_str,
-        visibility,
-        mutability,
-        kind_name_str,
-        params,
-        modifiers,
-        returns,
-        body
-      )
+      format!("{}{}", sig_str, body_str)
     }
 
     ASTNode::EventDefinition {
@@ -1407,12 +1440,7 @@ fn do_node_to_source_text(
       format!(
         "{} {}{}",
         format_keyword("event"),
-        format_identifier(
-          name,
-          &new_node_topic(node_id),
-          &nodes_map,
-          topic_metadata
-        ),
+        format_identifier(name, &new_node_topic(node_id), topic_metadata),
         params
       )
     }
@@ -1434,23 +1462,17 @@ fn do_node_to_source_text(
       format!(
         "{} {}{}",
         format_keyword("error"),
-        format_identifier(
-          name,
-          &new_node_topic(node_id),
-          &nodes_map,
-          topic_metadata
-        ),
+        format_identifier(name, &new_node_topic(node_id), topic_metadata),
         params
       )
     }
 
-    ASTNode::ModifierDefinition {
-      node_id,
+    ASTNode::ModifierSignature {
       name,
+      referenced_id,
       parameters,
       virtual_,
       visibility,
-      body,
       ..
     } => {
       let params = do_node_to_source_text(
@@ -1470,21 +1492,37 @@ fn do_node_to_source_text(
         format_keyword(&function_visibility_to_string(&visibility));
 
       format!(
-        "{}{} {} {}{} {}",
+        "{}{} {} {}{}",
         virtual_str,
         visibility_str,
         format_keyword("mod"),
-        format_function_name(name, &new_node_topic(node_id)),
+        format_function_name(name, &new_node_topic(referenced_id)),
         params,
-        do_node_to_source_text(
-          body,
-          indent_level,
-          nodes_map,
-          topic_metadata,
-          function_mod_properties,
-          variable_properties
-        )
       )
+    }
+
+    ASTNode::ModifierDefinition {
+      signature, body, ..
+    } => {
+      let sig_str = do_node_to_source_text(
+        signature,
+        indent_level,
+        nodes_map,
+        topic_metadata,
+        function_mod_properties,
+        variable_properties,
+      );
+
+      let body_str = do_node_to_source_text(
+        body,
+        indent_level,
+        nodes_map,
+        topic_metadata,
+        function_mod_properties,
+        variable_properties,
+      );
+
+      format!("{} {}", sig_str, body_str)
     }
 
     ASTNode::StructDefinition {
@@ -1516,12 +1554,7 @@ fn do_node_to_source_text(
         "{} {} {} {{{}{}}}",
         visibility_str,
         format_keyword("struct"),
-        format_identifier(
-          name,
-          &new_node_topic(node_id),
-          &nodes_map,
-          topic_metadata
-        ),
+        format_identifier(name, &new_node_topic(node_id), topic_metadata),
         indent(&members_str, indent_level),
         trailing_newline
       )
@@ -1553,12 +1586,7 @@ fn do_node_to_source_text(
       format!(
         "{} {} {{{}{}}}",
         format_keyword("enum"),
-        format_identifier(
-          name,
-          &new_node_topic(node_id),
-          &nodes_map,
-          topic_metadata
-        ),
+        format_identifier(name, &new_node_topic(node_id), topic_metadata),
         indent(&members_str, indent_level),
         trailing_newline
       )
@@ -1572,12 +1600,7 @@ fn do_node_to_source_text(
     } => {
       format!(
         "type {} is {}",
-        format_identifier(
-          name,
-          &new_node_topic(node_id),
-          &nodes_map,
-          topic_metadata
-        ),
+        format_identifier(name, &new_node_topic(node_id), topic_metadata),
         do_node_to_source_text(
           underlying_type,
           indent_level,
@@ -1847,7 +1870,6 @@ fn do_node_to_source_text(
 fn format_identifier(
   name: &String,
   topic: &topic::Topic,
-  nodes_map: &BTreeMap<topic::Topic, Node>,
   topic_metadata: &BTreeMap<topic::Topic, core::TopicMetadata>,
 ) -> String {
   // Prefer metadata-based classification (single source of truth)
@@ -1877,87 +1899,7 @@ fn format_identifier(
     return format_topic_token(name, css_class, topic);
   }
 
-  // Fallback to AST inspection for edge cases (e.g., out-of-scope references)
-  match nodes_map.get(&topic) {
-    Some(Node::Solidity(ASTNode::ContractDefinition { name, .. })) => {
-      format_topic_token(name, "contract", topic)
-    }
-
-    Some(Node::Solidity(ASTNode::StructDefinition { name, .. })) => {
-      format_topic_token(name, "struct", topic)
-    }
-
-    Some(Node::Solidity(ASTNode::EnumDefinition { name, .. })) => {
-      format_topic_token(name, "enum", topic)
-    }
-
-    Some(Node::Solidity(ASTNode::ErrorDefinition { name, .. })) => {
-      format_topic_token(name, "error", topic)
-    }
-
-    Some(Node::Solidity(ASTNode::EventDefinition { name, .. })) => {
-      format_topic_token(name, "event", topic)
-    }
-
-    Some(Node::Solidity(ASTNode::UserDefinedValueTypeDefinition {
-      name,
-      ..
-    })) => format_topic_token(name, "user-defined-type", topic),
-
-    Some(Node::Solidity(ASTNode::EnumValue { name, .. })) => {
-      format_topic_token(name, "enum-value", topic)
-    }
-
-    Some(Node::Solidity(ASTNode::VariableDeclaration {
-      name,
-      constant,
-      ..
-    }))
-      if *constant =>
-    {
-      format_topic_token(name, "constant", topic)
-    }
-
-    Some(Node::Solidity(ASTNode::VariableDeclaration {
-      name,
-      state_variable,
-      mutability,
-      ..
-    }))
-      if *state_variable && *mutability == VariableMutability::Immutable =>
-    {
-      format_topic_token(name, "immutable-state-variable", topic)
-    }
-
-    Some(Node::Solidity(ASTNode::VariableDeclaration {
-      name,
-      state_variable,
-      ..
-    }))
-      if *state_variable =>
-    {
-      format_topic_token(name, "state-variable", topic)
-    }
-
-    Some(Node::Solidity(ASTNode::VariableDeclaration { name, .. })) => {
-      format_topic_token(name, "identifier", topic)
-    }
-
-    Some(Node::Solidity(ASTNode::FunctionDefinition { name, .. })) => {
-      format_topic_token(name, "function", topic)
-    }
-
-    Some(Node::Solidity(ASTNode::ModifierDefinition { name, .. })) => {
-      format_topic_token(name, "modifier", topic)
-    }
-
-    None => match topic.underlying_id() {
-      Ok(node_id) if node_id < 0 => format_global(name),
-      _ => format!("{}-{}", name, topic.id()),
-    },
-
-    n => format_token(&format!("{:?}-{:?}", topic.id(), n), "identifier"),
-  }
+  format_token(&format!("{}-{:?}", topic.id(), name), "identifier")
 }
 
 fn format_token(token: &str, class: &str) -> String {
@@ -2218,160 +2160,4 @@ fn storage_location_to_string(location: &StorageLocation) -> String {
     StorageLocation::Calldata => "calldata",
   }
   .to_string()
-}
-
-pub fn node_to_signature(topic: topic::Topic, node: &ASTNode) -> String {
-  let sig = match node {
-    ASTNode::FunctionDefinition {
-      node_id,
-      kind,
-      name,
-      visibility,
-      state_mutability,
-      virtual_,
-      ..
-    } => {
-      let virtual_str = if *virtual_ {
-        format!("{} ", format_keyword("virtual"))
-      } else {
-        String::new()
-      };
-      let visibility =
-        format_keyword(&function_visibility_to_string(visibility));
-      let mutability = format!(
-        " {}",
-        format_keyword(&function_mutability_to_string(state_mutability))
-      );
-      let kind_str =
-        format!(" {}", format_keyword(&function_kind_to_string(kind)));
-      let name_str = if name.is_empty() {
-        String::new()
-      } else {
-        format!(" {}", format_function_name(name, &new_node_topic(node_id)))
-      };
-
-      format!(
-        "{}{}{}{}{}",
-        virtual_str, visibility, mutability, kind_str, name_str,
-      )
-    }
-    ASTNode::ContractDefinition {
-      contract_kind,
-      name,
-      abstract_,
-      ..
-    } => {
-      let kind = contract_kind_to_string(contract_kind);
-      let abstract_str = if *abstract_ {
-        format!("{} ", format_keyword("abstract"))
-      } else {
-        String::new()
-      };
-
-      format!(
-        "{}{} {}",
-        abstract_str,
-        format_keyword(&html_escape(&kind)),
-        format_type(&html_escape(name)),
-      )
-    }
-    ASTNode::Assignment { .. } => format!("Assignment {}", topic.id),
-    ASTNode::BinaryOperation { .. } => format!("BinaryOperation {}", topic.id),
-    ASTNode::Conditional { .. } => format!("Conditional {}", topic.id),
-    ASTNode::ElementaryTypeNameExpression { .. } => {
-      format!("ElementaryTypeNameExpression {}", topic.id)
-    }
-    ASTNode::FunctionCall { .. } => format!("FunctionCall {}", topic.id),
-    ASTNode::TypeConversion { .. } => format!("TypeConversion {}", topic.id),
-    ASTNode::StructConstructor { .. } => {
-      format!("StructConstructor {}", topic.id)
-    }
-    ASTNode::FunctionCallOptions { .. } => {
-      format!("FunctionCallOptions {}", topic.id)
-    }
-    ASTNode::Identifier { .. } => format!("Identifier {}", topic.id),
-    ASTNode::IdentifierPath { .. } => format!("IdentifierPath {}", topic.id),
-    ASTNode::IndexAccess { .. } => format!("IndexAccess {}", topic.id),
-    ASTNode::IndexRangeAccess { .. } => {
-      format!("IndexRangeAccess {}", topic.id)
-    }
-    ASTNode::Literal { .. } => format!("Literal {}", topic.id),
-    ASTNode::MemberAccess { .. } => format!("MemberAccess {}", topic.id),
-    ASTNode::NewExpression { .. } => format!("NewExpression {}", topic.id),
-    ASTNode::TupleExpression { .. } => format!("TupleExpression {}", topic.id),
-    ASTNode::UnaryOperation { .. } => format!("UnaryOperation {}", topic.id),
-    ASTNode::EnumValue { .. } => format!("EnumValue {}", topic.id),
-    ASTNode::Block { .. } => format!("Block {}", topic.id),
-    ASTNode::SemanticBlock { .. } => format!("SemanticBlock {}", topic.id),
-    ASTNode::Break { .. } => format!("Break {}", topic.id),
-    ASTNode::Continue { .. } => format!("Continue {}", topic.id),
-    ASTNode::DoWhileStatement { .. } => {
-      format!("DoWhileStatement {}", topic.id)
-    }
-    ASTNode::EmitStatement { .. } => format!("EmitStatement {}", topic.id),
-    ASTNode::ExpressionStatement { .. } => {
-      format!("ExpressionStatement {}", topic.id)
-    }
-    ASTNode::ForStatement { .. } => format!("ForStatement {}", topic.id),
-    ASTNode::IfStatement { .. } => format!("IfStatement {}", topic.id),
-    ASTNode::InlineAssembly { .. } => format!("InlineAssembly {}", topic.id),
-    ASTNode::PlaceholderStatement { .. } => {
-      format!("PlaceholderStatement {}", topic.id)
-    }
-    ASTNode::Return { .. } => format!("Return {}", topic.id),
-    ASTNode::RevertStatement { .. } => format!("RevertStatement {}", topic.id),
-    ASTNode::TryStatement { .. } => format!("TryStatement {}", topic.id),
-    ASTNode::UncheckedBlock { .. } => format!("UncheckedBlock {}", topic.id),
-    ASTNode::VariableDeclarationStatement { .. } => {
-      format!("VariableDeclarationStatement {}", topic.id)
-    }
-    ASTNode::VariableDeclaration { .. } => {
-      format!("VariableDeclaration {}", topic.id)
-    }
-    ASTNode::WhileStatement { .. } => format!("WhileStatement {}", topic.id),
-    ASTNode::EventDefinition { .. } => format!("EventDefinition {}", topic.id),
-    ASTNode::ErrorDefinition { .. } => format!("ErrorDefinition {}", topic.id),
-    ASTNode::ModifierDefinition { .. } => {
-      format!("ModifierDefinition {}", topic.id)
-    }
-    ASTNode::StructDefinition { .. } => {
-      format!("StructDefinition {}", topic.id)
-    }
-    ASTNode::EnumDefinition { .. } => format!("EnumDefinition {}", topic.id),
-    ASTNode::UserDefinedValueTypeDefinition { .. } => {
-      format!("UserDefinedValueTypeDefinition {}", topic.id)
-    }
-    ASTNode::PragmaDirective { .. } => format!("PragmaDirective {}", topic.id),
-    ASTNode::ImportDirective { .. } => format!("ImportDirective {}", topic.id),
-    ASTNode::UsingForDirective { .. } => {
-      format!("UsingForDirective {}", topic.id)
-    }
-    ASTNode::SourceUnit { .. } => format!("SourceUnit {}", topic.id),
-    ASTNode::InheritanceSpecifier { .. } => {
-      format!("InheritanceSpecifier {}", topic.id)
-    }
-    ASTNode::ElementaryTypeName { .. } => {
-      format!("ElementaryTypeName {}", topic.id)
-    }
-    ASTNode::FunctionTypeName { .. } => {
-      format!("FunctionTypeName {}", topic.id)
-    }
-    ASTNode::ParameterList { .. } => format!("ParameterList {}", topic.id),
-    ASTNode::TryCatchClause { .. } => format!("TryCatchClause {}", topic.id),
-    ASTNode::ModifierInvocation { .. } => {
-      format!("ModifierInvocation {}", topic.id)
-    }
-    ASTNode::UserDefinedTypeName { .. } => {
-      format!("UserDefinedTypeName {}", topic.id)
-    }
-    ASTNode::ArrayTypeName { .. } => format!("ArrayTypeName {}", topic.id),
-    ASTNode::Mapping { .. } => format!("Mapping {}", topic.id),
-    ASTNode::StructuredDocumentation { .. } => {
-      format!("StructuredDocumentation {}", topic.id)
-    }
-    ASTNode::Stub { .. } => format!("Stub {}", topic.id),
-    ASTNode::Other { .. } => format!("Other {}", topic.id),
-  };
-
-  format!("<pre><code>{}</code></pre>", sig)
 }

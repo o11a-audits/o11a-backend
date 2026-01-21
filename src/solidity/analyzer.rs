@@ -90,8 +90,8 @@ pub enum FirstPassDeclaration {
     is_publicly_in_scope: bool,
     declaration_kind: NamedTopicKind,
     name: String,
-    base_contracts: Vec<i32>,
-    other_contracts: Vec<i32>,
+    base_contracts: Vec<ReferencedNode>,
+    other_contracts: Vec<ReferencedNode>,
     public_members: Vec<i32>,
   },
   Flat {
@@ -126,8 +126,8 @@ pub enum InScopeDeclaration {
     declaration_kind: NamedTopicKind,
     name: String,
     references: Vec<i32>,
-    base_contracts: Vec<i32>,
-    other_contracts: Vec<i32>,
+    base_contracts: Vec<ReferencedNode>,
+    other_contracts: Vec<ReferencedNode>,
     public_members: Vec<i32>,
   },
   // All other declarations
@@ -213,15 +213,36 @@ fn process_first_pass_ast_nodes(
     match node {
       ASTNode::ContractDefinition {
         node_id,
-        name,
-        contract_kind,
-        base_contracts,
+        signature,
         nodes: contract_nodes,
         ..
       } => {
+        // Extract fields from the ContractSignature
+        let (
+          signature_node_id,
+          name,
+          contract_kind,
+          base_contracts,
+          directives,
+        ) = match signature.as_ref() {
+          ASTNode::ContractSignature {
+            node_id,
+            name,
+            contract_kind,
+            base_contracts,
+            directives,
+            ..
+          } => (node_id, name, contract_kind, base_contracts, directives),
+          _ => {
+            panic!("Expected ContractSignature in ContractDefinition.signature")
+          }
+        };
+
         let declaration_kind = NamedTopicKind::Contract(*contract_kind);
 
-        let base_contract_ids: Vec<i32> = base_contracts
+        // When getting these base contract node ids, set the signature node as
+        // the containing statement node
+        let base_contract_ids: Vec<ReferencedNode> = base_contracts
           .iter()
           .map(|base_contract| {
             // Each base_contract should be an InheritanceSpecifier
@@ -229,9 +250,10 @@ fn process_first_pass_ast_nodes(
               ASTNode::InheritanceSpecifier { base_name, .. } => {
                 // base_name should be an IdentifierPath with a referenced_declaration
                 match base_name.as_ref() {
-                  ASTNode::IdentifierPath { referenced_declaration, .. } => {
-                    *referenced_declaration
-                  }
+                  ASTNode::IdentifierPath { referenced_declaration, .. } => ReferencedNode {
+                    statement_node: *signature_node_id,
+                    referenced_node: *referenced_declaration,
+                  },
                   _ => panic!(
                     "Expected IdentifierPath in InheritanceSpecifier base_name, got: {:?}",
                     base_name
@@ -246,7 +268,9 @@ fn process_first_pass_ast_nodes(
           })
           .collect();
 
-        let using_for_contracts: Vec<i32> = contract_nodes
+        // When getting these directive node ids, set the signature node as
+        // the containing statement node
+        let using_for_contracts: Vec<ReferencedNode> = directives
           .iter()
           .filter_map(|node| match node {
             ASTNode::UsingForDirective {
@@ -255,23 +279,27 @@ fn process_first_pass_ast_nodes(
               ..
             } => {
               // Helper function to extract referenced_declaration from either IdentifierPath or UserDefinedTypeName
-              let extract_reference = |node: &ASTNode| -> Option<i32> {
-                match node {
-                  ASTNode::IdentifierPath {
-                    referenced_declaration,
-                    ..
-                  } => Some(*referenced_declaration),
-                  ASTNode::UserDefinedTypeName { path_node, .. } => {
-                    match path_node.as_ref() {
-                      ASTNode::IdentifierPath {
-                        referenced_declaration,
-                        ..
-                      } => Some(*referenced_declaration),
-                      _ => None,
-                    }
+              let extract_reference = |node: &ASTNode| match node {
+                ASTNode::IdentifierPath {
+                  referenced_declaration,
+                  ..
+                } => Some(ReferencedNode {
+                  statement_node: *signature_node_id,
+                  referenced_node: *referenced_declaration,
+                }),
+                ASTNode::UserDefinedTypeName { path_node, .. } => {
+                  match path_node.as_ref() {
+                    ASTNode::IdentifierPath {
+                      referenced_declaration,
+                      ..
+                    } => Some(ReferencedNode {
+                      statement_node: *signature_node_id,
+                      referenced_node: *referenced_declaration,
+                    }),
+                    _ => None,
                   }
-                  _ => None,
                 }
+                _ => None,
               };
 
               // Extract referenced_declaration from library_name
@@ -302,27 +330,39 @@ fn process_first_pass_ast_nodes(
           .filter_map(|node| match node {
             // Public functions
             ASTNode::FunctionDefinition {
-              node_id,
-              visibility,
-              ..
-            } if matches!(
-              visibility,
-              FunctionVisibility::Public | FunctionVisibility::External
-            ) =>
-            {
-              Some(*node_id)
+              node_id, signature, ..
+            } => {
+              if let ASTNode::FunctionSignature { visibility, .. } =
+                signature.as_ref()
+              {
+                if matches!(
+                  visibility,
+                  FunctionVisibility::Public | FunctionVisibility::External
+                ) {
+                  Some(*node_id)
+                } else {
+                  None
+                }
+              } else {
+                None
+              }
             }
             // Public modifiers
             ASTNode::ModifierDefinition {
-              node_id,
-              visibility,
-              ..
-            } if matches!(
-              visibility,
-              FunctionVisibility::Public | FunctionVisibility::External
-            ) =>
-            {
-              Some(*node_id)
+              node_id, signature, ..
+            } => {
+              let visibility = match signature.as_ref() {
+                ASTNode::ModifierSignature { visibility, .. } => visibility,
+                _ => panic!("Expected ModifierSignature"),
+              };
+              if matches!(
+                visibility,
+                FunctionVisibility::Public | FunctionVisibility::External
+              ) {
+                Some(*node_id)
+              } else {
+                None
+              }
             }
             // Events (all events are public)
             ASTNode::EventDefinition { node_id, .. } => Some(*node_id),
@@ -364,11 +404,16 @@ fn process_first_pass_ast_nodes(
       }
 
       ASTNode::FunctionDefinition {
-        node_id,
-        name,
-        kind,
-        ..
+        node_id, signature, ..
       } => {
+        // Extract name and kind from the signature
+        let (name, kind) = match signature.as_ref() {
+          ASTNode::FunctionSignature { name, kind, .. } => (name, kind),
+          _ => {
+            panic!("Expected FunctionSignature in FunctionDefinition.signature")
+          }
+        };
+
         let mut referenced_nodes = Vec::new();
         let mut require_revert_statements = Vec::new();
         let mut function_calls = Vec::new();
@@ -405,7 +450,14 @@ fn process_first_pass_ast_nodes(
         )?;
       }
 
-      ASTNode::ModifierDefinition { node_id, name, .. } => {
+      ASTNode::ModifierDefinition {
+        node_id, signature, ..
+      } => {
+        let name = match signature.as_ref() {
+          ASTNode::ModifierSignature { name, .. } => name,
+          _ => panic!("Expected ModifierSignature"),
+        };
+
         let mut referenced_nodes = Vec::new();
         let mut require_revert_statements = Vec::new();
         let mut function_calls = Vec::new();
@@ -678,11 +730,19 @@ fn process_second_pass_nodes(
             .collect();
 
           match node {
-            ASTNode::FunctionDefinition {
-              parameters,
-              return_parameters,
-              ..
-            } => {
+            ASTNode::FunctionDefinition { signature, .. } => {
+              // Extract parameters from the signature
+              let (parameters, return_parameters) = match signature.as_ref() {
+                ASTNode::FunctionSignature {
+                  parameters,
+                  return_parameters,
+                  ..
+                } => (parameters, return_parameters),
+                _ => panic!(
+                  "Expected FunctionSignature in FunctionDefinition.signature"
+                ),
+              };
+
               // Extract function properties
               let param_topics = extract_parameter_topics(parameters);
               let return_topics = extract_parameter_topics(return_parameters);
@@ -698,7 +758,12 @@ fn process_second_pass_nodes(
                 },
               );
             }
-            ASTNode::ModifierDefinition { parameters, .. } => {
+            ASTNode::ModifierDefinition { signature, .. } => {
+              let parameters = match signature.as_ref() {
+                ASTNode::ModifierSignature { parameters, .. } => parameters,
+                _ => panic!("Expected ModifierSignature"),
+              };
+
               // Extract modifier properties
               let param_topics = extract_parameter_topics(parameters);
 
@@ -839,11 +904,17 @@ fn collect_references_and_statements(
   // Update current_semantic_block when entering a SemanticBlock
   let semantic_block = match node {
     ASTNode::SemanticBlock { node_id, .. } => Some(*node_id),
+    ASTNode::FunctionSignature { node_id, .. } => Some(*node_id),
     _ => current_semantic_block,
   };
 
   match node {
+    // References
     ASTNode::Identifier {
+      referenced_declaration,
+      ..
+    }
+    | ASTNode::IdentifierPath {
       referenced_declaration,
       ..
     } => {
@@ -854,6 +925,8 @@ fn collect_references_and_statements(
         });
       }
     }
+
+    // Function calls
     ASTNode::FunctionCall {
       expression,
       arguments,
@@ -882,6 +955,8 @@ fn collect_references_and_statements(
         }
       }
     }
+
+    // Reverts
     ASTNode::RevertStatement { error_call, .. } => {
       // For RevertStatement, extract the error identifier from the error_call
       // The error_call is a FunctionCall node
@@ -896,6 +971,8 @@ fn collect_references_and_statements(
         }
       };
     }
+
+    // Mutations
     ASTNode::Assignment {
       node_id,
       left_hand_side,
@@ -1090,8 +1167,8 @@ fn process_tree_shake_declarations(
 
   in_scope_declarations.insert(node_id, in_scope_decl);
 
-  // Process all referenced nodes from this declaration if it is a function
-  // or modifier
+  // Process all referenced nodes from this declaration if it is a function,
+  // modifier, or contract
   match first_pass_decl {
     FirstPassDeclaration::FunctionMod {
       referenced_nodes, ..
@@ -1114,10 +1191,10 @@ fn process_tree_shake_declarations(
       ..
     } => {
       // Process base contracts with BaseContract context
-      for &base_contract_id in base_contracts {
+      for base_contract_ref in base_contracts {
         process_tree_shake_declarations(
-          base_contract_id,
-          Some(node_id), // This contract references the base contract
+          base_contract_ref.referenced_node,
+          Some(base_contract_ref.statement_node), // This contract references the base contract
           ReferenceProcessingMethod::ProcessAllContractMembers,
           first_pass_declarations,
           in_scope_declarations,
@@ -1126,10 +1203,10 @@ fn process_tree_shake_declarations(
       }
 
       // Process other contracts (using for, type references) with NoContext
-      for &other_contract_id in other_contracts {
+      for other_contract_ref in other_contracts {
         process_tree_shake_declarations(
-          other_contract_id,
-          Some(node_id), // This contract references the other contract
+          other_contract_ref.referenced_node,
+          Some(other_contract_ref.statement_node), // This contract references the other contract
           ReferenceProcessingMethod::Normal,
           first_pass_declarations,
           in_scope_declarations,

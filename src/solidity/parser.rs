@@ -768,22 +768,6 @@ pub enum ASTNode {
     declarations: Vec<ASTNode>,
     initial_value: Option<Box<ASTNode>>,
   },
-  VariableDeclaration {
-    node_id: i32,
-    src_location: SourceLocation,
-    constant: bool,
-    function_selector: Option<String>,
-    mutability: VariableMutability,
-    name: String,
-    name_location: SourceLocation,
-    scope: i32,
-    state_variable: bool,
-    storage_location: StorageLocation,
-    type_name: Box<ASTNode>,
-    value: Option<Box<ASTNode>>,
-    visibility: VariableVisibility,
-    parameter_variable: bool,
-  },
   WhileStatement {
     node_id: i32,
     src_location: SourceLocation,
@@ -791,33 +775,59 @@ pub enum ASTNode {
     body: Option<Box<ASTNode>>,
   },
 
-  // Definition nodes
-  ContractDefinition {
+  // Signature nodes (generated during parsing)
+  ContractSignature {
     node_id: i32,
     src_location: SourceLocation,
-    nodes: Vec<ASTNode>,
-    abstract_: bool,
-    base_contracts: Vec<ASTNode>,
     name: String,
     name_location: SourceLocation,
+    referenced_id: i32,
     contract_kind: ContractKind,
+    abstract_: bool,
+    base_contracts: Vec<ASTNode>,
+    directives: Vec<ASTNode>,
   },
-  FunctionDefinition {
+  FunctionSignature {
     node_id: i32,
     src_location: SourceLocation,
-    body: Option<Box<ASTNode>>,
     documentation: Option<Box<ASTNode>>,
-    implemented: bool,
     kind: FunctionKind,
     modifiers: Vec<ASTNode>,
     name: String,
     name_location: SourceLocation,
+    referenced_id: i32,
     parameters: Box<ASTNode>,
     return_parameters: Box<ASTNode>,
     scope: i32,
     state_mutability: FunctionStateMutability,
     virtual_: bool,
     visibility: FunctionVisibility,
+  },
+  ModifierSignature {
+    node_id: i32,
+    src_location: SourceLocation,
+    documentation: Option<Box<ASTNode>>,
+    name: String,
+    name_location: SourceLocation,
+    referenced_id: i32,
+    parameters: Box<ASTNode>,
+    virtual_: bool,
+    visibility: FunctionVisibility,
+  },
+
+  // Definition nodes
+  ContractDefinition {
+    node_id: i32,
+    src_location: SourceLocation,
+    signature: Box<ASTNode>,
+    nodes: Vec<ASTNode>,
+  },
+  FunctionDefinition {
+    node_id: i32,
+    src_location: SourceLocation,
+    signature: Box<ASTNode>,
+    implemented: bool,
+    body: Option<Box<ASTNode>>,
   },
   EventDefinition {
     node_id: i32,
@@ -836,13 +846,8 @@ pub enum ASTNode {
   ModifierDefinition {
     node_id: i32,
     src_location: SourceLocation,
+    signature: Box<ASTNode>,
     body: Box<ASTNode>,
-    documentation: Option<Box<ASTNode>>,
-    name: String,
-    name_location: SourceLocation,
-    parameters: Box<ASTNode>,
-    virtual_: bool,
-    visibility: FunctionVisibility,
   },
   StructDefinition {
     node_id: i32,
@@ -866,6 +871,22 @@ pub enum ASTNode {
     src_location: SourceLocation,
     name: String,
     underlying_type: Box<ASTNode>,
+  },
+  VariableDeclaration {
+    node_id: i32,
+    src_location: SourceLocation,
+    constant: bool,
+    function_selector: Option<String>,
+    mutability: VariableMutability,
+    name: String,
+    name_location: SourceLocation,
+    scope: i32,
+    state_variable: bool,
+    storage_location: StorageLocation,
+    type_name: Box<ASTNode>,
+    value: Option<Box<ASTNode>>,
+    visibility: VariableVisibility,
+    parameter_variable: bool,
   },
 
   // Directive nodes
@@ -1088,8 +1109,11 @@ impl ASTNode {
       ASTNode::VariableDeclarationStatement { node_id, .. } => *node_id,
       ASTNode::VariableDeclaration { node_id, .. } => *node_id,
       ASTNode::WhileStatement { node_id, .. } => *node_id,
+      ASTNode::ContractSignature { node_id, .. } => *node_id,
+      ASTNode::FunctionSignature { node_id, .. } => *node_id,
       ASTNode::ContractDefinition { node_id, .. } => *node_id,
       ASTNode::FunctionDefinition { node_id, .. } => *node_id,
+      ASTNode::ModifierSignature { node_id, .. } => *node_id,
       ASTNode::EventDefinition { node_id, .. } => *node_id,
       ASTNode::ErrorDefinition { node_id, .. } => *node_id,
       ASTNode::ModifierDefinition { node_id, .. } => *node_id,
@@ -1157,6 +1181,9 @@ impl ASTNode {
       }
       ASTNode::VariableDeclaration { src_location, .. } => src_location,
       ASTNode::WhileStatement { src_location, .. } => src_location,
+      ASTNode::ContractSignature { src_location, .. } => src_location,
+      ASTNode::FunctionSignature { src_location, .. } => src_location,
+      ASTNode::ModifierSignature { src_location, .. } => src_location,
       ASTNode::ContractDefinition { src_location, .. } => src_location,
       ASTNode::FunctionDefinition { src_location, .. } => src_location,
       ASTNode::EventDefinition { src_location, .. } => src_location,
@@ -1377,22 +1404,30 @@ impl ASTNode {
         Some(body) => vec![body, condition],
         None => vec![condition],
       },
-      ASTNode::ContractDefinition {
-        nodes,
+      ASTNode::ContractSignature {
         base_contracts,
+        directives,
         ..
       } => {
         let mut result = vec![];
-        for item in nodes {
+        for item in base_contracts {
           result.push(item);
         }
-        for item in base_contracts {
+        for item in directives {
           result.push(item);
         }
         result
       }
-      ASTNode::FunctionDefinition {
-        body,
+      ASTNode::ContractDefinition {
+        signature, nodes, ..
+      } => {
+        let mut result = vec![&**signature];
+        for item in nodes {
+          result.push(item);
+        }
+        result
+      }
+      ASTNode::FunctionSignature {
         documentation,
         modifiers,
         parameters,
@@ -1400,13 +1435,8 @@ impl ASTNode {
         ..
       } => {
         let mut result = vec![];
-        match body {
-          Some(body_node) => result.push(&**body_node),
-          None => {}
-        }
-        match documentation {
-          Some(doc) => result.push(&**doc),
-          None => {}
+        if let Some(doc) = documentation {
+          result.push(&**doc);
         }
         for item in modifiers {
           result.push(item);
@@ -1415,20 +1445,33 @@ impl ASTNode {
         result.push(&**return_parameters);
         result
       }
+      ASTNode::FunctionDefinition {
+        signature, body, ..
+      } => {
+        let mut result = vec![&**signature];
+        if let Some(body_node) = body {
+          result.push(&**body_node);
+        }
+        result
+      }
       ASTNode::EventDefinition { parameters, .. } => vec![parameters],
       ASTNode::ErrorDefinition { parameters, .. } => vec![parameters],
-      ASTNode::ModifierDefinition {
-        body,
+      ASTNode::ModifierSignature {
         documentation,
         parameters,
         ..
       } => {
-        let mut result = vec![&**body, &**parameters];
-        match documentation {
-          Some(doc) => result.push(doc),
-          None => {}
+        let mut result = vec![];
+        if let Some(doc) = documentation {
+          result.push(&**doc);
         }
+        result.push(&**parameters);
         result
+      }
+      ASTNode::ModifierDefinition {
+        signature, body, ..
+      } => {
+        vec![&**signature, &**body]
       }
       ASTNode::StructDefinition { members, .. } => {
         let mut result = vec![];
@@ -2063,63 +2106,87 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
         None => None,
       },
     },
+    ASTNode::ContractSignature {
+      node_id,
+      src_location,
+      name,
+      name_location,
+      referenced_id,
+      contract_kind,
+      abstract_,
+      base_contracts,
+      directives,
+    } => ASTNode::ContractSignature {
+      node_id: node_id,
+      src_location: src_location,
+      name: name,
+      name_location: name_location,
+      referenced_id: referenced_id,
+      contract_kind: contract_kind,
+      abstract_: abstract_,
+      base_contracts: base_contracts.iter().map(|n| node_to_stub(n)).collect(),
+      directives: directives.iter().map(|n| node_to_stub(n)).collect(),
+    },
     ASTNode::ContractDefinition {
       node_id,
       src_location,
+      signature,
       nodes,
-      abstract_,
-      base_contracts,
-      name,
-      name_location,
-      contract_kind,
     } => ASTNode::ContractDefinition {
       node_id: node_id,
       src_location: src_location,
+      signature: Box::new(node_to_stub(&signature)),
       nodes: nodes.iter().map(|n| node_to_stub(n)).collect(),
-      abstract_: abstract_,
-      base_contracts: base_contracts.iter().map(|n| node_to_stub(n)).collect(),
-      name: name,
-      name_location: name_location,
-      contract_kind: contract_kind,
     },
-    ASTNode::FunctionDefinition {
+    ASTNode::FunctionSignature {
       node_id,
       src_location,
-      body,
       documentation,
-      implemented,
       kind,
       modifiers,
       name,
       name_location,
+      referenced_id,
       parameters,
       return_parameters,
       scope,
       state_mutability,
       virtual_,
       visibility,
-    } => ASTNode::FunctionDefinition {
+    } => ASTNode::FunctionSignature {
       node_id: node_id,
       src_location: src_location,
-      body: match body {
-        Some(b) => Some(Box::new(node_to_stub(&b))),
-        None => None,
-      },
       documentation: match documentation {
         Some(d) => Some(Box::new(node_to_stub(&d))),
         None => None,
       },
-      implemented: implemented,
       kind: kind,
       modifiers: modifiers.iter().map(|n| node_to_stub(n)).collect(),
       name: name,
       name_location: name_location,
+      referenced_id: referenced_id,
       parameters: Box::new(node_to_stub(&parameters)),
       return_parameters: Box::new(node_to_stub(&return_parameters)),
       scope: scope,
       state_mutability: state_mutability,
       virtual_: virtual_,
       visibility: visibility,
+    },
+    ASTNode::FunctionDefinition {
+      node_id,
+      src_location,
+      signature,
+      implemented,
+      body,
+    } => ASTNode::FunctionDefinition {
+      node_id: node_id,
+      src_location: src_location,
+      signature: Box::new(node_to_stub(&signature)),
+      implemented: implemented,
+      body: match body {
+        Some(b) => Some(Box::new(node_to_stub(&b))),
+        None => None,
+      },
     },
     ASTNode::EventDefinition {
       node_id,
@@ -2147,29 +2214,40 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       name_location: name_location,
       parameters: Box::new(node_to_stub(&parameters)),
     },
-    ASTNode::ModifierDefinition {
+    ASTNode::ModifierSignature {
       node_id,
       src_location,
-      body,
       documentation,
       name,
       name_location,
+      referenced_id,
       parameters,
       virtual_,
       visibility,
-    } => ASTNode::ModifierDefinition {
+    } => ASTNode::ModifierSignature {
       node_id: node_id,
       src_location: src_location,
-      body: Box::new(node_to_stub(&body)),
       documentation: match documentation {
         Some(d) => Some(Box::new(node_to_stub(&d))),
         None => None,
       },
       name: name,
       name_location: name_location,
+      referenced_id: referenced_id,
       parameters: Box::new(node_to_stub(&parameters)),
       virtual_: virtual_,
       visibility: visibility,
+    },
+    ASTNode::ModifierDefinition {
+      node_id,
+      src_location,
+      signature,
+      body,
+    } => ASTNode::ModifierDefinition {
+      node_id: node_id,
+      src_location: src_location,
+      signature: Box::new(node_to_stub(&signature)),
+      body: Box::new(node_to_stub(&body)),
     },
     ASTNode::StructDefinition {
       node_id,
@@ -3844,7 +3922,7 @@ pub fn node_from_json(
       })
     }
     "ContractDefinition" => {
-      let nodes = get_required_node_vec_with_context(
+      let all_nodes = get_required_node_vec_with_context(
         val,
         "nodes",
         node_type_str,
@@ -3867,15 +3945,30 @@ pub fn node_from_json(
       let contract_kind =
         get_required_enum_with_context(val, "contractKind", node_type_str)?;
 
+      // Separate UsingForDirective nodes from other nodes
+      let (directives, nodes): (Vec<ASTNode>, Vec<ASTNode>) = all_nodes
+        .into_iter()
+        .partition(|node| matches!(node, ASTNode::UsingForDirective { .. }));
+
+      // Create the ContractSignature node with a generated ID
+      let signature_node_id = generate_node_id();
+      let signature = ASTNode::ContractSignature {
+        node_id: signature_node_id,
+        src_location: src_location.clone(),
+        name,
+        name_location,
+        referenced_id: node_id,
+        contract_kind,
+        abstract_,
+        base_contracts,
+        directives,
+      };
+
       Ok(ASTNode::ContractDefinition {
         node_id,
         src_location,
+        signature: Box::new(signature),
         nodes,
-        abstract_,
-        base_contracts,
-        name,
-        name_location,
-        contract_kind,
       })
     }
     "FunctionDefinition" => {
@@ -3926,22 +4019,31 @@ pub fn node_from_json(
       let visibility =
         get_required_enum_with_context(val, "visibility", node_type_str)?;
 
-      Ok(ASTNode::FunctionDefinition {
-        node_id,
-        src_location,
-        body,
+      // Create the FunctionSignature node with a generated ID
+      let signature_node_id = generate_node_id();
+      let signature = ASTNode::FunctionSignature {
+        node_id: signature_node_id,
+        src_location: src_location.clone(),
         documentation,
-        implemented,
         kind,
         modifiers,
         name,
         name_location,
+        referenced_id: node_id,
         parameters,
         return_parameters,
         scope,
         state_mutability,
         virtual_,
         visibility,
+      };
+
+      Ok(ASTNode::FunctionDefinition {
+        node_id,
+        src_location,
+        signature: Box::new(signature),
+        implemented,
+        body,
       })
     }
     "EventDefinition" => {
@@ -4018,16 +4120,25 @@ pub fn node_from_json(
       let visibility =
         get_required_enum_with_context(val, "visibility", node_type_str)?;
 
-      Ok(ASTNode::ModifierDefinition {
-        node_id,
-        src_location,
-        body,
+      // Create the ModifierSignature node with a generated ID
+      let signature_node_id = generate_node_id();
+      let signature = ASTNode::ModifierSignature {
+        node_id: signature_node_id,
+        src_location: src_location.clone(),
         documentation,
         name,
         name_location,
+        referenced_id: node_id,
         parameters,
         virtual_,
         visibility,
+      };
+
+      Ok(ASTNode::ModifierDefinition {
+        node_id,
+        src_location,
+        signature: Box::new(signature),
+        body,
       })
     }
     "StructDefinition" => {
