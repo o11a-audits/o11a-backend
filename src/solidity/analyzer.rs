@@ -93,6 +93,7 @@ pub enum FirstPassDeclaration {
     base_contracts: Vec<ReferencedNode>,
     other_contracts: Vec<ReferencedNode>,
     public_members: Vec<i32>,
+    referenced_nodes: Vec<ReferencedNode>,
   },
   Flat {
     declaration_kind: NamedTopicKind,
@@ -383,6 +384,37 @@ fn process_first_pass_ast_nodes(
           })
           .collect();
 
+        // Collect type references from state variable declarations
+        let mut variable_type_references: Vec<ReferencedNode> = Vec::new();
+        for contract_node in contract_nodes {
+          match contract_node {
+            ASTNode::VariableDeclaration {
+              node_id: var_node_id,
+              state_variable,
+              type_name,
+              ..
+            } if *state_variable => {
+              collect_type_references(
+                type_name,
+                *var_node_id,
+                &mut variable_type_references,
+              );
+            }
+            ASTNode::StructDefinition {
+              node_id, members, ..
+            } => {
+              for node in members {
+                collect_type_references(
+                  node,
+                  *node_id,
+                  &mut variable_type_references,
+                );
+              }
+            }
+            _ => (),
+          }
+        }
+
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::Contract {
@@ -392,6 +424,7 @@ fn process_first_pass_ast_nodes(
             base_contracts: base_contract_ids,
             other_contracts: using_for_contracts,
             public_members: public_member_ids,
+            referenced_nodes: variable_type_references,
           },
         );
 
@@ -1007,6 +1040,40 @@ fn collect_references_and_statements(
   }
 }
 
+/// Recursively extracts type references from a type AST node.
+fn collect_type_references(
+  type_node: &ASTNode,
+  statement_node: i32,
+  references: &mut Vec<ReferencedNode>,
+) {
+  match type_node {
+    ASTNode::VariableDeclaration { type_name, .. } => {
+      collect_type_references(type_name, statement_node, references);
+    }
+    ASTNode::UserDefinedTypeName {
+      referenced_declaration,
+      ..
+    } => {
+      references.push(ReferencedNode {
+        statement_node,
+        referenced_node: *referenced_declaration,
+      });
+    }
+    ASTNode::Mapping {
+      key_type,
+      value_type,
+      ..
+    } => {
+      collect_type_references(key_type, statement_node, references);
+      collect_type_references(value_type, statement_node, references);
+    }
+    ASTNode::ArrayTypeName { base_type, .. } => {
+      collect_type_references(base_type, statement_node, references);
+    }
+    _ => (),
+  }
+}
+
 impl FirstPassDeclaration {
   /// Get the declaration kind for any declaration variant
   pub fn declaration_kind(&self) -> &NamedTopicKind {
@@ -1188,6 +1255,7 @@ fn process_tree_shake_declarations(
       base_contracts,
       other_contracts,
       public_members,
+      referenced_nodes,
       ..
     } => {
       // Process base contracts with BaseContract context
@@ -1207,6 +1275,18 @@ fn process_tree_shake_declarations(
         process_tree_shake_declarations(
           other_contract_ref.referenced_node,
           Some(other_contract_ref.statement_node), // This contract references the other contract
+          ReferenceProcessingMethod::Normal,
+          first_pass_declarations,
+          in_scope_declarations,
+          visiting,
+        )?;
+      }
+
+      // Process type references from state variable declarations
+      for ref_node in referenced_nodes {
+        process_tree_shake_declarations(
+          ref_node.referenced_node,
+          Some(ref_node.statement_node), // The VariableDeclaration node references the type
           ReferenceProcessingMethod::Normal,
           first_pass_declarations,
           in_scope_declarations,
