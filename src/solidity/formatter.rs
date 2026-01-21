@@ -1016,6 +1016,7 @@ fn do_node_to_source_text(
       name,
       constant,
       parameter_variable,
+      struct_field,
       ..
     } => {
       let type_str = do_node_to_source_text(
@@ -1055,7 +1056,11 @@ fn do_node_to_source_text(
       if *visibility != VariableVisibility::Internal {
         parts.push(format_keyword(&visibility_str));
       }
-      if *visibility == VariableVisibility::Internal && !parameter_variable {
+      // Only render "let" for local variables that are not parameters or struct fields
+      if *visibility == VariableVisibility::Internal
+        && !parameter_variable
+        && !struct_field
+      {
         parts.push(format_keyword("let"));
       }
       // Do not render an immutable modifier for internal variables (they are

@@ -273,7 +273,7 @@ fn shallow_parse_struct_definition(
   let name_location = get_required_source_location(val, "nameLocation")?;
   let visibility: VariableVisibility = get_required_enum(val, "visibility")?;
 
-  // Parse members (VariableDeclaration nodes)
+  // Parse members (VariableDeclaration nodes) and set struct_field to true
   let members_array = val
     .get("members")
     .and_then(|v| v.as_array())
@@ -282,7 +282,46 @@ fn shallow_parse_struct_definition(
   let members: Result<Vec<ASTNode>, String> = members_array
     .iter()
     .filter(|m| !m.is_null())
-    .map(|m| shallow_parse_variable_declaration(m))
+    .map(|m| {
+      let node = shallow_parse_variable_declaration(m)?;
+      // Set struct_field to true for struct members
+      Ok(match node {
+        ASTNode::VariableDeclaration {
+          node_id,
+          src_location,
+          constant,
+          function_selector,
+          mutability,
+          name,
+          name_location,
+          scope,
+          state_variable,
+          storage_location,
+          type_name,
+          value,
+          visibility,
+          parameter_variable,
+          ..
+        } => ASTNode::VariableDeclaration {
+          node_id,
+          src_location,
+          constant,
+          function_selector,
+          mutability,
+          name,
+          name_location,
+          scope,
+          state_variable,
+          storage_location,
+          type_name,
+          value,
+          visibility,
+          parameter_variable,
+          struct_field: true,
+        },
+        _ => node,
+      })
+    })
     .collect();
 
   Ok(ASTNode::StructDefinition {
@@ -432,6 +471,7 @@ fn shallow_parse_variable_declaration(
     value: None, // Parameters don't have values
     visibility,
     parameter_variable: true,
+    struct_field: false,
   })
 }
 
@@ -1506,6 +1546,7 @@ pub enum ASTNode {
     value: Option<Box<ASTNode>>,
     visibility: VariableVisibility,
     parameter_variable: bool,
+    struct_field: bool,
   },
 
   // Directive nodes
@@ -2703,6 +2744,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       value,
       visibility,
       parameter_variable,
+      struct_field,
     } => ASTNode::VariableDeclaration {
       node_id: node_id,
       src_location: src_location,
@@ -2721,6 +2763,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       },
       visibility: visibility,
       parameter_variable: parameter_variable,
+      struct_field: struct_field,
     },
     ASTNode::WhileStatement {
       node_id,
@@ -3308,6 +3351,7 @@ fn get_required_parameter_variable_declaration_vec_with_context(
         type_name,
         value,
         visibility,
+        struct_field,
         ..
       } => ASTNode::VariableDeclaration {
         node_id,
@@ -3324,6 +3368,60 @@ fn get_required_parameter_variable_declaration_vec_with_context(
         value,
         visibility,
         parameter_variable: true,
+        struct_field,
+      },
+      _ => node,
+    })
+    .collect();
+
+  Ok(updated_nodes)
+}
+
+fn get_required_struct_field_variable_declaration_vec_with_context(
+  val: &serde_json::Value,
+  field_name: &str,
+  node_type: &str,
+  context: &ParserContext,
+) -> Result<Vec<ASTNode>, String> {
+  let nodes = get_required_node_vec(val, field_name, context)
+    .map_err(|e| format!("Error parsing {} node: {}", node_type, e))?;
+
+  // Set struct_field to true for all VariableDeclaration nodes
+  let updated_nodes = nodes
+    .into_iter()
+    .map(|node| match node {
+      ASTNode::VariableDeclaration {
+        node_id,
+        src_location,
+        constant,
+        function_selector,
+        mutability,
+        name,
+        name_location,
+        scope,
+        state_variable,
+        storage_location,
+        type_name,
+        value,
+        visibility,
+        parameter_variable,
+        ..
+      } => ASTNode::VariableDeclaration {
+        node_id,
+        src_location,
+        constant,
+        function_selector,
+        mutability,
+        name,
+        name_location,
+        scope,
+        state_variable,
+        storage_location,
+        type_name,
+        value,
+        visibility,
+        parameter_variable,
+        struct_field: true,
       },
       _ => node,
     })
@@ -4687,6 +4785,9 @@ fn node_from_json(
         // child to a ParameterList node, this value will be set to true before
         // setting it into the ParameterList node variant
         parameter_variable: false,
+        // This is always set to false initially, but when this is parsed as a
+        // child to a StructDefinition node, this value will be set to true
+        struct_field: false,
       })
     }
     "WhileStatement" => {
@@ -4919,12 +5020,13 @@ fn node_from_json(
       })
     }
     "StructDefinition" => {
-      let members = get_required_node_vec_with_context(
-        val,
-        "members",
-        node_type_str,
-        context,
-      )?;
+      let members =
+        get_required_struct_field_variable_declaration_vec_with_context(
+          val,
+          "members",
+          node_type_str,
+          context,
+        )?;
       let canonical_name =
         get_required_string_with_context(val, "canonicalName", node_type_str)?;
       let name = get_required_string_with_context(val, "name", node_type_str)?;
