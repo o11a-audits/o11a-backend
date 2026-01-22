@@ -1,0 +1,3613 @@
+{
+  "abi": [
+    {
+      "type": "function",
+      "name": "NATIVE_TOKEN",
+      "inputs": [],
+      "outputs": [{ "name": "", "type": "address", "internalType": "address" }],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "NUDGE_ADMIN_ROLE",
+      "inputs": [],
+      "outputs": [{ "name": "", "type": "bytes32", "internalType": "bytes32" }],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "NUDGE_OPERATOR_ROLE",
+      "inputs": [],
+      "outputs": [{ "name": "", "type": "bytes32", "internalType": "bytes32" }],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "SWAP_CALLER_ROLE",
+      "inputs": [],
+      "outputs": [{ "name": "", "type": "bytes32", "internalType": "bytes32" }],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "campaignAddresses",
+      "inputs": [{ "name": "", "type": "uint256", "internalType": "uint256" }],
+      "outputs": [{ "name": "", "type": "address", "internalType": "address" }],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "collectFeesFromCampaigns",
+      "inputs": [
+        {
+          "name": "campaigns",
+          "type": "address[]",
+          "internalType": "address[]"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "deployAndFundCampaign",
+      "inputs": [
+        {
+          "name": "holdingPeriodInSeconds",
+          "type": "uint32",
+          "internalType": "uint32"
+        },
+        { "name": "targetToken", "type": "address", "internalType": "address" },
+        { "name": "rewardToken", "type": "address", "internalType": "address" },
+        { "name": "rewardPPQ", "type": "uint256", "internalType": "uint256" },
+        {
+          "name": "campaignAdmin",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "startTimestamp",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "alternativeWithdrawalAddress",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "initialRewardAmount",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        { "name": "uuid", "type": "uint256", "internalType": "uint256" }
+      ],
+      "outputs": [{ "name": "", "type": "address", "internalType": "address" }],
+      "stateMutability": "payable"
+    },
+    {
+      "type": "function",
+      "name": "deployCampaign",
+      "inputs": [
+        {
+          "name": "holdingPeriodInSeconds",
+          "type": "uint32",
+          "internalType": "uint32"
+        },
+        { "name": "targetToken", "type": "address", "internalType": "address" },
+        { "name": "rewardToken", "type": "address", "internalType": "address" },
+        { "name": "rewardPPQ", "type": "uint256", "internalType": "uint256" },
+        {
+          "name": "campaignAdmin",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "startTimestamp",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "alternativeWithdrawalAddress",
+          "type": "address",
+          "internalType": "address"
+        },
+        { "name": "uuid", "type": "uint256", "internalType": "uint256" }
+      ],
+      "outputs": [{ "name": "", "type": "address", "internalType": "address" }],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "getCampaignAddress",
+      "inputs": [
+        {
+          "name": "holdingPeriodInSeconds",
+          "type": "uint32",
+          "internalType": "uint32"
+        },
+        { "name": "targetToken", "type": "address", "internalType": "address" },
+        { "name": "rewardToken", "type": "address", "internalType": "address" },
+        { "name": "rewardPPQ", "type": "uint256", "internalType": "uint256" },
+        {
+          "name": "campaignAdmin",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "startTimestamp",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        { "name": "feeBps", "type": "uint16", "internalType": "uint16" },
+        {
+          "name": "alternativeWithdrawalAddress",
+          "type": "address",
+          "internalType": "address"
+        },
+        { "name": "uuid", "type": "uint256", "internalType": "uint256" }
+      ],
+      "outputs": [{ "name": "", "type": "address", "internalType": "address" }],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "getRoleAdmin",
+      "inputs": [
+        { "name": "role", "type": "bytes32", "internalType": "bytes32" }
+      ],
+      "outputs": [{ "name": "", "type": "bytes32", "internalType": "bytes32" }],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "grantRole",
+      "inputs": [
+        { "name": "role", "type": "bytes32", "internalType": "bytes32" },
+        { "name": "account", "type": "address", "internalType": "address" }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "hasRole",
+      "inputs": [
+        { "name": "role", "type": "bytes32", "internalType": "bytes32" },
+        { "name": "account", "type": "address", "internalType": "address" }
+      ],
+      "outputs": [{ "name": "", "type": "bool", "internalType": "bool" }],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "isCampaign",
+      "inputs": [{ "name": "", "type": "address", "internalType": "address" }],
+      "outputs": [{ "name": "", "type": "bool", "internalType": "bool" }],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "isCampaignPaused",
+      "inputs": [{ "name": "", "type": "address", "internalType": "address" }],
+      "outputs": [{ "name": "", "type": "bool", "internalType": "bool" }],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "nudgeTreasuryAddress",
+      "inputs": [],
+      "outputs": [{ "name": "", "type": "address", "internalType": "address" }],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "pauseCampaigns",
+      "inputs": [
+        {
+          "name": "campaigns",
+          "type": "address[]",
+          "internalType": "address[]"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "renounceRole",
+      "inputs": [
+        { "name": "role", "type": "bytes32", "internalType": "bytes32" },
+        {
+          "name": "callerConfirmation",
+          "type": "address",
+          "internalType": "address"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "revokeRole",
+      "inputs": [
+        { "name": "role", "type": "bytes32", "internalType": "bytes32" },
+        { "name": "account", "type": "address", "internalType": "address" }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "unpauseCampaigns",
+      "inputs": [
+        {
+          "name": "campaigns",
+          "type": "address[]",
+          "internalType": "address[]"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "updateFeeSetting",
+      "inputs": [
+        { "name": "newFeeBps", "type": "uint16", "internalType": "uint16" }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "updateTreasuryAddress",
+      "inputs": [
+        { "name": "newTreasury", "type": "address", "internalType": "address" }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "event",
+      "name": "CampaignDeployed",
+      "inputs": [
+        {
+          "name": "campaign",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
+          "name": "admin",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
+          "name": "targetToken",
+          "type": "address",
+          "indexed": false,
+          "internalType": "address"
+        },
+        {
+          "name": "rewardToken",
+          "type": "address",
+          "indexed": false,
+          "internalType": "address"
+        },
+        {
+          "name": "startTimestamp",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        },
+        {
+          "name": "uuid",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "CampaignsPaused",
+      "inputs": [
+        {
+          "name": "campaigns",
+          "type": "address[]",
+          "indexed": false,
+          "internalType": "address[]"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "CampaignsUnpaused",
+      "inputs": [
+        {
+          "name": "campaigns",
+          "type": "address[]",
+          "indexed": false,
+          "internalType": "address[]"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "FeeUpdated",
+      "inputs": [
+        {
+          "name": "oldFeeBps",
+          "type": "uint16",
+          "indexed": false,
+          "internalType": "uint16"
+        },
+        {
+          "name": "newFeeBps",
+          "type": "uint16",
+          "indexed": false,
+          "internalType": "uint16"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "FeesCollected",
+      "inputs": [
+        {
+          "name": "campaigns",
+          "type": "address[]",
+          "indexed": false,
+          "internalType": "address[]"
+        },
+        {
+          "name": "totalAmount",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "RoleAdminChanged",
+      "inputs": [
+        {
+          "name": "role",
+          "type": "bytes32",
+          "indexed": true,
+          "internalType": "bytes32"
+        },
+        {
+          "name": "previousAdminRole",
+          "type": "bytes32",
+          "indexed": true,
+          "internalType": "bytes32"
+        },
+        {
+          "name": "newAdminRole",
+          "type": "bytes32",
+          "indexed": true,
+          "internalType": "bytes32"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "RoleGranted",
+      "inputs": [
+        {
+          "name": "role",
+          "type": "bytes32",
+          "indexed": true,
+          "internalType": "bytes32"
+        },
+        {
+          "name": "account",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
+          "name": "sender",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "RoleRevoked",
+      "inputs": [
+        {
+          "name": "role",
+          "type": "bytes32",
+          "indexed": true,
+          "internalType": "bytes32"
+        },
+        {
+          "name": "account",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
+          "name": "sender",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "TreasuryUpdated",
+      "inputs": [
+        {
+          "name": "oldTreasury",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
+          "name": "newTreasury",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        }
+      ],
+      "anonymous": false
+    },
+    { "type": "error", "name": "AccessControlBadConfirmation", "inputs": [] },
+    {
+      "type": "error",
+      "name": "AccessControlUnauthorizedAccount",
+      "inputs": [
+        { "name": "account", "type": "address", "internalType": "address" },
+        { "name": "neededRole", "type": "bytes32", "internalType": "bytes32" }
+      ]
+    },
+    { "type": "error", "name": "CampaignAlreadyPaused", "inputs": [] },
+    { "type": "error", "name": "CampaignNotPaused", "inputs": [] },
+    { "type": "error", "name": "IncorrectEtherAmount", "inputs": [] },
+    { "type": "error", "name": "InvalidCampaign", "inputs": [] },
+    { "type": "error", "name": "InvalidFeeSetting", "inputs": [] },
+    { "type": "error", "name": "InvalidParameter", "inputs": [] },
+    { "type": "error", "name": "InvalidTreasuryAddress", "inputs": [] },
+    { "type": "error", "name": "NativeTokenTransferFailed", "inputs": [] },
+    { "type": "error", "name": "ZeroAddress", "inputs": [] }
+  ],
+  "bytecode": { "object": "0x", "sourceMap": "", "linkReferences": {} },
+  "deployedBytecode": { "object": "0x", "sourceMap": "", "linkReferences": {} },
+  "methodIdentifiers": {
+    "NATIVE_TOKEN()": "31f7d964",
+    "NUDGE_ADMIN_ROLE()": "8537ed1f",
+    "NUDGE_OPERATOR_ROLE()": "adf256f3",
+    "SWAP_CALLER_ROLE()": "620cad99",
+    "campaignAddresses(uint256)": "1b422e5f",
+    "collectFeesFromCampaigns(address[])": "2643fc1d",
+    "deployAndFundCampaign(uint32,address,address,uint256,address,uint256,address,uint256,uint256)": "3093586a",
+    "deployCampaign(uint32,address,address,uint256,address,uint256,address,uint256)": "f1104b7a",
+    "getCampaignAddress(uint32,address,address,uint256,address,uint256,uint16,address,uint256)": "be4434fb",
+    "getRoleAdmin(bytes32)": "248a9ca3",
+    "grantRole(bytes32,address)": "2f2ff15d",
+    "hasRole(bytes32,address)": "91d14854",
+    "isCampaign(address)": "e2714e1b",
+    "isCampaignPaused(address)": "71c0962a",
+    "nudgeTreasuryAddress()": "0da4eb87",
+    "pauseCampaigns(address[])": "b4879fc8",
+    "renounceRole(bytes32,address)": "36568abe",
+    "revokeRole(bytes32,address)": "d547741f",
+    "unpauseCampaigns(address[])": "6dc91e65",
+    "updateFeeSetting(uint16)": "01dd6060",
+    "updateTreasuryAddress(address)": "841e4561"
+  },
+  "rawMetadata": "{\"compiler\":{\"version\":\"0.8.28+commit.7893614a\"},\"language\":\"Solidity\",\"output\":{\"abi\":[{\"inputs\":[],\"name\":\"AccessControlBadConfirmation\",\"type\":\"error\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"account\",\"type\":\"address\"},{\"internalType\":\"bytes32\",\"name\":\"neededRole\",\"type\":\"bytes32\"}],\"name\":\"AccessControlUnauthorizedAccount\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"CampaignAlreadyPaused\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"CampaignNotPaused\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"IncorrectEtherAmount\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"InvalidCampaign\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"InvalidFeeSetting\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"InvalidParameter\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"InvalidTreasuryAddress\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"NativeTokenTransferFailed\",\"type\":\"error\"},{\"inputs\":[],\"name\":\"ZeroAddress\",\"type\":\"error\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"campaign\",\"type\":\"address\"},{\"indexed\":true,\"internalType\":\"address\",\"name\":\"admin\",\"type\":\"address\"},{\"indexed\":false,\"internalType\":\"address\",\"name\":\"targetToken\",\"type\":\"address\"},{\"indexed\":false,\"internalType\":\"address\",\"name\":\"rewardToken\",\"type\":\"address\"},{\"indexed\":false,\"internalType\":\"uint256\",\"name\":\"startTimestamp\",\"type\":\"uint256\"},{\"indexed\":false,\"internalType\":\"uint256\",\"name\":\"uuid\",\"type\":\"uint256\"}],\"name\":\"CampaignDeployed\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"internalType\":\"address[]\",\"name\":\"campaigns\",\"type\":\"address[]\"}],\"name\":\"CampaignsPaused\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"internalType\":\"address[]\",\"name\":\"campaigns\",\"type\":\"address[]\"}],\"name\":\"CampaignsUnpaused\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"internalType\":\"uint16\",\"name\":\"oldFeeBps\",\"type\":\"uint16\"},{\"indexed\":false,\"internalType\":\"uint16\",\"name\":\"newFeeBps\",\"type\":\"uint16\"}],\"name\":\"FeeUpdated\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"internalType\":\"address[]\",\"name\":\"campaigns\",\"type\":\"address[]\"},{\"indexed\":false,\"internalType\":\"uint256\",\"name\":\"totalAmount\",\"type\":\"uint256\"}],\"name\":\"FeesCollected\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"bytes32\",\"name\":\"role\",\"type\":\"bytes32\"},{\"indexed\":true,\"internalType\":\"bytes32\",\"name\":\"previousAdminRole\",\"type\":\"bytes32\"},{\"indexed\":true,\"internalType\":\"bytes32\",\"name\":\"newAdminRole\",\"type\":\"bytes32\"}],\"name\":\"RoleAdminChanged\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"bytes32\",\"name\":\"role\",\"type\":\"bytes32\"},{\"indexed\":true,\"internalType\":\"address\",\"name\":\"account\",\"type\":\"address\"},{\"indexed\":true,\"internalType\":\"address\",\"name\":\"sender\",\"type\":\"address\"}],\"name\":\"RoleGranted\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"bytes32\",\"name\":\"role\",\"type\":\"bytes32\"},{\"indexed\":true,\"internalType\":\"address\",\"name\":\"account\",\"type\":\"address\"},{\"indexed\":true,\"internalType\":\"address\",\"name\":\"sender\",\"type\":\"address\"}],\"name\":\"RoleRevoked\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"internalType\":\"address\",\"name\":\"oldTreasury\",\"type\":\"address\"},{\"indexed\":true,\"internalType\":\"address\",\"name\":\"newTreasury\",\"type\":\"address\"}],\"name\":\"TreasuryUpdated\",\"type\":\"event\"},{\"inputs\":[],\"name\":\"NATIVE_TOKEN\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"NUDGE_ADMIN_ROLE\",\"outputs\":[{\"internalType\":\"bytes32\",\"name\":\"\",\"type\":\"bytes32\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"NUDGE_OPERATOR_ROLE\",\"outputs\":[{\"internalType\":\"bytes32\",\"name\":\"\",\"type\":\"bytes32\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"SWAP_CALLER_ROLE\",\"outputs\":[{\"internalType\":\"bytes32\",\"name\":\"\",\"type\":\"bytes32\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"\",\"type\":\"uint256\"}],\"name\":\"campaignAddresses\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address[]\",\"name\":\"campaigns\",\"type\":\"address[]\"}],\"name\":\"collectFeesFromCampaigns\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"uint32\",\"name\":\"holdingPeriodInSeconds\",\"type\":\"uint32\"},{\"internalType\":\"address\",\"name\":\"targetToken\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"rewardToken\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"rewardPPQ\",\"type\":\"uint256\"},{\"internalType\":\"address\",\"name\":\"campaignAdmin\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"startTimestamp\",\"type\":\"uint256\"},{\"internalType\":\"address\",\"name\":\"alternativeWithdrawalAddress\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"initialRewardAmount\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"uuid\",\"type\":\"uint256\"}],\"name\":\"deployAndFundCampaign\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"payable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"uint32\",\"name\":\"holdingPeriodInSeconds\",\"type\":\"uint32\"},{\"internalType\":\"address\",\"name\":\"targetToken\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"rewardToken\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"rewardPPQ\",\"type\":\"uint256\"},{\"internalType\":\"address\",\"name\":\"campaignAdmin\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"startTimestamp\",\"type\":\"uint256\"},{\"internalType\":\"address\",\"name\":\"alternativeWithdrawalAddress\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"uuid\",\"type\":\"uint256\"}],\"name\":\"deployCampaign\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"uint32\",\"name\":\"holdingPeriodInSeconds\",\"type\":\"uint32\"},{\"internalType\":\"address\",\"name\":\"targetToken\",\"type\":\"address\"},{\"internalType\":\"address\",\"name\":\"rewardToken\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"rewardPPQ\",\"type\":\"uint256\"},{\"internalType\":\"address\",\"name\":\"campaignAdmin\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"startTimestamp\",\"type\":\"uint256\"},{\"internalType\":\"uint16\",\"name\":\"feeBps\",\"type\":\"uint16\"},{\"internalType\":\"address\",\"name\":\"alternativeWithdrawalAddress\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"uuid\",\"type\":\"uint256\"}],\"name\":\"getCampaignAddress\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"role\",\"type\":\"bytes32\"}],\"name\":\"getRoleAdmin\",\"outputs\":[{\"internalType\":\"bytes32\",\"name\":\"\",\"type\":\"bytes32\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"role\",\"type\":\"bytes32\"},{\"internalType\":\"address\",\"name\":\"account\",\"type\":\"address\"}],\"name\":\"grantRole\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"role\",\"type\":\"bytes32\"},{\"internalType\":\"address\",\"name\":\"account\",\"type\":\"address\"}],\"name\":\"hasRole\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"name\":\"isCampaign\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"name\":\"isCampaignPaused\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"nudgeTreasuryAddress\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address[]\",\"name\":\"campaigns\",\"type\":\"address[]\"}],\"name\":\"pauseCampaigns\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"role\",\"type\":\"bytes32\"},{\"internalType\":\"address\",\"name\":\"callerConfirmation\",\"type\":\"address\"}],\"name\":\"renounceRole\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"role\",\"type\":\"bytes32\"},{\"internalType\":\"address\",\"name\":\"account\",\"type\":\"address\"}],\"name\":\"revokeRole\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address[]\",\"name\":\"campaigns\",\"type\":\"address[]\"}],\"name\":\"unpauseCampaigns\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"uint16\",\"name\":\"newFeeBps\",\"type\":\"uint16\"}],\"name\":\"updateFeeSetting\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"newTreasury\",\"type\":\"address\"}],\"name\":\"updateTreasuryAddress\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}],\"devdoc\":{\"errors\":{\"AccessControlBadConfirmation()\":[{\"details\":\"The caller of a function is not the expected one. NOTE: Don't confuse with {AccessControlUnauthorizedAccount}.\"}],\"AccessControlUnauthorizedAccount(address,bytes32)\":[{\"details\":\"The `account` is missing a role.\"}]},\"events\":{\"RoleAdminChanged(bytes32,bytes32,bytes32)\":{\"details\":\"Emitted when `newAdminRole` is set as ``role``'s admin role, replacing `previousAdminRole` `DEFAULT_ADMIN_ROLE` is the starting admin for all roles, despite {RoleAdminChanged} not being emitted signaling this.\"},\"RoleGranted(bytes32,address,address)\":{\"details\":\"Emitted when `account` is granted `role`. `sender` is the account that originated the contract call. This account bears the admin role (for the granted role). Expected in cases where the role was granted using the internal {AccessControl-_grantRole}.\"},\"RoleRevoked(bytes32,address,address)\":{\"details\":\"Emitted when `account` is revoked `role`. `sender` is the account that originated the contract call:   - if using `revokeRole`, it is the admin role bearer   - if using `renounceRole`, it is the role bearer (i.e. `account`)\"}},\"kind\":\"dev\",\"methods\":{\"getRoleAdmin(bytes32)\":{\"details\":\"Returns the admin role that controls `role`. See {grantRole} and {revokeRole}. To change a role's admin, use {AccessControl-_setRoleAdmin}.\"},\"grantRole(bytes32,address)\":{\"details\":\"Grants `role` to `account`. If `account` had not been already granted `role`, emits a {RoleGranted} event. Requirements: - the caller must have ``role``'s admin role.\"},\"hasRole(bytes32,address)\":{\"details\":\"Returns `true` if `account` has been granted `role`.\"},\"renounceRole(bytes32,address)\":{\"details\":\"Revokes `role` from the calling account. Roles are often managed via {grantRole} and {revokeRole}: this function's purpose is to provide a mechanism for accounts to lose their privileges if they are compromised (such as when a trusted device is misplaced). If the calling account had been granted `role`, emits a {RoleRevoked} event. Requirements: - the caller must be `callerConfirmation`.\"},\"revokeRole(bytes32,address)\":{\"details\":\"Revokes `role` from `account`. If `account` had been granted `role`, emits a {RoleRevoked} event. Requirements: - the caller must have ``role``'s admin role.\"}},\"version\":1},\"userdoc\":{\"kind\":\"user\",\"methods\":{},\"version\":1}},\"settings\":{\"compilationTarget\":{\"src/campaign/interfaces/INudgeCampaignFactory.sol\":\"INudgeCampaignFactory\"},\"evmVersion\":\"cancun\",\"libraries\":{},\"metadata\":{\"bytecodeHash\":\"none\"},\"optimizer\":{\"enabled\":true,\"runs\":200},\"remappings\":[\":@openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/contracts/\",\":@openzeppelin/contracts/=lib/openzeppelin-contracts-upgradeable/lib/openzeppelin-contracts/contracts/\",\":@prb/test/=lib/prb-test/src/\",\":erc4626-tests/=lib/openzeppelin-contracts-upgradeable/lib/erc4626-tests/\",\":forge-std/=lib/forge-std/src/\",\":halmos-cheatcodes/=lib/openzeppelin-contracts-upgradeable/lib/halmos-cheatcodes/src/\",\":openzeppelin-contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/\",\":openzeppelin-contracts/=lib/openzeppelin-contracts/\",\":prb-test/=lib/prb-test/src/\"]},\"sources\":{\"lib/openzeppelin-contracts-upgradeable/lib/openzeppelin-contracts/contracts/access/IAccessControl.sol\":{\"keccak256\":\"0xc1c2a7f1563b77050dc6d507db9f4ada5d042c1f6a9ddbffdc49c77cdc0a1606\",\"license\":\"MIT\",\"urls\":[\"bzz-raw://fd54abb96a6156d9a761f6fdad1d3004bc48d2d4fce47f40a3f91a7ae83fc3a1\",\"dweb:/ipfs/QmUrFSGkTDJ7WaZ6qPVVe3Gn5uN2viPb7x7QQ35UX4DofX\"]},\"src/campaign/interfaces/INudgeCampaignFactory.sol\":{\"keccak256\":\"0xd0d43a48cc582056ab5c6f6212c297400c9da69ec6de3f1b63ac4fe22bd056bf\",\"license\":\"MIT\",\"urls\":[\"bzz-raw://f20134988408c465234c63f9cd89690f180aab1436577fd6a82a6bff5207072b\",\"dweb:/ipfs/QmSfdYCfsgAUYtpqUPNeRvwLm5C2Na1dTi6Df6We5c4bv2\"]}},\"version\":1}",
+  "metadata": {
+    "compiler": { "version": "0.8.28+commit.7893614a" },
+    "language": "Solidity",
+    "output": {
+      "abi": [
+        {
+          "inputs": [],
+          "type": "error",
+          "name": "AccessControlBadConfirmation"
+        },
+        {
+          "inputs": [
+            { "internalType": "address", "name": "account", "type": "address" },
+            {
+              "internalType": "bytes32",
+              "name": "neededRole",
+              "type": "bytes32"
+            }
+          ],
+          "type": "error",
+          "name": "AccessControlUnauthorizedAccount"
+        },
+        { "inputs": [], "type": "error", "name": "CampaignAlreadyPaused" },
+        { "inputs": [], "type": "error", "name": "CampaignNotPaused" },
+        { "inputs": [], "type": "error", "name": "IncorrectEtherAmount" },
+        { "inputs": [], "type": "error", "name": "InvalidCampaign" },
+        { "inputs": [], "type": "error", "name": "InvalidFeeSetting" },
+        { "inputs": [], "type": "error", "name": "InvalidParameter" },
+        { "inputs": [], "type": "error", "name": "InvalidTreasuryAddress" },
+        { "inputs": [], "type": "error", "name": "NativeTokenTransferFailed" },
+        { "inputs": [], "type": "error", "name": "ZeroAddress" },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "campaign",
+              "type": "address",
+              "indexed": true
+            },
+            {
+              "internalType": "address",
+              "name": "admin",
+              "type": "address",
+              "indexed": true
+            },
+            {
+              "internalType": "address",
+              "name": "targetToken",
+              "type": "address",
+              "indexed": false
+            },
+            {
+              "internalType": "address",
+              "name": "rewardToken",
+              "type": "address",
+              "indexed": false
+            },
+            {
+              "internalType": "uint256",
+              "name": "startTimestamp",
+              "type": "uint256",
+              "indexed": false
+            },
+            {
+              "internalType": "uint256",
+              "name": "uuid",
+              "type": "uint256",
+              "indexed": false
+            }
+          ],
+          "type": "event",
+          "name": "CampaignDeployed",
+          "anonymous": false
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address[]",
+              "name": "campaigns",
+              "type": "address[]",
+              "indexed": false
+            }
+          ],
+          "type": "event",
+          "name": "CampaignsPaused",
+          "anonymous": false
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address[]",
+              "name": "campaigns",
+              "type": "address[]",
+              "indexed": false
+            }
+          ],
+          "type": "event",
+          "name": "CampaignsUnpaused",
+          "anonymous": false
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "uint16",
+              "name": "oldFeeBps",
+              "type": "uint16",
+              "indexed": false
+            },
+            {
+              "internalType": "uint16",
+              "name": "newFeeBps",
+              "type": "uint16",
+              "indexed": false
+            }
+          ],
+          "type": "event",
+          "name": "FeeUpdated",
+          "anonymous": false
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address[]",
+              "name": "campaigns",
+              "type": "address[]",
+              "indexed": false
+            },
+            {
+              "internalType": "uint256",
+              "name": "totalAmount",
+              "type": "uint256",
+              "indexed": false
+            }
+          ],
+          "type": "event",
+          "name": "FeesCollected",
+          "anonymous": false
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "bytes32",
+              "name": "role",
+              "type": "bytes32",
+              "indexed": true
+            },
+            {
+              "internalType": "bytes32",
+              "name": "previousAdminRole",
+              "type": "bytes32",
+              "indexed": true
+            },
+            {
+              "internalType": "bytes32",
+              "name": "newAdminRole",
+              "type": "bytes32",
+              "indexed": true
+            }
+          ],
+          "type": "event",
+          "name": "RoleAdminChanged",
+          "anonymous": false
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "bytes32",
+              "name": "role",
+              "type": "bytes32",
+              "indexed": true
+            },
+            {
+              "internalType": "address",
+              "name": "account",
+              "type": "address",
+              "indexed": true
+            },
+            {
+              "internalType": "address",
+              "name": "sender",
+              "type": "address",
+              "indexed": true
+            }
+          ],
+          "type": "event",
+          "name": "RoleGranted",
+          "anonymous": false
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "bytes32",
+              "name": "role",
+              "type": "bytes32",
+              "indexed": true
+            },
+            {
+              "internalType": "address",
+              "name": "account",
+              "type": "address",
+              "indexed": true
+            },
+            {
+              "internalType": "address",
+              "name": "sender",
+              "type": "address",
+              "indexed": true
+            }
+          ],
+          "type": "event",
+          "name": "RoleRevoked",
+          "anonymous": false
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "oldTreasury",
+              "type": "address",
+              "indexed": true
+            },
+            {
+              "internalType": "address",
+              "name": "newTreasury",
+              "type": "address",
+              "indexed": true
+            }
+          ],
+          "type": "event",
+          "name": "TreasuryUpdated",
+          "anonymous": false
+        },
+        {
+          "inputs": [],
+          "stateMutability": "view",
+          "type": "function",
+          "name": "NATIVE_TOKEN",
+          "outputs": [
+            { "internalType": "address", "name": "", "type": "address" }
+          ]
+        },
+        {
+          "inputs": [],
+          "stateMutability": "view",
+          "type": "function",
+          "name": "NUDGE_ADMIN_ROLE",
+          "outputs": [
+            { "internalType": "bytes32", "name": "", "type": "bytes32" }
+          ]
+        },
+        {
+          "inputs": [],
+          "stateMutability": "view",
+          "type": "function",
+          "name": "NUDGE_OPERATOR_ROLE",
+          "outputs": [
+            { "internalType": "bytes32", "name": "", "type": "bytes32" }
+          ]
+        },
+        {
+          "inputs": [],
+          "stateMutability": "view",
+          "type": "function",
+          "name": "SWAP_CALLER_ROLE",
+          "outputs": [
+            { "internalType": "bytes32", "name": "", "type": "bytes32" }
+          ]
+        },
+        {
+          "inputs": [
+            { "internalType": "uint256", "name": "", "type": "uint256" }
+          ],
+          "stateMutability": "view",
+          "type": "function",
+          "name": "campaignAddresses",
+          "outputs": [
+            { "internalType": "address", "name": "", "type": "address" }
+          ]
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address[]",
+              "name": "campaigns",
+              "type": "address[]"
+            }
+          ],
+          "stateMutability": "nonpayable",
+          "type": "function",
+          "name": "collectFeesFromCampaigns"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "uint32",
+              "name": "holdingPeriodInSeconds",
+              "type": "uint32"
+            },
+            {
+              "internalType": "address",
+              "name": "targetToken",
+              "type": "address"
+            },
+            {
+              "internalType": "address",
+              "name": "rewardToken",
+              "type": "address"
+            },
+            {
+              "internalType": "uint256",
+              "name": "rewardPPQ",
+              "type": "uint256"
+            },
+            {
+              "internalType": "address",
+              "name": "campaignAdmin",
+              "type": "address"
+            },
+            {
+              "internalType": "uint256",
+              "name": "startTimestamp",
+              "type": "uint256"
+            },
+            {
+              "internalType": "address",
+              "name": "alternativeWithdrawalAddress",
+              "type": "address"
+            },
+            {
+              "internalType": "uint256",
+              "name": "initialRewardAmount",
+              "type": "uint256"
+            },
+            { "internalType": "uint256", "name": "uuid", "type": "uint256" }
+          ],
+          "stateMutability": "payable",
+          "type": "function",
+          "name": "deployAndFundCampaign",
+          "outputs": [
+            { "internalType": "address", "name": "", "type": "address" }
+          ]
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "uint32",
+              "name": "holdingPeriodInSeconds",
+              "type": "uint32"
+            },
+            {
+              "internalType": "address",
+              "name": "targetToken",
+              "type": "address"
+            },
+            {
+              "internalType": "address",
+              "name": "rewardToken",
+              "type": "address"
+            },
+            {
+              "internalType": "uint256",
+              "name": "rewardPPQ",
+              "type": "uint256"
+            },
+            {
+              "internalType": "address",
+              "name": "campaignAdmin",
+              "type": "address"
+            },
+            {
+              "internalType": "uint256",
+              "name": "startTimestamp",
+              "type": "uint256"
+            },
+            {
+              "internalType": "address",
+              "name": "alternativeWithdrawalAddress",
+              "type": "address"
+            },
+            { "internalType": "uint256", "name": "uuid", "type": "uint256" }
+          ],
+          "stateMutability": "nonpayable",
+          "type": "function",
+          "name": "deployCampaign",
+          "outputs": [
+            { "internalType": "address", "name": "", "type": "address" }
+          ]
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "uint32",
+              "name": "holdingPeriodInSeconds",
+              "type": "uint32"
+            },
+            {
+              "internalType": "address",
+              "name": "targetToken",
+              "type": "address"
+            },
+            {
+              "internalType": "address",
+              "name": "rewardToken",
+              "type": "address"
+            },
+            {
+              "internalType": "uint256",
+              "name": "rewardPPQ",
+              "type": "uint256"
+            },
+            {
+              "internalType": "address",
+              "name": "campaignAdmin",
+              "type": "address"
+            },
+            {
+              "internalType": "uint256",
+              "name": "startTimestamp",
+              "type": "uint256"
+            },
+            { "internalType": "uint16", "name": "feeBps", "type": "uint16" },
+            {
+              "internalType": "address",
+              "name": "alternativeWithdrawalAddress",
+              "type": "address"
+            },
+            { "internalType": "uint256", "name": "uuid", "type": "uint256" }
+          ],
+          "stateMutability": "view",
+          "type": "function",
+          "name": "getCampaignAddress",
+          "outputs": [
+            { "internalType": "address", "name": "", "type": "address" }
+          ]
+        },
+        {
+          "inputs": [
+            { "internalType": "bytes32", "name": "role", "type": "bytes32" }
+          ],
+          "stateMutability": "view",
+          "type": "function",
+          "name": "getRoleAdmin",
+          "outputs": [
+            { "internalType": "bytes32", "name": "", "type": "bytes32" }
+          ]
+        },
+        {
+          "inputs": [
+            { "internalType": "bytes32", "name": "role", "type": "bytes32" },
+            { "internalType": "address", "name": "account", "type": "address" }
+          ],
+          "stateMutability": "nonpayable",
+          "type": "function",
+          "name": "grantRole"
+        },
+        {
+          "inputs": [
+            { "internalType": "bytes32", "name": "role", "type": "bytes32" },
+            { "internalType": "address", "name": "account", "type": "address" }
+          ],
+          "stateMutability": "view",
+          "type": "function",
+          "name": "hasRole",
+          "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }]
+        },
+        {
+          "inputs": [
+            { "internalType": "address", "name": "", "type": "address" }
+          ],
+          "stateMutability": "view",
+          "type": "function",
+          "name": "isCampaign",
+          "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }]
+        },
+        {
+          "inputs": [
+            { "internalType": "address", "name": "", "type": "address" }
+          ],
+          "stateMutability": "view",
+          "type": "function",
+          "name": "isCampaignPaused",
+          "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }]
+        },
+        {
+          "inputs": [],
+          "stateMutability": "view",
+          "type": "function",
+          "name": "nudgeTreasuryAddress",
+          "outputs": [
+            { "internalType": "address", "name": "", "type": "address" }
+          ]
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address[]",
+              "name": "campaigns",
+              "type": "address[]"
+            }
+          ],
+          "stateMutability": "nonpayable",
+          "type": "function",
+          "name": "pauseCampaigns"
+        },
+        {
+          "inputs": [
+            { "internalType": "bytes32", "name": "role", "type": "bytes32" },
+            {
+              "internalType": "address",
+              "name": "callerConfirmation",
+              "type": "address"
+            }
+          ],
+          "stateMutability": "nonpayable",
+          "type": "function",
+          "name": "renounceRole"
+        },
+        {
+          "inputs": [
+            { "internalType": "bytes32", "name": "role", "type": "bytes32" },
+            { "internalType": "address", "name": "account", "type": "address" }
+          ],
+          "stateMutability": "nonpayable",
+          "type": "function",
+          "name": "revokeRole"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address[]",
+              "name": "campaigns",
+              "type": "address[]"
+            }
+          ],
+          "stateMutability": "nonpayable",
+          "type": "function",
+          "name": "unpauseCampaigns"
+        },
+        {
+          "inputs": [
+            { "internalType": "uint16", "name": "newFeeBps", "type": "uint16" }
+          ],
+          "stateMutability": "nonpayable",
+          "type": "function",
+          "name": "updateFeeSetting"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "newTreasury",
+              "type": "address"
+            }
+          ],
+          "stateMutability": "nonpayable",
+          "type": "function",
+          "name": "updateTreasuryAddress"
+        }
+      ],
+      "devdoc": {
+        "kind": "dev",
+        "methods": {
+          "getRoleAdmin(bytes32)": {
+            "details": "Returns the admin role that controls `role`. See {grantRole} and {revokeRole}. To change a role's admin, use {AccessControl-_setRoleAdmin}."
+          },
+          "grantRole(bytes32,address)": {
+            "details": "Grants `role` to `account`. If `account` had not been already granted `role`, emits a {RoleGranted} event. Requirements: - the caller must have ``role``'s admin role."
+          },
+          "hasRole(bytes32,address)": {
+            "details": "Returns `true` if `account` has been granted `role`."
+          },
+          "renounceRole(bytes32,address)": {
+            "details": "Revokes `role` from the calling account. Roles are often managed via {grantRole} and {revokeRole}: this function's purpose is to provide a mechanism for accounts to lose their privileges if they are compromised (such as when a trusted device is misplaced). If the calling account had been granted `role`, emits a {RoleRevoked} event. Requirements: - the caller must be `callerConfirmation`."
+          },
+          "revokeRole(bytes32,address)": {
+            "details": "Revokes `role` from `account`. If `account` had been granted `role`, emits a {RoleRevoked} event. Requirements: - the caller must have ``role``'s admin role."
+          }
+        },
+        "version": 1
+      },
+      "userdoc": { "kind": "user", "methods": {}, "version": 1 }
+    },
+    "settings": {
+      "remappings": [
+        "@openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/contracts/",
+        "@openzeppelin/contracts/=lib/openzeppelin-contracts-upgradeable/lib/openzeppelin-contracts/contracts/",
+        "@prb/test/=lib/prb-test/src/",
+        "erc4626-tests/=lib/openzeppelin-contracts-upgradeable/lib/erc4626-tests/",
+        "forge-std/=lib/forge-std/src/",
+        "halmos-cheatcodes/=lib/openzeppelin-contracts-upgradeable/lib/halmos-cheatcodes/src/",
+        "openzeppelin-contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/",
+        "openzeppelin-contracts/=lib/openzeppelin-contracts/",
+        "prb-test/=lib/prb-test/src/"
+      ],
+      "optimizer": { "enabled": true, "runs": 200 },
+      "metadata": { "bytecodeHash": "none" },
+      "compilationTarget": {
+        "src/campaign/interfaces/INudgeCampaignFactory.sol": "INudgeCampaignFactory"
+      },
+      "evmVersion": "cancun",
+      "libraries": {}
+    },
+    "sources": {
+      "lib/openzeppelin-contracts-upgradeable/lib/openzeppelin-contracts/contracts/access/IAccessControl.sol": {
+        "keccak256": "0xc1c2a7f1563b77050dc6d507db9f4ada5d042c1f6a9ddbffdc49c77cdc0a1606",
+        "urls": [
+          "bzz-raw://fd54abb96a6156d9a761f6fdad1d3004bc48d2d4fce47f40a3f91a7ae83fc3a1",
+          "dweb:/ipfs/QmUrFSGkTDJ7WaZ6qPVVe3Gn5uN2viPb7x7QQ35UX4DofX"
+        ],
+        "license": "MIT"
+      },
+      "src/campaign/interfaces/INudgeCampaignFactory.sol": {
+        "keccak256": "0xd0d43a48cc582056ab5c6f6212c297400c9da69ec6de3f1b63ac4fe22bd056bf",
+        "urls": [
+          "bzz-raw://f20134988408c465234c63f9cd89690f180aab1436577fd6a82a6bff5207072b",
+          "dweb:/ipfs/QmSfdYCfsgAUYtpqUPNeRvwLm5C2Na1dTi6Df6We5c4bv2"
+        ],
+        "license": "MIT"
+      }
+    },
+    "version": 1
+  },
+  "storageLayout": { "storage": [], "types": {} },
+  "ast": {
+    "absolutePath": "src/campaign/interfaces/INudgeCampaignFactory.sol",
+    "id": 49769,
+    "exportedSymbols": {
+      "IAccessControl": [39425],
+      "INudgeCampaignFactory": [49768]
+    },
+    "nodeType": "SourceUnit",
+    "src": "32:2865:52",
+    "nodes": [
+      {
+        "id": 49562,
+        "nodeType": "PragmaDirective",
+        "src": "32:24:52",
+        "nodes": [],
+        "literals": ["solidity", "^", "0.8", ".28"]
+      },
+      {
+        "id": 49563,
+        "nodeType": "ImportDirective",
+        "src": "58:59:52",
+        "nodes": [],
+        "absolutePath": "lib/openzeppelin-contracts-upgradeable/lib/openzeppelin-contracts/contracts/access/IAccessControl.sol",
+        "file": "@openzeppelin/contracts/access/IAccessControl.sol",
+        "nameLocation": "-1:-1:-1",
+        "scope": 49769,
+        "sourceUnit": 39426,
+        "symbolAliases": [],
+        "unitAlias": ""
+      },
+      {
+        "id": 49768,
+        "nodeType": "ContractDefinition",
+        "src": "119:2777:52",
+        "nodes": [
+          {
+            "id": 49570,
+            "nodeType": "FunctionDefinition",
+            "src": "175:60:52",
+            "nodes": [],
+            "functionSelector": "8537ed1f",
+            "implemented": false,
+            "kind": "function",
+            "modifiers": [],
+            "name": "NUDGE_ADMIN_ROLE",
+            "nameLocation": "184:16:52",
+            "parameters": {
+              "id": 49566,
+              "nodeType": "ParameterList",
+              "parameters": [],
+              "src": "200:2:52"
+            },
+            "returnParameters": {
+              "id": 49569,
+              "nodeType": "ParameterList",
+              "parameters": [
+                {
+                  "constant": false,
+                  "id": 49568,
+                  "mutability": "mutable",
+                  "name": "",
+                  "nameLocation": "-1:-1:-1",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49570,
+                  "src": "226:7:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_bytes32",
+                    "typeString": "bytes32"
+                  },
+                  "typeName": {
+                    "id": 49567,
+                    "name": "bytes32",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "226:7:52",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_bytes32",
+                      "typeString": "bytes32"
+                    }
+                  },
+                  "visibility": "internal"
+                }
+              ],
+              "src": "225:9:52"
+            },
+            "scope": 49768,
+            "stateMutability": "view",
+            "virtual": false,
+            "visibility": "external"
+          },
+          {
+            "id": 49575,
+            "nodeType": "FunctionDefinition",
+            "src": "240:63:52",
+            "nodes": [],
+            "functionSelector": "adf256f3",
+            "implemented": false,
+            "kind": "function",
+            "modifiers": [],
+            "name": "NUDGE_OPERATOR_ROLE",
+            "nameLocation": "249:19:52",
+            "parameters": {
+              "id": 49571,
+              "nodeType": "ParameterList",
+              "parameters": [],
+              "src": "268:2:52"
+            },
+            "returnParameters": {
+              "id": 49574,
+              "nodeType": "ParameterList",
+              "parameters": [
+                {
+                  "constant": false,
+                  "id": 49573,
+                  "mutability": "mutable",
+                  "name": "",
+                  "nameLocation": "-1:-1:-1",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49575,
+                  "src": "294:7:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_bytes32",
+                    "typeString": "bytes32"
+                  },
+                  "typeName": {
+                    "id": 49572,
+                    "name": "bytes32",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "294:7:52",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_bytes32",
+                      "typeString": "bytes32"
+                    }
+                  },
+                  "visibility": "internal"
+                }
+              ],
+              "src": "293:9:52"
+            },
+            "scope": 49768,
+            "stateMutability": "view",
+            "virtual": false,
+            "visibility": "external"
+          },
+          {
+            "id": 49580,
+            "nodeType": "FunctionDefinition",
+            "src": "308:60:52",
+            "nodes": [],
+            "functionSelector": "620cad99",
+            "implemented": false,
+            "kind": "function",
+            "modifiers": [],
+            "name": "SWAP_CALLER_ROLE",
+            "nameLocation": "317:16:52",
+            "parameters": {
+              "id": 49576,
+              "nodeType": "ParameterList",
+              "parameters": [],
+              "src": "333:2:52"
+            },
+            "returnParameters": {
+              "id": 49579,
+              "nodeType": "ParameterList",
+              "parameters": [
+                {
+                  "constant": false,
+                  "id": 49578,
+                  "mutability": "mutable",
+                  "name": "",
+                  "nameLocation": "-1:-1:-1",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49580,
+                  "src": "359:7:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_bytes32",
+                    "typeString": "bytes32"
+                  },
+                  "typeName": {
+                    "id": 49577,
+                    "name": "bytes32",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "359:7:52",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_bytes32",
+                      "typeString": "bytes32"
+                    }
+                  },
+                  "visibility": "internal"
+                }
+              ],
+              "src": "358:9:52"
+            },
+            "scope": 49768,
+            "stateMutability": "view",
+            "virtual": false,
+            "visibility": "external"
+          },
+          {
+            "id": 49585,
+            "nodeType": "FunctionDefinition",
+            "src": "373:56:52",
+            "nodes": [],
+            "functionSelector": "31f7d964",
+            "implemented": false,
+            "kind": "function",
+            "modifiers": [],
+            "name": "NATIVE_TOKEN",
+            "nameLocation": "382:12:52",
+            "parameters": {
+              "id": 49581,
+              "nodeType": "ParameterList",
+              "parameters": [],
+              "src": "394:2:52"
+            },
+            "returnParameters": {
+              "id": 49584,
+              "nodeType": "ParameterList",
+              "parameters": [
+                {
+                  "constant": false,
+                  "id": 49583,
+                  "mutability": "mutable",
+                  "name": "",
+                  "nameLocation": "-1:-1:-1",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49585,
+                  "src": "420:7:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_address",
+                    "typeString": "address"
+                  },
+                  "typeName": {
+                    "id": 49582,
+                    "name": "address",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "420:7:52",
+                    "stateMutability": "nonpayable",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_address",
+                      "typeString": "address"
+                    }
+                  },
+                  "visibility": "internal"
+                }
+              ],
+              "src": "419:9:52"
+            },
+            "scope": 49768,
+            "stateMutability": "view",
+            "virtual": false,
+            "visibility": "external"
+          },
+          {
+            "id": 49587,
+            "nodeType": "ErrorDefinition",
+            "src": "435:20:52",
+            "nodes": [],
+            "errorSelector": "d92e233d",
+            "name": "ZeroAddress",
+            "nameLocation": "441:11:52",
+            "parameters": {
+              "id": 49586,
+              "nodeType": "ParameterList",
+              "parameters": [],
+              "src": "452:2:52"
+            }
+          },
+          {
+            "id": 49589,
+            "nodeType": "ErrorDefinition",
+            "src": "460:31:52",
+            "nodes": [],
+            "errorSelector": "cfe2ea63",
+            "name": "InvalidTreasuryAddress",
+            "nameLocation": "466:22:52",
+            "parameters": {
+              "id": 49588,
+              "nodeType": "ParameterList",
+              "parameters": [],
+              "src": "488:2:52"
+            }
+          },
+          {
+            "id": 49591,
+            "nodeType": "ErrorDefinition",
+            "src": "496:25:52",
+            "nodes": [],
+            "errorSelector": "613970e0",
+            "name": "InvalidParameter",
+            "nameLocation": "502:16:52",
+            "parameters": {
+              "id": 49590,
+              "nodeType": "ParameterList",
+              "parameters": [],
+              "src": "518:2:52"
+            }
+          },
+          {
+            "id": 49593,
+            "nodeType": "ErrorDefinition",
+            "src": "526:24:52",
+            "nodes": [],
+            "errorSelector": "477a3e50",
+            "name": "InvalidCampaign",
+            "nameLocation": "532:15:52",
+            "parameters": {
+              "id": 49592,
+              "nodeType": "ParameterList",
+              "parameters": [],
+              "src": "547:2:52"
+            }
+          },
+          {
+            "id": 49595,
+            "nodeType": "ErrorDefinition",
+            "src": "555:30:52",
+            "nodes": [],
+            "errorSelector": "5cebfd4a",
+            "name": "CampaignAlreadyPaused",
+            "nameLocation": "561:21:52",
+            "parameters": {
+              "id": 49594,
+              "nodeType": "ParameterList",
+              "parameters": [],
+              "src": "582:2:52"
+            }
+          },
+          {
+            "id": 49597,
+            "nodeType": "ErrorDefinition",
+            "src": "590:26:52",
+            "nodes": [],
+            "errorSelector": "c851109a",
+            "name": "CampaignNotPaused",
+            "nameLocation": "596:17:52",
+            "parameters": {
+              "id": 49596,
+              "nodeType": "ParameterList",
+              "parameters": [],
+              "src": "613:2:52"
+            }
+          },
+          {
+            "id": 49599,
+            "nodeType": "ErrorDefinition",
+            "src": "621:34:52",
+            "nodes": [],
+            "errorSelector": "3022f2e4",
+            "name": "NativeTokenTransferFailed",
+            "nameLocation": "627:25:52",
+            "parameters": {
+              "id": 49598,
+              "nodeType": "ParameterList",
+              "parameters": [],
+              "src": "652:2:52"
+            }
+          },
+          {
+            "id": 49601,
+            "nodeType": "ErrorDefinition",
+            "src": "660:29:52",
+            "nodes": [],
+            "errorSelector": "35429146",
+            "name": "IncorrectEtherAmount",
+            "nameLocation": "666:20:52",
+            "parameters": {
+              "id": 49600,
+              "nodeType": "ParameterList",
+              "parameters": [],
+              "src": "686:2:52"
+            }
+          },
+          {
+            "id": 49603,
+            "nodeType": "ErrorDefinition",
+            "src": "694:26:52",
+            "nodes": [],
+            "errorSelector": "b34dad23",
+            "name": "InvalidFeeSetting",
+            "nameLocation": "700:17:52",
+            "parameters": {
+              "id": 49602,
+              "nodeType": "ParameterList",
+              "parameters": [],
+              "src": "717:2:52"
+            }
+          },
+          {
+            "id": 49617,
+            "nodeType": "EventDefinition",
+            "src": "726:206:52",
+            "nodes": [],
+            "anonymous": false,
+            "eventSelector": "8a485b4ff36109214be0efca429c224409c67d461cf57c3911534157742563f3",
+            "name": "CampaignDeployed",
+            "nameLocation": "732:16:52",
+            "parameters": {
+              "id": 49616,
+              "nodeType": "ParameterList",
+              "parameters": [
+                {
+                  "constant": false,
+                  "id": 49605,
+                  "indexed": true,
+                  "mutability": "mutable",
+                  "name": "campaign",
+                  "nameLocation": "774:8:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49617,
+                  "src": "758:24:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_address",
+                    "typeString": "address"
+                  },
+                  "typeName": {
+                    "id": 49604,
+                    "name": "address",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "758:7:52",
+                    "stateMutability": "nonpayable",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_address",
+                      "typeString": "address"
+                    }
+                  },
+                  "visibility": "internal"
+                },
+                {
+                  "constant": false,
+                  "id": 49607,
+                  "indexed": true,
+                  "mutability": "mutable",
+                  "name": "admin",
+                  "nameLocation": "808:5:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49617,
+                  "src": "792:21:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_address",
+                    "typeString": "address"
+                  },
+                  "typeName": {
+                    "id": 49606,
+                    "name": "address",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "792:7:52",
+                    "stateMutability": "nonpayable",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_address",
+                      "typeString": "address"
+                    }
+                  },
+                  "visibility": "internal"
+                },
+                {
+                  "constant": false,
+                  "id": 49609,
+                  "indexed": false,
+                  "mutability": "mutable",
+                  "name": "targetToken",
+                  "nameLocation": "831:11:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49617,
+                  "src": "823:19:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_address",
+                    "typeString": "address"
+                  },
+                  "typeName": {
+                    "id": 49608,
+                    "name": "address",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "823:7:52",
+                    "stateMutability": "nonpayable",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_address",
+                      "typeString": "address"
+                    }
+                  },
+                  "visibility": "internal"
+                },
+                {
+                  "constant": false,
+                  "id": 49611,
+                  "indexed": false,
+                  "mutability": "mutable",
+                  "name": "rewardToken",
+                  "nameLocation": "860:11:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49617,
+                  "src": "852:19:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_address",
+                    "typeString": "address"
+                  },
+                  "typeName": {
+                    "id": 49610,
+                    "name": "address",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "852:7:52",
+                    "stateMutability": "nonpayable",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_address",
+                      "typeString": "address"
+                    }
+                  },
+                  "visibility": "internal"
+                },
+                {
+                  "constant": false,
+                  "id": 49613,
+                  "indexed": false,
+                  "mutability": "mutable",
+                  "name": "startTimestamp",
+                  "nameLocation": "889:14:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49617,
+                  "src": "881:22:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_uint256",
+                    "typeString": "uint256"
+                  },
+                  "typeName": {
+                    "id": 49612,
+                    "name": "uint256",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "881:7:52",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_uint256",
+                      "typeString": "uint256"
+                    }
+                  },
+                  "visibility": "internal"
+                },
+                {
+                  "constant": false,
+                  "id": 49615,
+                  "indexed": false,
+                  "mutability": "mutable",
+                  "name": "uuid",
+                  "nameLocation": "921:4:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49617,
+                  "src": "913:12:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_uint256",
+                    "typeString": "uint256"
+                  },
+                  "typeName": {
+                    "id": 49614,
+                    "name": "uint256",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "913:7:52",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_uint256",
+                      "typeString": "uint256"
+                    }
+                  },
+                  "visibility": "internal"
+                }
+              ],
+              "src": "748:183:52"
+            }
+          },
+          {
+            "id": 49623,
+            "nodeType": "EventDefinition",
+            "src": "937:80:52",
+            "nodes": [],
+            "anonymous": false,
+            "eventSelector": "4ab5be82436d353e61ca18726e984e561f5c1cc7c6d38b29d2553c790434705a",
+            "name": "TreasuryUpdated",
+            "nameLocation": "943:15:52",
+            "parameters": {
+              "id": 49622,
+              "nodeType": "ParameterList",
+              "parameters": [
+                {
+                  "constant": false,
+                  "id": 49619,
+                  "indexed": true,
+                  "mutability": "mutable",
+                  "name": "oldTreasury",
+                  "nameLocation": "975:11:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49623,
+                  "src": "959:27:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_address",
+                    "typeString": "address"
+                  },
+                  "typeName": {
+                    "id": 49618,
+                    "name": "address",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "959:7:52",
+                    "stateMutability": "nonpayable",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_address",
+                      "typeString": "address"
+                    }
+                  },
+                  "visibility": "internal"
+                },
+                {
+                  "constant": false,
+                  "id": 49621,
+                  "indexed": true,
+                  "mutability": "mutable",
+                  "name": "newTreasury",
+                  "nameLocation": "1004:11:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49623,
+                  "src": "988:27:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_address",
+                    "typeString": "address"
+                  },
+                  "typeName": {
+                    "id": 49620,
+                    "name": "address",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "988:7:52",
+                    "stateMutability": "nonpayable",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_address",
+                      "typeString": "address"
+                    }
+                  },
+                  "visibility": "internal"
+                }
+              ],
+              "src": "958:58:52"
+            }
+          },
+          {
+            "id": 49628,
+            "nodeType": "EventDefinition",
+            "src": "1022:43:52",
+            "nodes": [],
+            "anonymous": false,
+            "eventSelector": "7bea7730b5f7dec3b33eecccf24bce2048cd842be0b6375b5163607612c8f32f",
+            "name": "CampaignsPaused",
+            "nameLocation": "1028:15:52",
+            "parameters": {
+              "id": 49627,
+              "nodeType": "ParameterList",
+              "parameters": [
+                {
+                  "constant": false,
+                  "id": 49626,
+                  "indexed": false,
+                  "mutability": "mutable",
+                  "name": "campaigns",
+                  "nameLocation": "1054:9:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49628,
+                  "src": "1044:19:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_array$_t_address_$dyn_memory_ptr",
+                    "typeString": "address[]"
+                  },
+                  "typeName": {
+                    "baseType": {
+                      "id": 49624,
+                      "name": "address",
+                      "nodeType": "ElementaryTypeName",
+                      "src": "1044:7:52",
+                      "stateMutability": "nonpayable",
+                      "typeDescriptions": {
+                        "typeIdentifier": "t_address",
+                        "typeString": "address"
+                      }
+                    },
+                    "id": 49625,
+                    "nodeType": "ArrayTypeName",
+                    "src": "1044:9:52",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_array$_t_address_$dyn_storage_ptr",
+                      "typeString": "address[]"
+                    }
+                  },
+                  "visibility": "internal"
+                }
+              ],
+              "src": "1043:21:52"
+            }
+          },
+          {
+            "id": 49633,
+            "nodeType": "EventDefinition",
+            "src": "1070:45:52",
+            "nodes": [],
+            "anonymous": false,
+            "eventSelector": "c354fd29f66dd3daba40cddbc6cba8e9bf5fe77cb8d3db181474a300d2892bc0",
+            "name": "CampaignsUnpaused",
+            "nameLocation": "1076:17:52",
+            "parameters": {
+              "id": 49632,
+              "nodeType": "ParameterList",
+              "parameters": [
+                {
+                  "constant": false,
+                  "id": 49631,
+                  "indexed": false,
+                  "mutability": "mutable",
+                  "name": "campaigns",
+                  "nameLocation": "1104:9:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49633,
+                  "src": "1094:19:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_array$_t_address_$dyn_memory_ptr",
+                    "typeString": "address[]"
+                  },
+                  "typeName": {
+                    "baseType": {
+                      "id": 49629,
+                      "name": "address",
+                      "nodeType": "ElementaryTypeName",
+                      "src": "1094:7:52",
+                      "stateMutability": "nonpayable",
+                      "typeDescriptions": {
+                        "typeIdentifier": "t_address",
+                        "typeString": "address"
+                      }
+                    },
+                    "id": 49630,
+                    "nodeType": "ArrayTypeName",
+                    "src": "1094:9:52",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_array$_t_address_$dyn_storage_ptr",
+                      "typeString": "address[]"
+                    }
+                  },
+                  "visibility": "internal"
+                }
+              ],
+              "src": "1093:21:52"
+            }
+          },
+          {
+            "id": 49640,
+            "nodeType": "EventDefinition",
+            "src": "1120:62:52",
+            "nodes": [],
+            "anonymous": false,
+            "eventSelector": "b85ae4f4912ba7db0bd6801c9e74518025e271fa9fc04e79964717cbb9ee6b39",
+            "name": "FeesCollected",
+            "nameLocation": "1126:13:52",
+            "parameters": {
+              "id": 49639,
+              "nodeType": "ParameterList",
+              "parameters": [
+                {
+                  "constant": false,
+                  "id": 49636,
+                  "indexed": false,
+                  "mutability": "mutable",
+                  "name": "campaigns",
+                  "nameLocation": "1150:9:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49640,
+                  "src": "1140:19:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_array$_t_address_$dyn_memory_ptr",
+                    "typeString": "address[]"
+                  },
+                  "typeName": {
+                    "baseType": {
+                      "id": 49634,
+                      "name": "address",
+                      "nodeType": "ElementaryTypeName",
+                      "src": "1140:7:52",
+                      "stateMutability": "nonpayable",
+                      "typeDescriptions": {
+                        "typeIdentifier": "t_address",
+                        "typeString": "address"
+                      }
+                    },
+                    "id": 49635,
+                    "nodeType": "ArrayTypeName",
+                    "src": "1140:9:52",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_array$_t_address_$dyn_storage_ptr",
+                      "typeString": "address[]"
+                    }
+                  },
+                  "visibility": "internal"
+                },
+                {
+                  "constant": false,
+                  "id": 49638,
+                  "indexed": false,
+                  "mutability": "mutable",
+                  "name": "totalAmount",
+                  "nameLocation": "1169:11:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49640,
+                  "src": "1161:19:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_uint256",
+                    "typeString": "uint256"
+                  },
+                  "typeName": {
+                    "id": 49637,
+                    "name": "uint256",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "1161:7:52",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_uint256",
+                      "typeString": "uint256"
+                    }
+                  },
+                  "visibility": "internal"
+                }
+              ],
+              "src": "1139:42:52"
+            }
+          },
+          {
+            "id": 49646,
+            "nodeType": "EventDefinition",
+            "src": "1187:53:52",
+            "nodes": [],
+            "anonymous": false,
+            "eventSelector": "2e7c4279000925b8ff0bca0e7109cbc47fc6f6c4edfb831ffe7466cf0af07fa0",
+            "name": "FeeUpdated",
+            "nameLocation": "1193:10:52",
+            "parameters": {
+              "id": 49645,
+              "nodeType": "ParameterList",
+              "parameters": [
+                {
+                  "constant": false,
+                  "id": 49642,
+                  "indexed": false,
+                  "mutability": "mutable",
+                  "name": "oldFeeBps",
+                  "nameLocation": "1211:9:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49646,
+                  "src": "1204:16:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_uint16",
+                    "typeString": "uint16"
+                  },
+                  "typeName": {
+                    "id": 49641,
+                    "name": "uint16",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "1204:6:52",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_uint16",
+                      "typeString": "uint16"
+                    }
+                  },
+                  "visibility": "internal"
+                },
+                {
+                  "constant": false,
+                  "id": 49644,
+                  "indexed": false,
+                  "mutability": "mutable",
+                  "name": "newFeeBps",
+                  "nameLocation": "1229:9:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49646,
+                  "src": "1222:16:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_uint16",
+                    "typeString": "uint16"
+                  },
+                  "typeName": {
+                    "id": 49643,
+                    "name": "uint16",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "1222:6:52",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_uint16",
+                      "typeString": "uint16"
+                    }
+                  },
+                  "visibility": "internal"
+                }
+              ],
+              "src": "1203:36:52"
+            }
+          },
+          {
+            "id": 49651,
+            "nodeType": "FunctionDefinition",
+            "src": "1246:64:52",
+            "nodes": [],
+            "functionSelector": "0da4eb87",
+            "implemented": false,
+            "kind": "function",
+            "modifiers": [],
+            "name": "nudgeTreasuryAddress",
+            "nameLocation": "1255:20:52",
+            "parameters": {
+              "id": 49647,
+              "nodeType": "ParameterList",
+              "parameters": [],
+              "src": "1275:2:52"
+            },
+            "returnParameters": {
+              "id": 49650,
+              "nodeType": "ParameterList",
+              "parameters": [
+                {
+                  "constant": false,
+                  "id": 49649,
+                  "mutability": "mutable",
+                  "name": "",
+                  "nameLocation": "-1:-1:-1",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49651,
+                  "src": "1301:7:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_address",
+                    "typeString": "address"
+                  },
+                  "typeName": {
+                    "id": 49648,
+                    "name": "address",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "1301:7:52",
+                    "stateMutability": "nonpayable",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_address",
+                      "typeString": "address"
+                    }
+                  },
+                  "visibility": "internal"
+                }
+              ],
+              "src": "1300:9:52"
+            },
+            "scope": 49768,
+            "stateMutability": "view",
+            "virtual": false,
+            "visibility": "external"
+          },
+          {
+            "id": 49658,
+            "nodeType": "FunctionDefinition",
+            "src": "1315:58:52",
+            "nodes": [],
+            "functionSelector": "e2714e1b",
+            "implemented": false,
+            "kind": "function",
+            "modifiers": [],
+            "name": "isCampaign",
+            "nameLocation": "1324:10:52",
+            "parameters": {
+              "id": 49654,
+              "nodeType": "ParameterList",
+              "parameters": [
+                {
+                  "constant": false,
+                  "id": 49653,
+                  "mutability": "mutable",
+                  "name": "",
+                  "nameLocation": "-1:-1:-1",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49658,
+                  "src": "1335:7:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_address",
+                    "typeString": "address"
+                  },
+                  "typeName": {
+                    "id": 49652,
+                    "name": "address",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "1335:7:52",
+                    "stateMutability": "nonpayable",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_address",
+                      "typeString": "address"
+                    }
+                  },
+                  "visibility": "internal"
+                }
+              ],
+              "src": "1334:9:52"
+            },
+            "returnParameters": {
+              "id": 49657,
+              "nodeType": "ParameterList",
+              "parameters": [
+                {
+                  "constant": false,
+                  "id": 49656,
+                  "mutability": "mutable",
+                  "name": "",
+                  "nameLocation": "-1:-1:-1",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49658,
+                  "src": "1367:4:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_bool",
+                    "typeString": "bool"
+                  },
+                  "typeName": {
+                    "id": 49655,
+                    "name": "bool",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "1367:4:52",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_bool",
+                      "typeString": "bool"
+                    }
+                  },
+                  "visibility": "internal"
+                }
+              ],
+              "src": "1366:6:52"
+            },
+            "scope": 49768,
+            "stateMutability": "view",
+            "virtual": false,
+            "visibility": "external"
+          },
+          {
+            "id": 49665,
+            "nodeType": "FunctionDefinition",
+            "src": "1378:68:52",
+            "nodes": [],
+            "functionSelector": "1b422e5f",
+            "implemented": false,
+            "kind": "function",
+            "modifiers": [],
+            "name": "campaignAddresses",
+            "nameLocation": "1387:17:52",
+            "parameters": {
+              "id": 49661,
+              "nodeType": "ParameterList",
+              "parameters": [
+                {
+                  "constant": false,
+                  "id": 49660,
+                  "mutability": "mutable",
+                  "name": "",
+                  "nameLocation": "-1:-1:-1",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49665,
+                  "src": "1405:7:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_uint256",
+                    "typeString": "uint256"
+                  },
+                  "typeName": {
+                    "id": 49659,
+                    "name": "uint256",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "1405:7:52",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_uint256",
+                      "typeString": "uint256"
+                    }
+                  },
+                  "visibility": "internal"
+                }
+              ],
+              "src": "1404:9:52"
+            },
+            "returnParameters": {
+              "id": 49664,
+              "nodeType": "ParameterList",
+              "parameters": [
+                {
+                  "constant": false,
+                  "id": 49663,
+                  "mutability": "mutable",
+                  "name": "",
+                  "nameLocation": "-1:-1:-1",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49665,
+                  "src": "1437:7:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_address",
+                    "typeString": "address"
+                  },
+                  "typeName": {
+                    "id": 49662,
+                    "name": "address",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "1437:7:52",
+                    "stateMutability": "nonpayable",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_address",
+                      "typeString": "address"
+                    }
+                  },
+                  "visibility": "internal"
+                }
+              ],
+              "src": "1436:9:52"
+            },
+            "scope": 49768,
+            "stateMutability": "view",
+            "virtual": false,
+            "visibility": "external"
+          },
+          {
+            "id": 49672,
+            "nodeType": "FunctionDefinition",
+            "src": "1451:64:52",
+            "nodes": [],
+            "functionSelector": "71c0962a",
+            "implemented": false,
+            "kind": "function",
+            "modifiers": [],
+            "name": "isCampaignPaused",
+            "nameLocation": "1460:16:52",
+            "parameters": {
+              "id": 49668,
+              "nodeType": "ParameterList",
+              "parameters": [
+                {
+                  "constant": false,
+                  "id": 49667,
+                  "mutability": "mutable",
+                  "name": "",
+                  "nameLocation": "-1:-1:-1",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49672,
+                  "src": "1477:7:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_address",
+                    "typeString": "address"
+                  },
+                  "typeName": {
+                    "id": 49666,
+                    "name": "address",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "1477:7:52",
+                    "stateMutability": "nonpayable",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_address",
+                      "typeString": "address"
+                    }
+                  },
+                  "visibility": "internal"
+                }
+              ],
+              "src": "1476:9:52"
+            },
+            "returnParameters": {
+              "id": 49671,
+              "nodeType": "ParameterList",
+              "parameters": [
+                {
+                  "constant": false,
+                  "id": 49670,
+                  "mutability": "mutable",
+                  "name": "",
+                  "nameLocation": "-1:-1:-1",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49672,
+                  "src": "1509:4:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_bool",
+                    "typeString": "bool"
+                  },
+                  "typeName": {
+                    "id": 49669,
+                    "name": "bool",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "1509:4:52",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_bool",
+                      "typeString": "bool"
+                    }
+                  },
+                  "visibility": "internal"
+                }
+              ],
+              "src": "1508:6:52"
+            },
+            "scope": 49768,
+            "stateMutability": "view",
+            "virtual": false,
+            "visibility": "external"
+          },
+          {
+            "id": 49693,
+            "nodeType": "FunctionDefinition",
+            "src": "1521:312:52",
+            "nodes": [],
+            "functionSelector": "f1104b7a",
+            "implemented": false,
+            "kind": "function",
+            "modifiers": [],
+            "name": "deployCampaign",
+            "nameLocation": "1530:14:52",
+            "parameters": {
+              "id": 49689,
+              "nodeType": "ParameterList",
+              "parameters": [
+                {
+                  "constant": false,
+                  "id": 49674,
+                  "mutability": "mutable",
+                  "name": "holdingPeriodInSeconds",
+                  "nameLocation": "1561:22:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49693,
+                  "src": "1554:29:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_uint32",
+                    "typeString": "uint32"
+                  },
+                  "typeName": {
+                    "id": 49673,
+                    "name": "uint32",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "1554:6:52",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_uint32",
+                      "typeString": "uint32"
+                    }
+                  },
+                  "visibility": "internal"
+                },
+                {
+                  "constant": false,
+                  "id": 49676,
+                  "mutability": "mutable",
+                  "name": "targetToken",
+                  "nameLocation": "1601:11:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49693,
+                  "src": "1593:19:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_address",
+                    "typeString": "address"
+                  },
+                  "typeName": {
+                    "id": 49675,
+                    "name": "address",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "1593:7:52",
+                    "stateMutability": "nonpayable",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_address",
+                      "typeString": "address"
+                    }
+                  },
+                  "visibility": "internal"
+                },
+                {
+                  "constant": false,
+                  "id": 49678,
+                  "mutability": "mutable",
+                  "name": "rewardToken",
+                  "nameLocation": "1630:11:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49693,
+                  "src": "1622:19:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_address",
+                    "typeString": "address"
+                  },
+                  "typeName": {
+                    "id": 49677,
+                    "name": "address",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "1622:7:52",
+                    "stateMutability": "nonpayable",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_address",
+                      "typeString": "address"
+                    }
+                  },
+                  "visibility": "internal"
+                },
+                {
+                  "constant": false,
+                  "id": 49680,
+                  "mutability": "mutable",
+                  "name": "rewardPPQ",
+                  "nameLocation": "1659:9:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49693,
+                  "src": "1651:17:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_uint256",
+                    "typeString": "uint256"
+                  },
+                  "typeName": {
+                    "id": 49679,
+                    "name": "uint256",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "1651:7:52",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_uint256",
+                      "typeString": "uint256"
+                    }
+                  },
+                  "visibility": "internal"
+                },
+                {
+                  "constant": false,
+                  "id": 49682,
+                  "mutability": "mutable",
+                  "name": "campaignAdmin",
+                  "nameLocation": "1686:13:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49693,
+                  "src": "1678:21:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_address",
+                    "typeString": "address"
+                  },
+                  "typeName": {
+                    "id": 49681,
+                    "name": "address",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "1678:7:52",
+                    "stateMutability": "nonpayable",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_address",
+                      "typeString": "address"
+                    }
+                  },
+                  "visibility": "internal"
+                },
+                {
+                  "constant": false,
+                  "id": 49684,
+                  "mutability": "mutable",
+                  "name": "startTimestamp",
+                  "nameLocation": "1717:14:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49693,
+                  "src": "1709:22:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_uint256",
+                    "typeString": "uint256"
+                  },
+                  "typeName": {
+                    "id": 49683,
+                    "name": "uint256",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "1709:7:52",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_uint256",
+                      "typeString": "uint256"
+                    }
+                  },
+                  "visibility": "internal"
+                },
+                {
+                  "constant": false,
+                  "id": 49686,
+                  "mutability": "mutable",
+                  "name": "alternativeWithdrawalAddress",
+                  "nameLocation": "1749:28:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49693,
+                  "src": "1741:36:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_address",
+                    "typeString": "address"
+                  },
+                  "typeName": {
+                    "id": 49685,
+                    "name": "address",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "1741:7:52",
+                    "stateMutability": "nonpayable",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_address",
+                      "typeString": "address"
+                    }
+                  },
+                  "visibility": "internal"
+                },
+                {
+                  "constant": false,
+                  "id": 49688,
+                  "mutability": "mutable",
+                  "name": "uuid",
+                  "nameLocation": "1795:4:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49693,
+                  "src": "1787:12:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_uint256",
+                    "typeString": "uint256"
+                  },
+                  "typeName": {
+                    "id": 49687,
+                    "name": "uint256",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "1787:7:52",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_uint256",
+                      "typeString": "uint256"
+                    }
+                  },
+                  "visibility": "internal"
+                }
+              ],
+              "src": "1544:261:52"
+            },
+            "returnParameters": {
+              "id": 49692,
+              "nodeType": "ParameterList",
+              "parameters": [
+                {
+                  "constant": false,
+                  "id": 49691,
+                  "mutability": "mutable",
+                  "name": "",
+                  "nameLocation": "-1:-1:-1",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49693,
+                  "src": "1824:7:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_address",
+                    "typeString": "address"
+                  },
+                  "typeName": {
+                    "id": 49690,
+                    "name": "address",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "1824:7:52",
+                    "stateMutability": "nonpayable",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_address",
+                      "typeString": "address"
+                    }
+                  },
+                  "visibility": "internal"
+                }
+              ],
+              "src": "1823:9:52"
+            },
+            "scope": 49768,
+            "stateMutability": "nonpayable",
+            "virtual": false,
+            "visibility": "external"
+          },
+          {
+            "id": 49716,
+            "nodeType": "FunctionDefinition",
+            "src": "1839:364:52",
+            "nodes": [],
+            "functionSelector": "3093586a",
+            "implemented": false,
+            "kind": "function",
+            "modifiers": [],
+            "name": "deployAndFundCampaign",
+            "nameLocation": "1848:21:52",
+            "parameters": {
+              "id": 49712,
+              "nodeType": "ParameterList",
+              "parameters": [
+                {
+                  "constant": false,
+                  "id": 49695,
+                  "mutability": "mutable",
+                  "name": "holdingPeriodInSeconds",
+                  "nameLocation": "1886:22:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49716,
+                  "src": "1879:29:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_uint32",
+                    "typeString": "uint32"
+                  },
+                  "typeName": {
+                    "id": 49694,
+                    "name": "uint32",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "1879:6:52",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_uint32",
+                      "typeString": "uint32"
+                    }
+                  },
+                  "visibility": "internal"
+                },
+                {
+                  "constant": false,
+                  "id": 49697,
+                  "mutability": "mutable",
+                  "name": "targetToken",
+                  "nameLocation": "1926:11:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49716,
+                  "src": "1918:19:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_address",
+                    "typeString": "address"
+                  },
+                  "typeName": {
+                    "id": 49696,
+                    "name": "address",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "1918:7:52",
+                    "stateMutability": "nonpayable",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_address",
+                      "typeString": "address"
+                    }
+                  },
+                  "visibility": "internal"
+                },
+                {
+                  "constant": false,
+                  "id": 49699,
+                  "mutability": "mutable",
+                  "name": "rewardToken",
+                  "nameLocation": "1955:11:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49716,
+                  "src": "1947:19:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_address",
+                    "typeString": "address"
+                  },
+                  "typeName": {
+                    "id": 49698,
+                    "name": "address",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "1947:7:52",
+                    "stateMutability": "nonpayable",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_address",
+                      "typeString": "address"
+                    }
+                  },
+                  "visibility": "internal"
+                },
+                {
+                  "constant": false,
+                  "id": 49701,
+                  "mutability": "mutable",
+                  "name": "rewardPPQ",
+                  "nameLocation": "1984:9:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49716,
+                  "src": "1976:17:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_uint256",
+                    "typeString": "uint256"
+                  },
+                  "typeName": {
+                    "id": 49700,
+                    "name": "uint256",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "1976:7:52",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_uint256",
+                      "typeString": "uint256"
+                    }
+                  },
+                  "visibility": "internal"
+                },
+                {
+                  "constant": false,
+                  "id": 49703,
+                  "mutability": "mutable",
+                  "name": "campaignAdmin",
+                  "nameLocation": "2011:13:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49716,
+                  "src": "2003:21:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_address",
+                    "typeString": "address"
+                  },
+                  "typeName": {
+                    "id": 49702,
+                    "name": "address",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "2003:7:52",
+                    "stateMutability": "nonpayable",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_address",
+                      "typeString": "address"
+                    }
+                  },
+                  "visibility": "internal"
+                },
+                {
+                  "constant": false,
+                  "id": 49705,
+                  "mutability": "mutable",
+                  "name": "startTimestamp",
+                  "nameLocation": "2042:14:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49716,
+                  "src": "2034:22:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_uint256",
+                    "typeString": "uint256"
+                  },
+                  "typeName": {
+                    "id": 49704,
+                    "name": "uint256",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "2034:7:52",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_uint256",
+                      "typeString": "uint256"
+                    }
+                  },
+                  "visibility": "internal"
+                },
+                {
+                  "constant": false,
+                  "id": 49707,
+                  "mutability": "mutable",
+                  "name": "alternativeWithdrawalAddress",
+                  "nameLocation": "2074:28:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49716,
+                  "src": "2066:36:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_address",
+                    "typeString": "address"
+                  },
+                  "typeName": {
+                    "id": 49706,
+                    "name": "address",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "2066:7:52",
+                    "stateMutability": "nonpayable",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_address",
+                      "typeString": "address"
+                    }
+                  },
+                  "visibility": "internal"
+                },
+                {
+                  "constant": false,
+                  "id": 49709,
+                  "mutability": "mutable",
+                  "name": "initialRewardAmount",
+                  "nameLocation": "2120:19:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49716,
+                  "src": "2112:27:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_uint256",
+                    "typeString": "uint256"
+                  },
+                  "typeName": {
+                    "id": 49708,
+                    "name": "uint256",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "2112:7:52",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_uint256",
+                      "typeString": "uint256"
+                    }
+                  },
+                  "visibility": "internal"
+                },
+                {
+                  "constant": false,
+                  "id": 49711,
+                  "mutability": "mutable",
+                  "name": "uuid",
+                  "nameLocation": "2157:4:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49716,
+                  "src": "2149:12:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_uint256",
+                    "typeString": "uint256"
+                  },
+                  "typeName": {
+                    "id": 49710,
+                    "name": "uint256",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "2149:7:52",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_uint256",
+                      "typeString": "uint256"
+                    }
+                  },
+                  "visibility": "internal"
+                }
+              ],
+              "src": "1869:298:52"
+            },
+            "returnParameters": {
+              "id": 49715,
+              "nodeType": "ParameterList",
+              "parameters": [
+                {
+                  "constant": false,
+                  "id": 49714,
+                  "mutability": "mutable",
+                  "name": "",
+                  "nameLocation": "-1:-1:-1",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49716,
+                  "src": "2194:7:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_address",
+                    "typeString": "address"
+                  },
+                  "typeName": {
+                    "id": 49713,
+                    "name": "address",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "2194:7:52",
+                    "stateMutability": "nonpayable",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_address",
+                      "typeString": "address"
+                    }
+                  },
+                  "visibility": "internal"
+                }
+              ],
+              "src": "2193:9:52"
+            },
+            "scope": 49768,
+            "stateMutability": "payable",
+            "virtual": false,
+            "visibility": "external"
+          },
+          {
+            "id": 49739,
+            "nodeType": "FunctionDefinition",
+            "src": "2209:344:52",
+            "nodes": [],
+            "functionSelector": "be4434fb",
+            "implemented": false,
+            "kind": "function",
+            "modifiers": [],
+            "name": "getCampaignAddress",
+            "nameLocation": "2218:18:52",
+            "parameters": {
+              "id": 49735,
+              "nodeType": "ParameterList",
+              "parameters": [
+                {
+                  "constant": false,
+                  "id": 49718,
+                  "mutability": "mutable",
+                  "name": "holdingPeriodInSeconds",
+                  "nameLocation": "2253:22:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49739,
+                  "src": "2246:29:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_uint32",
+                    "typeString": "uint32"
+                  },
+                  "typeName": {
+                    "id": 49717,
+                    "name": "uint32",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "2246:6:52",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_uint32",
+                      "typeString": "uint32"
+                    }
+                  },
+                  "visibility": "internal"
+                },
+                {
+                  "constant": false,
+                  "id": 49720,
+                  "mutability": "mutable",
+                  "name": "targetToken",
+                  "nameLocation": "2293:11:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49739,
+                  "src": "2285:19:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_address",
+                    "typeString": "address"
+                  },
+                  "typeName": {
+                    "id": 49719,
+                    "name": "address",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "2285:7:52",
+                    "stateMutability": "nonpayable",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_address",
+                      "typeString": "address"
+                    }
+                  },
+                  "visibility": "internal"
+                },
+                {
+                  "constant": false,
+                  "id": 49722,
+                  "mutability": "mutable",
+                  "name": "rewardToken",
+                  "nameLocation": "2322:11:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49739,
+                  "src": "2314:19:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_address",
+                    "typeString": "address"
+                  },
+                  "typeName": {
+                    "id": 49721,
+                    "name": "address",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "2314:7:52",
+                    "stateMutability": "nonpayable",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_address",
+                      "typeString": "address"
+                    }
+                  },
+                  "visibility": "internal"
+                },
+                {
+                  "constant": false,
+                  "id": 49724,
+                  "mutability": "mutable",
+                  "name": "rewardPPQ",
+                  "nameLocation": "2351:9:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49739,
+                  "src": "2343:17:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_uint256",
+                    "typeString": "uint256"
+                  },
+                  "typeName": {
+                    "id": 49723,
+                    "name": "uint256",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "2343:7:52",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_uint256",
+                      "typeString": "uint256"
+                    }
+                  },
+                  "visibility": "internal"
+                },
+                {
+                  "constant": false,
+                  "id": 49726,
+                  "mutability": "mutable",
+                  "name": "campaignAdmin",
+                  "nameLocation": "2378:13:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49739,
+                  "src": "2370:21:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_address",
+                    "typeString": "address"
+                  },
+                  "typeName": {
+                    "id": 49725,
+                    "name": "address",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "2370:7:52",
+                    "stateMutability": "nonpayable",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_address",
+                      "typeString": "address"
+                    }
+                  },
+                  "visibility": "internal"
+                },
+                {
+                  "constant": false,
+                  "id": 49728,
+                  "mutability": "mutable",
+                  "name": "startTimestamp",
+                  "nameLocation": "2409:14:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49739,
+                  "src": "2401:22:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_uint256",
+                    "typeString": "uint256"
+                  },
+                  "typeName": {
+                    "id": 49727,
+                    "name": "uint256",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "2401:7:52",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_uint256",
+                      "typeString": "uint256"
+                    }
+                  },
+                  "visibility": "internal"
+                },
+                {
+                  "constant": false,
+                  "id": 49730,
+                  "mutability": "mutable",
+                  "name": "feeBps",
+                  "nameLocation": "2440:6:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49739,
+                  "src": "2433:13:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_uint16",
+                    "typeString": "uint16"
+                  },
+                  "typeName": {
+                    "id": 49729,
+                    "name": "uint16",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "2433:6:52",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_uint16",
+                      "typeString": "uint16"
+                    }
+                  },
+                  "visibility": "internal"
+                },
+                {
+                  "constant": false,
+                  "id": 49732,
+                  "mutability": "mutable",
+                  "name": "alternativeWithdrawalAddress",
+                  "nameLocation": "2464:28:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49739,
+                  "src": "2456:36:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_address",
+                    "typeString": "address"
+                  },
+                  "typeName": {
+                    "id": 49731,
+                    "name": "address",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "2456:7:52",
+                    "stateMutability": "nonpayable",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_address",
+                      "typeString": "address"
+                    }
+                  },
+                  "visibility": "internal"
+                },
+                {
+                  "constant": false,
+                  "id": 49734,
+                  "mutability": "mutable",
+                  "name": "uuid",
+                  "nameLocation": "2510:4:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49739,
+                  "src": "2502:12:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_uint256",
+                    "typeString": "uint256"
+                  },
+                  "typeName": {
+                    "id": 49733,
+                    "name": "uint256",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "2502:7:52",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_uint256",
+                      "typeString": "uint256"
+                    }
+                  },
+                  "visibility": "internal"
+                }
+              ],
+              "src": "2236:284:52"
+            },
+            "returnParameters": {
+              "id": 49738,
+              "nodeType": "ParameterList",
+              "parameters": [
+                {
+                  "constant": false,
+                  "id": 49737,
+                  "mutability": "mutable",
+                  "name": "",
+                  "nameLocation": "-1:-1:-1",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49739,
+                  "src": "2544:7:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_address",
+                    "typeString": "address"
+                  },
+                  "typeName": {
+                    "id": 49736,
+                    "name": "address",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "2544:7:52",
+                    "stateMutability": "nonpayable",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_address",
+                      "typeString": "address"
+                    }
+                  },
+                  "visibility": "internal"
+                }
+              ],
+              "src": "2543:9:52"
+            },
+            "scope": 49768,
+            "stateMutability": "view",
+            "virtual": false,
+            "visibility": "external"
+          },
+          {
+            "id": 49744,
+            "nodeType": "FunctionDefinition",
+            "src": "2559:61:52",
+            "nodes": [],
+            "functionSelector": "841e4561",
+            "implemented": false,
+            "kind": "function",
+            "modifiers": [],
+            "name": "updateTreasuryAddress",
+            "nameLocation": "2568:21:52",
+            "parameters": {
+              "id": 49742,
+              "nodeType": "ParameterList",
+              "parameters": [
+                {
+                  "constant": false,
+                  "id": 49741,
+                  "mutability": "mutable",
+                  "name": "newTreasury",
+                  "nameLocation": "2598:11:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49744,
+                  "src": "2590:19:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_address",
+                    "typeString": "address"
+                  },
+                  "typeName": {
+                    "id": 49740,
+                    "name": "address",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "2590:7:52",
+                    "stateMutability": "nonpayable",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_address",
+                      "typeString": "address"
+                    }
+                  },
+                  "visibility": "internal"
+                }
+              ],
+              "src": "2589:21:52"
+            },
+            "returnParameters": {
+              "id": 49743,
+              "nodeType": "ParameterList",
+              "parameters": [],
+              "src": "2619:0:52"
+            },
+            "scope": 49768,
+            "stateMutability": "nonpayable",
+            "virtual": false,
+            "visibility": "external"
+          },
+          {
+            "id": 49749,
+            "nodeType": "FunctionDefinition",
+            "src": "2625:53:52",
+            "nodes": [],
+            "functionSelector": "01dd6060",
+            "implemented": false,
+            "kind": "function",
+            "modifiers": [],
+            "name": "updateFeeSetting",
+            "nameLocation": "2634:16:52",
+            "parameters": {
+              "id": 49747,
+              "nodeType": "ParameterList",
+              "parameters": [
+                {
+                  "constant": false,
+                  "id": 49746,
+                  "mutability": "mutable",
+                  "name": "newFeeBps",
+                  "nameLocation": "2658:9:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49749,
+                  "src": "2651:16:52",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_uint16",
+                    "typeString": "uint16"
+                  },
+                  "typeName": {
+                    "id": 49745,
+                    "name": "uint16",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "2651:6:52",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_uint16",
+                      "typeString": "uint16"
+                    }
+                  },
+                  "visibility": "internal"
+                }
+              ],
+              "src": "2650:18:52"
+            },
+            "returnParameters": {
+              "id": 49748,
+              "nodeType": "ParameterList",
+              "parameters": [],
+              "src": "2677:0:52"
+            },
+            "scope": 49768,
+            "stateMutability": "nonpayable",
+            "virtual": false,
+            "visibility": "external"
+          },
+          {
+            "id": 49755,
+            "nodeType": "FunctionDefinition",
+            "src": "2683:73:52",
+            "nodes": [],
+            "functionSelector": "2643fc1d",
+            "implemented": false,
+            "kind": "function",
+            "modifiers": [],
+            "name": "collectFeesFromCampaigns",
+            "nameLocation": "2692:24:52",
+            "parameters": {
+              "id": 49753,
+              "nodeType": "ParameterList",
+              "parameters": [
+                {
+                  "constant": false,
+                  "id": 49752,
+                  "mutability": "mutable",
+                  "name": "campaigns",
+                  "nameLocation": "2736:9:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49755,
+                  "src": "2717:28:52",
+                  "stateVariable": false,
+                  "storageLocation": "calldata",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_array$_t_address_$dyn_calldata_ptr",
+                    "typeString": "address[]"
+                  },
+                  "typeName": {
+                    "baseType": {
+                      "id": 49750,
+                      "name": "address",
+                      "nodeType": "ElementaryTypeName",
+                      "src": "2717:7:52",
+                      "stateMutability": "nonpayable",
+                      "typeDescriptions": {
+                        "typeIdentifier": "t_address",
+                        "typeString": "address"
+                      }
+                    },
+                    "id": 49751,
+                    "nodeType": "ArrayTypeName",
+                    "src": "2717:9:52",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_array$_t_address_$dyn_storage_ptr",
+                      "typeString": "address[]"
+                    }
+                  },
+                  "visibility": "internal"
+                }
+              ],
+              "src": "2716:30:52"
+            },
+            "returnParameters": {
+              "id": 49754,
+              "nodeType": "ParameterList",
+              "parameters": [],
+              "src": "2755:0:52"
+            },
+            "scope": 49768,
+            "stateMutability": "nonpayable",
+            "virtual": false,
+            "visibility": "external"
+          },
+          {
+            "id": 49761,
+            "nodeType": "FunctionDefinition",
+            "src": "2761:63:52",
+            "nodes": [],
+            "functionSelector": "b4879fc8",
+            "implemented": false,
+            "kind": "function",
+            "modifiers": [],
+            "name": "pauseCampaigns",
+            "nameLocation": "2770:14:52",
+            "parameters": {
+              "id": 49759,
+              "nodeType": "ParameterList",
+              "parameters": [
+                {
+                  "constant": false,
+                  "id": 49758,
+                  "mutability": "mutable",
+                  "name": "campaigns",
+                  "nameLocation": "2804:9:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49761,
+                  "src": "2785:28:52",
+                  "stateVariable": false,
+                  "storageLocation": "calldata",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_array$_t_address_$dyn_calldata_ptr",
+                    "typeString": "address[]"
+                  },
+                  "typeName": {
+                    "baseType": {
+                      "id": 49756,
+                      "name": "address",
+                      "nodeType": "ElementaryTypeName",
+                      "src": "2785:7:52",
+                      "stateMutability": "nonpayable",
+                      "typeDescriptions": {
+                        "typeIdentifier": "t_address",
+                        "typeString": "address"
+                      }
+                    },
+                    "id": 49757,
+                    "nodeType": "ArrayTypeName",
+                    "src": "2785:9:52",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_array$_t_address_$dyn_storage_ptr",
+                      "typeString": "address[]"
+                    }
+                  },
+                  "visibility": "internal"
+                }
+              ],
+              "src": "2784:30:52"
+            },
+            "returnParameters": {
+              "id": 49760,
+              "nodeType": "ParameterList",
+              "parameters": [],
+              "src": "2823:0:52"
+            },
+            "scope": 49768,
+            "stateMutability": "nonpayable",
+            "virtual": false,
+            "visibility": "external"
+          },
+          {
+            "id": 49767,
+            "nodeType": "FunctionDefinition",
+            "src": "2829:65:52",
+            "nodes": [],
+            "functionSelector": "6dc91e65",
+            "implemented": false,
+            "kind": "function",
+            "modifiers": [],
+            "name": "unpauseCampaigns",
+            "nameLocation": "2838:16:52",
+            "parameters": {
+              "id": 49765,
+              "nodeType": "ParameterList",
+              "parameters": [
+                {
+                  "constant": false,
+                  "id": 49764,
+                  "mutability": "mutable",
+                  "name": "campaigns",
+                  "nameLocation": "2874:9:52",
+                  "nodeType": "VariableDeclaration",
+                  "scope": 49767,
+                  "src": "2855:28:52",
+                  "stateVariable": false,
+                  "storageLocation": "calldata",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_array$_t_address_$dyn_calldata_ptr",
+                    "typeString": "address[]"
+                  },
+                  "typeName": {
+                    "baseType": {
+                      "id": 49762,
+                      "name": "address",
+                      "nodeType": "ElementaryTypeName",
+                      "src": "2855:7:52",
+                      "stateMutability": "nonpayable",
+                      "typeDescriptions": {
+                        "typeIdentifier": "t_address",
+                        "typeString": "address"
+                      }
+                    },
+                    "id": 49763,
+                    "nodeType": "ArrayTypeName",
+                    "src": "2855:9:52",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_array$_t_address_$dyn_storage_ptr",
+                      "typeString": "address[]"
+                    }
+                  },
+                  "visibility": "internal"
+                }
+              ],
+              "src": "2854:30:52"
+            },
+            "returnParameters": {
+              "id": 49766,
+              "nodeType": "ParameterList",
+              "parameters": [],
+              "src": "2893:0:52"
+            },
+            "scope": 49768,
+            "stateMutability": "nonpayable",
+            "virtual": false,
+            "visibility": "external"
+          }
+        ],
+        "abstract": false,
+        "baseContracts": [
+          {
+            "baseName": {
+              "id": 49564,
+              "name": "IAccessControl",
+              "nameLocations": ["154:14:52"],
+              "nodeType": "IdentifierPath",
+              "referencedDeclaration": 39425,
+              "src": "154:14:52"
+            },
+            "id": 49565,
+            "nodeType": "InheritanceSpecifier",
+            "src": "154:14:52"
+          }
+        ],
+        "canonicalName": "INudgeCampaignFactory",
+        "contractDependencies": [],
+        "contractKind": "interface",
+        "fullyImplemented": false,
+        "linearizedBaseContracts": [49768, 39425],
+        "name": "INudgeCampaignFactory",
+        "nameLocation": "129:21:52",
+        "scope": 49769,
+        "usedErrors": [
+          39352, 39355, 49587, 49589, 49591, 49593, 49595, 49597, 49599, 49601,
+          49603
+        ],
+        "usedEvents": [
+          39364, 39373, 39382, 49617, 49623, 49628, 49633, 49640, 49646
+        ]
+      }
+    ],
+    "license": "MIT"
+  },
+  "id": 52
+}

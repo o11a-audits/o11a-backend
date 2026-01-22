@@ -1017,6 +1017,7 @@ fn do_node_to_source_text(
       constant,
       parameter_variable,
       struct_field,
+      implementation_declaration,
       ..
     } => {
       let type_str = do_node_to_source_text(
@@ -1074,9 +1075,12 @@ fn do_node_to_source_text(
         parts.push(format_keyword(&storage));
       }
       if !name.is_empty() {
+        let topic =
+          new_node_topic(&implementation_declaration.unwrap_or(*node_id));
+
         parts.push(format!(
           "{}:",
-          format_identifier(name, &new_node_topic(node_id), topic_metadata)
+          format_identifier(name, &topic, topic_metadata)
         ));
       }
       parts.push(type_str);

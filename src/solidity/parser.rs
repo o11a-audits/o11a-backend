@@ -15,6 +15,41 @@ struct ParserContext {
   /// Map from node ID to shallowly-parsed definition nodes (FunctionDefinition,
   /// StructDefinition). Used to look up parameters/members when parsing calls.
   pub lookahead_definitions: BTreeMap<i32, ASTNode>,
+  /// Maps interface member node IDs to implementation member node IDs.
+  /// Used for interfaces with exactly one implementation in the audit scope,
+  /// allowing references to interface members to be treated as references to
+  /// the implementation.
+  pub interface_member_to_implementation: BTreeMap<i32, i32>,
+}
+
+/// Shallow contract info for interface-implementation mapping
+struct ShallowContractInfo {
+  node_id: i32,
+  contract_kind: ContractKind,
+  /// Referenced declaration IDs from baseContracts
+  base_contract_ids: Vec<i32>,
+  functions: Vec<ShallowFunctionInfo>,
+  /// Public state variables (for matching interface getter functions)
+  public_state_variables: Vec<ShallowStateVarInfo>,
+}
+
+/// Shallow function info for signature matching
+#[derive(Clone)]
+struct ShallowFunctionInfo {
+  node_id: i32,
+  name: String,
+  /// Type strings for each parameter (e.g., ["uint32", "address"])
+  parameter_types: Vec<String>,
+  /// Node IDs for each parameter (parallel to parameter_types)
+  parameter_ids: Vec<i32>,
+  /// Node IDs for each return parameter
+  return_parameter_ids: Vec<i32>,
+}
+
+/// Shallow state variable info for getter matching
+struct ShallowStateVarInfo {
+  node_id: i32,
+  name: String,
 }
 
 pub fn process(
@@ -35,12 +70,17 @@ pub fn process(
   // parsing and traversal of the AST, so we can afford to look ahead and gather
   // information like function and struct definitions ahead of time, then
   // process each AST file a second time fully.
-  let lookahead_definitions = shallow_parse_definitions(&out_dir)?;
+  // This also builds interface-to-implementation mappings for interfaces with
+  // exactly one implementation, allowing references to interface members to be
+  // treated as references to their implementation.
+  let (lookahead_definitions, interface_member_to_implementation) =
+    shallow_parse_all(&out_dir)?;
 
   let mut context = ParserContext {
     source_content: String::new(),
     ast_map: std::collections::BTreeMap::new(),
     lookahead_definitions,
+    interface_member_to_implementation,
   };
 
   // Recursively traverse the out directory to find all JSON files
@@ -56,26 +96,136 @@ pub fn process(
   Ok(context.ast_map)
 }
 
-/// Shallowly parses all AST JSON files to extract function and struct definitions.
-/// This only parses the minimum necessary fields to build a map of definitions
-/// with their parameters/members, without parsing function bodies.
-/// Returns a map from node ID to the parsed definition node.
-fn shallow_parse_definitions(
+/// Shallowly parses all AST JSON files in a single pass, extracting:
+/// 1. Function, struct, event, and error definitions (for lookahead)
+/// 2. Contract info for building interface-to-implementation mappings
+///
+/// Returns a tuple of (definitions_map, interface_member_to_implementation).
+fn shallow_parse_all(
   out_dir: &Path,
-) -> Result<BTreeMap<i32, ASTNode>, String> {
+) -> Result<(BTreeMap<i32, ASTNode>, BTreeMap<i32, i32>), String> {
   let mut definitions_map = BTreeMap::new();
-  shallow_traverse_directory(out_dir, &mut definitions_map)?;
-  println!(
-    "Shallow parsed {} definitions (functions and structs)",
-    definitions_map.len()
-  );
-  Ok(definitions_map)
+  let mut contracts: Vec<ShallowContractInfo> = Vec::new();
+
+  shallow_traverse_all(out_dir, &mut definitions_map, &mut contracts)?;
+
+  // Build interface-to-implementation member mappings
+  let member_map = build_interface_member_map(&contracts);
+
+  Ok((definitions_map, member_map))
 }
 
-/// Recursively traverses directories to find and shallowly parse JSON files.
-fn shallow_traverse_directory(
+/// Builds a mapping from interface member node IDs to implementation member node IDs.
+/// Only interfaces with exactly one implementation in the project are mapped.
+fn build_interface_member_map(
+  contracts: &[ShallowContractInfo],
+) -> BTreeMap<i32, i32> {
+  // Build a map of interface ID -> list of implementation IDs
+  let mut interface_implementations: BTreeMap<i32, Vec<i32>> = BTreeMap::new();
+
+  for contract in contracts {
+    // Skip interfaces - they can't be implementations
+    if contract.contract_kind == ContractKind::Interface {
+      continue;
+    }
+
+    // For each base contract (interface or parent), record this as an implementation
+    for &base_id in &contract.base_contract_ids {
+      interface_implementations
+        .entry(base_id)
+        .or_insert_with(Vec::new)
+        .push(contract.node_id);
+    }
+  }
+
+  // Now build member mappings for interfaces with exactly one implementation
+  let mut member_map: BTreeMap<i32, i32> = BTreeMap::new();
+
+  // Create a map of contract node_id -> contract info for quick lookup
+  let contracts_by_id: BTreeMap<i32, &ShallowContractInfo> =
+    contracts.iter().map(|c| (c.node_id, c)).collect();
+
+  for (interface_id, impl_ids) in &interface_implementations {
+    // Only process if exactly one implementation
+    if impl_ids.len() != 1 {
+      continue;
+    }
+
+    let impl_id = impl_ids[0];
+
+    // Get the interface and implementation info
+    let interface = match contracts_by_id.get(interface_id) {
+      Some(c) if c.contract_kind == ContractKind::Interface => c,
+      _ => continue, // Not an interface or not found
+    };
+    let implementation = match contracts_by_id.get(&impl_id) {
+      Some(c) => c,
+      None => continue,
+    };
+
+    // Map interface functions to implementation functions by signature
+    for iface_func in &interface.functions {
+      // First try to match by function signature
+      if let Some(impl_func) =
+        find_matching_function(&iface_func, &implementation.functions)
+      {
+        member_map.insert(iface_func.node_id, impl_func.node_id);
+
+        // Also map interface parameter IDs to implementation parameter IDs
+        // Parameters are matched by position (same index in both lists)
+        for (iface_param_id, impl_param_id) in iface_func
+          .parameter_ids
+          .iter()
+          .zip(impl_func.parameter_ids.iter())
+        {
+          member_map.insert(*iface_param_id, *impl_param_id);
+        }
+
+        // Also map interface return parameter IDs to implementation return parameter IDs
+        for (iface_ret_id, impl_ret_id) in iface_func
+          .return_parameter_ids
+          .iter()
+          .zip(impl_func.return_parameter_ids.iter())
+        {
+          member_map.insert(*iface_ret_id, *impl_ret_id);
+        }
+      }
+      // If no function match and the interface function has no parameters,
+      // try to match to a public state variable (getter)
+      else if iface_func.parameter_types.is_empty() {
+        if let Some(state_var) = implementation
+          .public_state_variables
+          .iter()
+          .find(|sv| sv.name == iface_func.name)
+        {
+          member_map.insert(iface_func.node_id, state_var.node_id);
+        }
+      }
+    }
+  }
+
+  member_map
+}
+
+/// Finds a function in the list that matches the given function's signature.
+fn find_matching_function(
+  target: &ShallowFunctionInfo,
+  candidates: &[ShallowFunctionInfo],
+) -> Option<ShallowFunctionInfo> {
+  candidates
+    .iter()
+    .find(|c| {
+      c.name == target.name && c.parameter_types == target.parameter_types
+    })
+    .cloned()
+}
+
+/// Recursively traverses directories to collect both definition nodes and contract info
+/// in a single pass, avoiding duplicate file reads.
+fn shallow_traverse_all(
   dir: &Path,
   definitions_map: &mut BTreeMap<i32, ASTNode>,
+  contracts: &mut Vec<ShallowContractInfo>,
 ) -> Result<(), String> {
   let entries = std::fs::read_dir(dir)
     .map_err(|e| format!("Failed to read directory {:?}: {}", dir, e))?;
@@ -86,17 +236,16 @@ fn shallow_traverse_directory(
     let path = entry.path();
 
     if path.is_dir() {
-      // Skip the build-info directory
       if let Some(dir_name) = path.file_name() {
         if dir_name == "build-info" {
           continue;
         }
       }
-      shallow_traverse_directory(&path, definitions_map)?;
+      shallow_traverse_all(&path, definitions_map, contracts)?;
     } else if path.is_file() {
       if let Some(extension) = path.extension() {
         if extension == "json" {
-          shallow_parse_json_file(&path, definitions_map)?;
+          shallow_parse_all_from_file(&path, definitions_map, contracts)?;
         }
       }
     }
@@ -105,10 +254,11 @@ fn shallow_traverse_directory(
   Ok(())
 }
 
-/// Shallowly parses a single JSON file to extract function and struct definitions.
-fn shallow_parse_json_file(
+/// Parses a single JSON file to extract both definition nodes and contract info.
+fn shallow_parse_all_from_file(
   file_path: &Path,
   definitions_map: &mut BTreeMap<i32, ASTNode>,
+  contracts: &mut Vec<ShallowContractInfo>,
 ) -> Result<(), String> {
   let json = std::fs::read_to_string(file_path)
     .map_err(|e| format!("Failed to read file {:?}: {}", file_path, e))?;
@@ -118,21 +268,177 @@ fn shallow_parse_json_file(
 
   let ast_obj = match parsed.get("ast") {
     Some(ast) => ast,
-    None => return Ok(()), // No AST in this file, skip it
+    None => return Ok(()),
   };
 
   let nodes_array = match ast_obj.get("nodes").and_then(|v| v.as_array()) {
     Some(nodes) => nodes,
-    None => return Ok(()), // No nodes, skip
+    None => return Ok(()),
   };
 
-  // Iterate through top-level nodes looking for ContractDefinition,
-  // FunctionDefinition, or StructDefinition
   for node in nodes_array {
+    // Extract contract info for interface-implementation mapping
+    if let Some(contract_info) = shallow_parse_contract_info(node) {
+      contracts.push(contract_info);
+    }
+    // Extract definition nodes (functions, structs, events, errors)
     shallow_parse_definition_node(node, definitions_map);
   }
 
   Ok(())
+}
+
+/// Extracts contract info from a ContractDefinition node.
+fn shallow_parse_contract_info(
+  node: &serde_json::Value,
+) -> Option<ShallowContractInfo> {
+  let node_type = node.get("nodeType").and_then(|v| v.as_str())?;
+  if node_type != "ContractDefinition" {
+    return None;
+  }
+
+  let node_id = node.get("id").and_then(|v| v.as_i64()).map(|v| v as i32)?;
+  let contract_kind_str = node.get("contractKind").and_then(|v| v.as_str())?;
+  let contract_kind = ContractKind::from_str(contract_kind_str).ok()?;
+
+  // Extract base contract IDs
+  let base_contract_ids = node
+    .get("baseContracts")
+    .and_then(|v| v.as_array())
+    .map(|arr| {
+      arr
+        .iter()
+        .filter_map(|bc| {
+          bc.get("baseName")
+            .and_then(|bn| bn.get("referencedDeclaration"))
+            .and_then(|v| v.as_i64())
+            .map(|v| v as i32)
+        })
+        .collect()
+    })
+    .unwrap_or_default();
+
+  // Extract functions and public state variables
+  let mut functions = Vec::new();
+  let mut public_state_variables = Vec::new();
+
+  if let Some(nodes) = node.get("nodes").and_then(|v| v.as_array()) {
+    for child in nodes {
+      let child_type = match child.get("nodeType").and_then(|v| v.as_str()) {
+        Some(t) => t,
+        None => continue,
+      };
+
+      match child_type {
+        "FunctionDefinition" => {
+          if let Some(func_info) = shallow_parse_function_info(child) {
+            functions.push(func_info);
+          }
+        }
+        "VariableDeclaration" => {
+          if let Some(var_info) = shallow_parse_state_var_info(child) {
+            public_state_variables.push(var_info);
+          }
+        }
+        _ => {}
+      }
+    }
+  }
+
+  Some(ShallowContractInfo {
+    node_id,
+    contract_kind,
+    base_contract_ids,
+    functions,
+    public_state_variables,
+  })
+}
+
+/// Extracts function info for signature matching.
+fn shallow_parse_function_info(
+  node: &serde_json::Value,
+) -> Option<ShallowFunctionInfo> {
+  let node_id = node.get("id").and_then(|v| v.as_i64()).map(|v| v as i32)?;
+  let name = node.get("name").and_then(|v| v.as_str())?.to_string();
+
+  // Extract parameter types and IDs from the parameters list
+  let params_array = node
+    .get("parameters")
+    .and_then(|p| p.get("parameters"))
+    .and_then(|v| v.as_array());
+
+  let (parameter_types, parameter_ids) = match params_array {
+    Some(arr) => {
+      let types: Vec<String> = arr
+        .iter()
+        .filter_map(|param| extract_type_string(param))
+        .collect();
+      let ids: Vec<i32> = arr
+        .iter()
+        .filter_map(|param| {
+          param.get("id").and_then(|v| v.as_i64()).map(|v| v as i32)
+        })
+        .collect();
+      (types, ids)
+    }
+    None => (Vec::new(), Vec::new()),
+  };
+
+  // Extract return parameter IDs
+  let return_parameter_ids = node
+    .get("returnParameters")
+    .and_then(|p| p.get("parameters"))
+    .and_then(|v| v.as_array())
+    .map(|arr| {
+      arr
+        .iter()
+        .filter_map(|param| {
+          param.get("id").and_then(|v| v.as_i64()).map(|v| v as i32)
+        })
+        .collect()
+    })
+    .unwrap_or_default();
+
+  Some(ShallowFunctionInfo {
+    node_id,
+    name,
+    parameter_types,
+    parameter_ids,
+    return_parameter_ids,
+  })
+}
+
+/// Extracts the type string from a parameter's typeDescriptions.
+fn extract_type_string(param: &serde_json::Value) -> Option<String> {
+  param
+    .get("typeDescriptions")
+    .and_then(|td| td.get("typeString"))
+    .and_then(|v| v.as_str())
+    .map(|s| s.to_string())
+}
+
+/// Extracts public state variable info for getter matching.
+fn shallow_parse_state_var_info(
+  node: &serde_json::Value,
+) -> Option<ShallowStateVarInfo> {
+  // Only include public state variables (they have auto-generated getters)
+  let visibility = node.get("visibility").and_then(|v| v.as_str())?;
+  if visibility != "public" {
+    return None;
+  }
+
+  let state_variable = node
+    .get("stateVariable")
+    .and_then(|v| v.as_bool())
+    .unwrap_or(false);
+  if !state_variable {
+    return None;
+  }
+
+  let node_id = node.get("id").and_then(|v| v.as_i64()).map(|v| v as i32)?;
+  let name = node.get("name").and_then(|v| v.as_str())?.to_string();
+
+  Some(ShallowStateVarInfo { node_id, name })
 }
 
 /// Parses a single node, extracting any function, struct, event, or error definitions.
@@ -301,6 +607,7 @@ fn shallow_parse_struct_definition(
           value,
           visibility,
           parameter_variable,
+          implementation_declaration,
           ..
         } => ASTNode::VariableDeclaration {
           node_id,
@@ -318,6 +625,7 @@ fn shallow_parse_struct_definition(
           visibility,
           parameter_variable,
           struct_field: true,
+          implementation_declaration,
         },
         _ => node,
       })
@@ -472,6 +780,8 @@ fn shallow_parse_variable_declaration(
     visibility,
     parameter_variable: true,
     struct_field: false,
+    // Shallow parsing doesn't have access to context, so this is always None
+    implementation_declaration: None,
   })
 }
 
@@ -1547,6 +1857,8 @@ pub enum ASTNode {
     visibility: VariableVisibility,
     parameter_variable: bool,
     struct_field: bool,
+    /// For interface parameters, points to the implementation's parameter node ID
+    implementation_declaration: Option<i32>,
   },
 
   // Directive nodes
@@ -2745,6 +3057,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       visibility,
       parameter_variable,
       struct_field,
+      implementation_declaration,
     } => ASTNode::VariableDeclaration {
       node_id: node_id,
       src_location: src_location,
@@ -2764,6 +3077,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       visibility: visibility,
       parameter_variable: parameter_variable,
       struct_field: struct_field,
+      implementation_declaration: implementation_declaration,
     },
     ASTNode::WhileStatement {
       node_id,
@@ -3352,6 +3666,7 @@ fn get_required_parameter_variable_declaration_vec_with_context(
         value,
         visibility,
         struct_field,
+        implementation_declaration,
         ..
       } => ASTNode::VariableDeclaration {
         node_id,
@@ -3369,6 +3684,7 @@ fn get_required_parameter_variable_declaration_vec_with_context(
         visibility,
         parameter_variable: true,
         struct_field,
+        implementation_declaration,
       },
       _ => node,
     })
@@ -3405,6 +3721,7 @@ fn get_required_struct_field_variable_declaration_vec_with_context(
         value,
         visibility,
         parameter_variable,
+        implementation_declaration,
         ..
       } => ASTNode::VariableDeclaration {
         node_id,
@@ -3422,6 +3739,7 @@ fn get_required_struct_field_variable_declaration_vec_with_context(
         visibility,
         parameter_variable,
         struct_field: true,
+        implementation_declaration,
       },
       _ => node,
     })
@@ -4289,11 +4607,18 @@ fn node_from_json(
         "overloadedDeclarations",
         node_type_str,
       )?;
-      let referenced_declaration = get_required_i32_with_context(
+      let raw_referenced_declaration = get_required_i32_with_context(
         val,
         "referencedDeclaration",
         node_type_str,
       )?;
+
+      // Substitute interface member reference with implementation member if available
+      let referenced_declaration = context
+        .interface_member_to_implementation
+        .get(&raw_referenced_declaration)
+        .copied()
+        .unwrap_or(raw_referenced_declaration);
 
       Ok(ASTNode::Identifier {
         node_id,
@@ -4310,11 +4635,18 @@ fn node_from_json(
         "nameLocations",
         node_type_str,
       )?;
-      let referenced_declaration = get_required_i32_with_context(
+      let raw_referenced_declaration = get_required_i32_with_context(
         val,
         "referencedDeclaration",
         node_type_str,
       )?;
+
+      // Substitute interface member reference with implementation member if available
+      let referenced_declaration = context
+        .interface_member_to_implementation
+        .get(&raw_referenced_declaration)
+        .copied()
+        .unwrap_or(raw_referenced_declaration);
 
       Ok(ASTNode::IdentifierPath {
         node_id,
@@ -4397,10 +4729,19 @@ fn node_from_json(
       )?;
       let member_name =
         get_required_string_with_context(val, "memberName", node_type_str)?;
-      let referenced_declaration = val
+      let raw_referenced_declaration = val
         .get("referencedDeclaration")
         .and_then(|v| v.as_i64())
         .map(|v| v as i32);
+
+      // Substitute interface member reference with implementation member if available
+      let referenced_declaration = raw_referenced_declaration.map(|raw_ref| {
+        context
+          .interface_member_to_implementation
+          .get(&raw_ref)
+          .copied()
+          .unwrap_or(raw_ref)
+      });
 
       Ok(ASTNode::MemberAccess {
         node_id,
@@ -4767,6 +5108,13 @@ fn node_from_json(
       let visibility =
         get_required_enum_with_context(val, "visibility", node_type_str)?;
 
+      // Check if this variable declaration has an implementation mapping
+      // (for interface parameters that map to implementation parameters)
+      let implementation_declaration = context
+        .interface_member_to_implementation
+        .get(&node_id)
+        .copied();
+
       Ok(ASTNode::VariableDeclaration {
         node_id,
         src_location,
@@ -4788,6 +5136,7 @@ fn node_from_json(
         // This is always set to false initially, but when this is parsed as a
         // child to a StructDefinition node, this value will be set to true
         struct_field: false,
+        implementation_declaration,
       })
     }
     "WhileStatement" => {
@@ -4901,6 +5250,14 @@ fn node_from_json(
       let visibility =
         get_required_enum_with_context(val, "visibility", node_type_str)?;
 
+      // Get the node ID from the context in case it is an interface member
+      // that was implemented in a contract
+      let referenced_implementation_node_id = context
+        .interface_member_to_implementation
+        .get(&node_id)
+        .copied()
+        .unwrap_or(node_id);
+
       // Create the FunctionSignature node with a generated ID
       let signature_node_id = generate_node_id();
       let signature = ASTNode::FunctionSignature {
@@ -4911,7 +5268,7 @@ fn node_from_json(
         modifiers,
         name,
         name_location,
-        referenced_id: node_id,
+        referenced_id: referenced_implementation_node_id,
         parameters,
         return_parameters,
         scope,
