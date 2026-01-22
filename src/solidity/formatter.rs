@@ -959,35 +959,76 @@ fn do_node_to_source_text(
       let indent_level = indent_level + 1;
 
       if let Some(initial_val) = initial_value {
-        declarations
-          .iter()
-          .map(|declaration| {
-            format!(
-              "{} {}{}",
-              do_node_to_source_text(
-                declaration,
+        if declarations.len() == 1 {
+          // Single declaration: use simple format
+          format!(
+            "{} {}{}",
+            do_node_to_source_text(
+              &declarations[0],
+              indent_level,
+              nodes_map,
+              topic_metadata,
+              function_mod_properties,
+              variable_properties
+            ),
+            format_operator("="),
+            indent(
+              &do_node_to_source_text(
+                initial_val,
                 indent_level,
                 nodes_map,
                 topic_metadata,
                 function_mod_properties,
                 variable_properties
               ),
-              format_operator("="),
-              indent(
-                &do_node_to_source_text(
-                  initial_val,
-                  indent_level,
-                  nodes_map,
-                  topic_metadata,
-                  function_mod_properties,
-                  variable_properties
-                ),
-                indent_level
-              ),
-            )
-          })
-          .collect::<Vec<_>>()
-          .join("\n")
+              indent_level
+            ),
+          )
+        } else {
+          // Multiple declarations: use tuple syntax
+          let declarations_str = declarations
+            .iter()
+            .map(|declaration| {
+              // Resolve the declaration (in case it's a Stub) and override
+              // the parameter_variable property so that it gets formatted
+              // without the "let" keyword in the tuple expression
+              let mut decl = declaration.resolve(nodes_map).clone();
+              if let ASTNode::VariableDeclaration {
+                parameter_variable, ..
+              } = &mut decl
+              {
+                *parameter_variable = true;
+              }
+
+              do_node_to_source_text(
+                &decl,
+                indent_level + 1,
+                nodes_map,
+                topic_metadata,
+                function_mod_properties,
+                variable_properties,
+              )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+          let initial_val_str = do_node_to_source_text(
+            initial_val,
+            indent_level,
+            nodes_map,
+            topic_metadata,
+            function_mod_properties,
+            variable_properties,
+          );
+
+          format!(
+            "{} ({}\n) {} {}",
+            format_keyword("let"),
+            indent(&declarations_str, indent_level + 1),
+            format_operator("="),
+            &initial_val_str
+          )
+        }
       } else {
         declarations
           .iter()
