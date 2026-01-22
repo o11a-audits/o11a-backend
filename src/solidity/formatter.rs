@@ -8,6 +8,15 @@ use crate::solidity::parser::{
 };
 use std::collections::BTreeMap;
 
+pub fn global_to_source_text(topic: &topic::Topic) -> Option<String> {
+  match topic.id.as_str() {
+    "N-8" => Some(format_topic_token("keccak256", "global", topic)),
+    "N-27" => Some(format_topic_token("type", "global", topic)),
+    "N-28" => Some(format_topic_token("this", "global", topic)),
+    _ => None,
+  }
+}
+
 /// Converts an AST node and all its children to a formatted HTML string with syntax highlighting.
 ///
 /// This function recursively processes nodes and uses div-based indentation with padding.
@@ -1908,11 +1917,16 @@ fn format_identifier(
       core::NamedTopicKind::LocalVariable => "identifier",
       core::NamedTopicKind::Function(_) => "function",
       core::NamedTopicKind::Modifier => "modifier",
+      core::NamedTopicKind::Builtin => "global",
     };
     return format_topic_token(name, css_class, topic);
   }
 
-  format_token(&format!("{}-{:?}", topic.id(), name), "identifier")
+  format!(
+    "<span class=\"unknown\" data-topic=\"{}\">{}</span>",
+    topic.id(),
+    name,
+  )
 }
 
 fn format_token(token: &str, class: &str) -> String {

@@ -304,6 +304,13 @@ pub async fn get_source_text(
   // Create topic from the topic_id
   let topic = new_topic(&topic_id);
 
+  match crate::solidity::formatter::global_to_source_text(&topic) {
+    Some(global) => {
+      return Ok(Html(global));
+    }
+    None => (),
+  }
+
   // Get the node for this topic
   let node = audit_data.nodes.get(&topic).ok_or_else(|| {
     eprintln!("Topic '{}' not found in audit '{}'", topic_id, audit_id);
@@ -362,6 +369,13 @@ fn topic_metadata_to_response(
 ) -> TopicMetadataResponse {
   // Extract scope information
   let scope_info = match metadata.scope() {
+    crate::core::Scope::Global => ScopeInfo {
+      scope_type: "Global".to_string(),
+      container: None,
+      component: None,
+      member: None,
+      semantic_block: None,
+    },
     crate::core::Scope::Container { container } => ScopeInfo {
       scope_type: "Container".to_string(),
       container: Some(container.file_path.clone()),

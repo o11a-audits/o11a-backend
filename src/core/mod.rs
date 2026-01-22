@@ -58,6 +58,7 @@ pub enum AST {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Scope {
+  Global,
   Container {
     container: ProjectPath,
   },
@@ -80,6 +81,7 @@ pub enum Scope {
 
 pub fn add_to_scope(scope: &Scope, topic: topic::Topic) -> Scope {
   match scope {
+    Scope::Global => Scope::Global, // Global scope cannot be nested
     Scope::Container { container } => Scope::Component {
       container: container.clone(),
       component: topic,
@@ -135,6 +137,7 @@ pub enum NamedTopicKind {
   EnumMember,
   StateVariable(VariableMutability),
   LocalVariable,
+  Builtin,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -218,6 +221,7 @@ impl TopicMetadata {
   /// Uses the declaration names from the scope components, falling back to topic IDs if not found
   pub fn qualified_name(&self, audit_data: &AuditData) -> String {
     match &self.scope() {
+      Scope::Global => self.name().to_string(),
       Scope::Container { .. } => self.name().to_string(),
       Scope::Component { component, .. } => {
         let component_name = audit_data
@@ -433,12 +437,54 @@ pub fn new_audit_data(
   audit_name: String,
   in_scope_files: HashSet<ProjectPath>,
 ) -> AuditData {
+  let mut topic_metadata = BTreeMap::new();
+
+  // Pre-populate with Solidity globals
+  // keccak256 function with node_id -8
+  let keccak256_topic = topic::new_node_topic(&-8);
+  topic_metadata.insert(
+    keccak256_topic.clone(),
+    TopicMetadata::NamedTopic {
+      topic: keccak256_topic,
+      scope: Scope::Global,
+      kind: NamedTopicKind::Builtin,
+      name: "keccak256".to_string(),
+      references: Vec::new(),
+    },
+  );
+
+  // type() function with node_id -27
+  let type_topic = topic::new_node_topic(&-27);
+  topic_metadata.insert(
+    type_topic.clone(),
+    TopicMetadata::NamedTopic {
+      topic: type_topic,
+      scope: Scope::Global,
+      kind: NamedTopicKind::Builtin,
+      name: "type".to_string(),
+      references: Vec::new(),
+    },
+  );
+
+  // this keyword with node_id -28
+  let this_topic = topic::new_node_topic(&-28);
+  topic_metadata.insert(
+    this_topic.clone(),
+    TopicMetadata::NamedTopic {
+      topic: this_topic,
+      scope: Scope::Global,
+      kind: NamedTopicKind::Builtin,
+      name: "this".to_string(),
+      references: Vec::new(),
+    },
+  );
+
   AuditData {
     audit_name,
     in_scope_files,
     asts: BTreeMap::new(),
     nodes: BTreeMap::new(),
-    topic_metadata: BTreeMap::new(),
+    topic_metadata,
     function_properties: BTreeMap::new(),
     variable_properties: BTreeMap::new(),
   }
