@@ -10,9 +10,9 @@ use std::collections::BTreeMap;
 
 pub fn global_to_source_text(topic: &topic::Topic) -> Option<String> {
   match topic.id.as_str() {
-    "N-8" => Some(format_topic_token("keccak256", "global", topic)),
-    "N-27" => Some(format_topic_token("type", "global", topic)),
-    "N-28" => Some(format_topic_token("this", "global", topic)),
+    "N-8" => Some(format_topic_token(&-8, "keccak256", "global", topic)),
+    "N-27" => Some(format_topic_token(&-27, "type", "global", topic)),
+    "N-28" => Some(format_topic_token(&-28, "this", "global", topic)),
     _ => None,
   }
 }
@@ -81,7 +81,7 @@ fn do_node_to_source_text(
         "{} {} {}{}",
         format_keyword("mut"),
         lhs,
-        format_topic_operator(&op, &new_node_topic(node_id)),
+        format_topic_operator(&node_id, &op, &new_node_topic(node_id)),
         indent(&rhs, indent_level)
       )
     }
@@ -120,7 +120,7 @@ fn do_node_to_source_text(
           lhs,
           format!(
             "{} {}",
-            format_topic_operator(&op, &new_node_topic(node_id)),
+            format_topic_operator(&node_id, &op, &new_node_topic(node_id)),
             &rhs
           ),
         )
@@ -140,7 +140,7 @@ fn do_node_to_source_text(
           indent(
             &format!(
               "{} {}",
-              format_topic_operator(&op, &new_node_topic(node_id)),
+              format_topic_operator(&node_id, &op, &new_node_topic(node_id)),
               &rhs
             ),
             indent_level
@@ -169,7 +169,7 @@ fn do_node_to_source_text(
       let part = if let Some(false_expr) = false_expression {
         format!(
           "\n{} {}\n{} {}",
-          format_topic_operator("?", &new_node_topic(node_id)),
+          format_topic_operator(&node_id, "?", &new_node_topic(node_id)),
           do_node_to_source_text(
             true_expression,
             indent_level,
@@ -191,7 +191,7 @@ fn do_node_to_source_text(
       } else {
         format!(
           "\n{} {}",
-          format_topic_operator("?", &new_node_topic(node_id)),
+          format_topic_operator(&node_id, "?", &new_node_topic(node_id)),
           do_node_to_source_text(
             true_expression,
             indent_level,
@@ -274,6 +274,7 @@ fn do_node_to_source_text(
     }
 
     ASTNode::Argument {
+      node_id,
       referenced_parameter,
       argument,
       ..
@@ -300,6 +301,7 @@ fn do_node_to_source_text(
             return format!(
               "{}:{}",
               format_identifier(
+                &node_id,
                 name,
                 &new_node_topic(referenced_declaration),
                 topic_metadata
@@ -341,7 +343,7 @@ fn do_node_to_source_text(
       format!(
         "{}{}{}",
         arg_str,
-        format_topic_operator("@", &new_node_topic(node_id)),
+        format_topic_operator(&node_id, "@", &new_node_topic(node_id)),
         expr,
       )
     }
@@ -418,20 +420,18 @@ fn do_node_to_source_text(
     }
 
     ASTNode::Identifier {
+      node_id,
+      name,
+      referenced_declaration,
+      ..
+    }
+    | ASTNode::IdentifierPath {
+      node_id,
       name,
       referenced_declaration,
       ..
     } => format_identifier(
-      name,
-      &new_node_topic(referenced_declaration),
-      topic_metadata,
-    ),
-
-    ASTNode::IdentifierPath {
-      name,
-      referenced_declaration,
-      ..
-    } => format_identifier(
+      &node_id,
       name,
       &new_node_topic(referenced_declaration),
       topic_metadata,
@@ -491,6 +491,7 @@ fn do_node_to_source_text(
     },
 
     ASTNode::MemberAccess {
+      node_id,
       expression,
       member_name,
       referenced_declaration,
@@ -540,6 +541,7 @@ fn do_node_to_source_text(
         );
         if let Some(member_node_id) = referenced_declaration {
           let member = format_identifier(
+            &node_id,
             member_name,
             &new_node_topic(member_node_id),
             topic_metadata,
@@ -562,7 +564,7 @@ fn do_node_to_source_text(
     } => {
       format!(
         "{} {}",
-        format_topic_keyword("new", &new_node_topic(node_id)),
+        format_topic_keyword(&node_id, "new", &new_node_topic(node_id)),
         do_node_to_source_text(
           type_name,
           indent_level,
@@ -630,7 +632,7 @@ fn do_node_to_source_text(
         format!(
           "{}{}{}",
           keyword,
-          format_topic_operator(&op, &new_node_topic(node_id)),
+          format_topic_operator(&node_id, &op, &new_node_topic(node_id)),
           expr
         )
       } else {
@@ -638,14 +640,17 @@ fn do_node_to_source_text(
           "{}{}{}",
           keyword,
           expr,
-          format_topic_operator(&op, &new_node_topic(node_id))
+          format_topic_operator(&node_id, &op, &new_node_topic(node_id))
         )
       }
     }
 
-    ASTNode::EnumValue { node_id, name, .. } => {
-      format_identifier(name, &new_node_topic(node_id), topic_metadata)
-    }
+    ASTNode::EnumValue { node_id, name, .. } => format_identifier(
+      &node_id,
+      name,
+      &new_node_topic(node_id),
+      topic_metadata,
+    ),
 
     ASTNode::Block { statements, .. } => {
       if statements.is_empty() {
@@ -698,6 +703,7 @@ fn do_node_to_source_text(
         .join("\n");
 
       format_semantic_block(
+        &node_id,
         &statements,
         "semantic-block",
         &topic::new_node_topic(node_id),
@@ -740,7 +746,7 @@ fn do_node_to_source_text(
       };
       format!(
         "{} {} {} ({})",
-        format_topic_keyword("do", &new_node_topic(node_id)),
+        format_topic_keyword(&node_id, "do", &new_node_topic(node_id)),
         body_str,
         format_keyword("while"),
         condition
@@ -754,7 +760,7 @@ fn do_node_to_source_text(
     } => {
       format!(
         "{} {}",
-        format_topic_keyword("emit", &new_node_topic(node_id)),
+        format_topic_keyword(&node_id, "emit", &new_node_topic(node_id)),
         do_node_to_source_text(
           event_call,
           indent_level,
@@ -829,7 +835,7 @@ fn do_node_to_source_text(
       );
       format!(
         "{} (LoopExpr) {}",
-        format_topic_keyword("for", &new_node_topic(node_id)),
+        format_topic_keyword(&node_id, "for", &new_node_topic(node_id)),
         body_str
       )
     }
@@ -875,7 +881,7 @@ fn do_node_to_source_text(
       };
       format!(
         "{} ({}\n) {}{}",
-        format_topic_keyword("if", &new_node_topic(node_id)),
+        format_topic_keyword(&node_id, "if", &new_node_topic(node_id)),
         indent(&cond, indent_level + 1),
         true_b,
         false_part
@@ -885,7 +891,7 @@ fn do_node_to_source_text(
     ASTNode::InlineAssembly { .. } => format_keyword("assembly"),
 
     ASTNode::PlaceholderStatement { node_id, .. } => {
-      format_topic_keyword("placeholder", &new_node_topic(node_id))
+      format_topic_keyword(&node_id, "placeholder", &new_node_topic(node_id))
     }
 
     ASTNode::Return {
@@ -896,7 +902,7 @@ fn do_node_to_source_text(
       if let Some(expr) = expression {
         format!(
           "{} {}",
-          format_topic_keyword("return", &new_node_topic(node_id)),
+          format_topic_keyword(&node_id, "return", &new_node_topic(node_id)),
           do_node_to_source_text(
             expr,
             indent_level,
@@ -907,7 +913,7 @@ fn do_node_to_source_text(
           )
         )
       } else {
-        format_topic_keyword("return", &new_node_topic(node_id))
+        format_topic_keyword(&node_id, "return", &new_node_topic(node_id))
       }
     }
 
@@ -918,7 +924,7 @@ fn do_node_to_source_text(
     } => {
       format!(
         "{} {}",
-        format_topic_keyword("revert", &new_node_topic(node_id)),
+        format_topic_keyword(&node_id, "revert", &new_node_topic(node_id)),
         do_node_to_source_text(
           error_call,
           indent_level,
@@ -1130,7 +1136,7 @@ fn do_node_to_source_text(
 
         parts.push(format!(
           "{}:",
-          format_identifier(name, &topic, topic_metadata)
+          format_identifier(&node_id, name, &topic, topic_metadata)
         ));
       }
       parts.push(type_str);
@@ -1186,13 +1192,14 @@ fn do_node_to_source_text(
       };
       format!(
         "{} ({}) {}",
-        format_topic_keyword("while", &new_node_topic(node_id)),
+        format_topic_keyword(&node_id, "while", &new_node_topic(node_id)),
         indent(&cond, indent_level),
         body_str
       )
     }
 
     ASTNode::ContractSignature {
+      node_id,
       contract_kind,
       name,
       referenced_id,
@@ -1271,6 +1278,7 @@ fn do_node_to_source_text(
         abstract_str,
         format_keyword(&kind),
         format_identifier(
+          &node_id,
           &name,
           &new_node_topic(referenced_id),
           topic_metadata
@@ -1322,6 +1330,7 @@ fn do_node_to_source_text(
     }
 
     ASTNode::FunctionSignature {
+      node_id,
       kind,
       name,
       referenced_id,
@@ -1348,6 +1357,7 @@ fn do_node_to_source_text(
         format!(
           " {}",
           format_topic_keyword(
+            &node_id,
             &function_kind_to_string(kind),
             &new_node_topic(referenced_id)
           )
@@ -1356,7 +1366,7 @@ fn do_node_to_source_text(
         format!(
           " {} {}",
           format_keyword(&function_kind_to_string(kind)),
-          format_function_name(name, &new_node_topic(referenced_id))
+          format_function_name(&node_id, name, &new_node_topic(referenced_id))
         )
       };
       let params = format!(
@@ -1462,7 +1472,12 @@ fn do_node_to_source_text(
       format!(
         "{} {}{}",
         format_keyword("event"),
-        format_identifier(name, &new_node_topic(node_id), topic_metadata),
+        format_identifier(
+          &node_id,
+          name,
+          &new_node_topic(node_id),
+          topic_metadata
+        ),
         params
       )
     }
@@ -1484,12 +1499,18 @@ fn do_node_to_source_text(
       format!(
         "{} {}{}",
         format_keyword("error"),
-        format_identifier(name, &new_node_topic(node_id), topic_metadata),
+        format_identifier(
+          &node_id,
+          name,
+          &new_node_topic(node_id),
+          topic_metadata
+        ),
         params
       )
     }
 
     ASTNode::ModifierSignature {
+      node_id,
       name,
       referenced_id,
       parameters,
@@ -1518,7 +1539,7 @@ fn do_node_to_source_text(
         virtual_str,
         visibility_str,
         format_keyword("mod"),
-        format_function_name(name, &new_node_topic(referenced_id)),
+        format_function_name(&node_id, name, &new_node_topic(referenced_id)),
         params,
       )
     }
@@ -1576,7 +1597,12 @@ fn do_node_to_source_text(
         "{} {} {} {{{}{}}}",
         visibility_str,
         format_keyword("struct"),
-        format_identifier(name, &new_node_topic(node_id), topic_metadata),
+        format_identifier(
+          &node_id,
+          name,
+          &new_node_topic(node_id),
+          topic_metadata
+        ),
         indent(&members_str, indent_level),
         trailing_newline
       )
@@ -1608,7 +1634,12 @@ fn do_node_to_source_text(
       format!(
         "{} {} {{{}{}}}",
         format_keyword("enum"),
-        format_identifier(name, &new_node_topic(node_id), topic_metadata),
+        format_identifier(
+          &node_id,
+          name,
+          &new_node_topic(node_id),
+          topic_metadata
+        ),
         indent(&members_str, indent_level),
         trailing_newline
       )
@@ -1622,7 +1653,12 @@ fn do_node_to_source_text(
     } => {
       format!(
         "type {} is {}",
-        format_identifier(name, &new_node_topic(node_id), topic_metadata),
+        format_identifier(
+          &node_id,
+          name,
+          &new_node_topic(node_id),
+          topic_metadata
+        ),
         do_node_to_source_text(
           underlying_type,
           indent_level,
@@ -1890,6 +1926,7 @@ fn do_node_to_source_text(
 // reference and the node type is not already known, and duplicating
 // identifier formatting logic could lead to inconsistencies.
 fn format_identifier(
+  node_id: &i32,
   name: &String,
   topic: &topic::Topic,
   topic_metadata: &BTreeMap<topic::Topic, core::TopicMetadata>,
@@ -1919,11 +1956,12 @@ fn format_identifier(
       core::NamedTopicKind::Modifier => "modifier",
       core::NamedTopicKind::Builtin => "global",
     };
-    return format_topic_token(name, css_class, topic);
+    return format_topic_token(&node_id, name, css_class, topic);
   }
 
   format!(
-    "<span class=\"unknown\" data-topic=\"{}\">{}</span>",
+    "<span id=\"{}\" class=\"unknown\" data-topic=\"{}\">{}</span>",
+    node_id,
     topic.id(),
     name,
   )
@@ -1934,12 +1972,14 @@ fn format_token(token: &str, class: &str) -> String {
 }
 
 fn format_topic_token(
+  node_id: &i32,
   token: &str,
   class: &str,
   topic: &topic::Topic,
 ) -> String {
   format!(
-    "<span class=\"{}\" data-topic=\"{}\" tabindex=\"0\">{}</span>",
+    "<span id=\"{}\" class=\"{}\" data-topic=\"{}\" tabindex=\"0\">{}</span>",
+    node_id,
     class,
     topic.id(),
     token
@@ -1954,12 +1994,20 @@ fn format_keyword(keyword: &str) -> String {
   format_token(keyword, "keyword")
 }
 
-fn format_topic_keyword(keyword: &str, topic: &topic::Topic) -> String {
-  format_topic_token(keyword, "keyword", topic)
+fn format_topic_keyword(
+  node_id: &i32,
+  keyword: &str,
+  topic: &topic::Topic,
+) -> String {
+  format_topic_token(node_id, keyword, "keyword", topic)
 }
 
-fn format_function_name(name: &String, topic: &topic::Topic) -> String {
-  format_topic_token(name, "function", topic)
+fn format_function_name(
+  node_id: &i32,
+  name: &String,
+  topic: &topic::Topic,
+) -> String {
+  format_topic_token(node_id, name, "function", topic)
 }
 
 fn format_type(type_name: &String) -> String {
@@ -1990,8 +2038,12 @@ fn format_operator(op: &str) -> String {
   format_token(&html_escape(&op), "operator")
 }
 
-fn format_topic_operator(op: &str, topic: &topic::Topic) -> String {
-  format_topic_token(&html_escape(&op), "operator", topic)
+fn format_topic_operator(
+  node_id: &i32,
+  op: &str,
+  topic: &topic::Topic,
+) -> String {
+  format_topic_token(node_id, &html_escape(&op), "operator", topic)
 }
 
 fn format_brace(brace: &str, indent_level: usize) -> String {
@@ -2002,12 +2054,14 @@ fn format_brace(brace: &str, indent_level: usize) -> String {
 }
 
 fn format_semantic_block(
+  node_id: &i32,
   token: &str,
   class: &str,
   topic: &topic::Topic,
 ) -> String {
   format!(
-    "<div class=\"{}\" data-topic=\"{}\" tabindex=\"0\">{}</div>",
+    "<div id=\"{}\" class=\"{}\" data-topic=\"{}\" tabindex=\"0\">{}</div>",
+    node_id,
     class,
     topic.id(),
     token
