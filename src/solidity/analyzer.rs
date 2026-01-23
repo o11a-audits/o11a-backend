@@ -892,8 +892,11 @@ fn process_second_pass_nodes(
       let scope = match node {
         ASTNode::SemanticBlock { node_id, .. }
         | ASTNode::ContractDefinition { node_id, .. }
+        | ASTNode::ContractSignature { node_id, .. }
         | ASTNode::FunctionDefinition { node_id, .. }
+        | ASTNode::FunctionSignature { node_id, .. }
         | ASTNode::ModifierDefinition { node_id, .. }
+        | ASTNode::ModifierSignature { node_id, .. }
         | ASTNode::StructDefinition { node_id, .. }
         | ASTNode::EnumDefinition { node_id, .. }
         | ASTNode::EventDefinition { node_id, .. }

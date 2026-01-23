@@ -274,8 +274,7 @@ fn do_node_to_source_text(
     }
 
     ASTNode::Argument {
-      node_id,
-      referenced_parameter,
+      parameter,
       argument,
       ..
     } => {
@@ -289,31 +288,30 @@ fn do_node_to_source_text(
       );
 
       // Format as "parameter:\n\targument" if parameter is available
-      if let Some(param) = referenced_parameter {
-        if let ASTNode::Identifier {
-          referenced_declaration,
-          name,
-          ..
-        } = param.as_ref()
-        {
-          // Only include parameter name if it's not empty
-          if !name.is_empty() {
-            return format!(
-              "{}:{}",
-              format_identifier(
-                &node_id,
-                name,
-                &new_node_topic(referenced_declaration),
-                topic_metadata
-              ),
-              indent(&arg_str, indent_level + 1)
-            );
+      match parameter {
+        Some(param) => {
+          match param.as_ref() {
+            ASTNode::Identifier { name, .. } if name != "" => {
+              // Only include parameter name if it's not empty
+              let param_str = do_node_to_source_text(
+                node,
+                indent_level,
+                nodes_map,
+                topic_metadata,
+                function_mod_properties,
+                variable_properties,
+              );
+              format!("{}:{}", param_str, indent(&arg_str, indent_level + 1))
+            }
+
+            // Fallback: just format the argument without parameter name
+            _ => arg_str,
           }
         }
-      }
 
-      // Fallback: just format the argument without parameter name
-      arg_str
+        // Fallback: just format the argument without parameter name
+        _ => arg_str,
+      }
     }
 
     ASTNode::TypeConversion {
@@ -645,12 +643,9 @@ fn do_node_to_source_text(
       }
     }
 
-    ASTNode::EnumValue { node_id, name, .. } => format_identifier(
-      &node_id,
-      name,
-      &new_node_topic(node_id),
-      topic_metadata,
-    ),
+    ASTNode::EnumValue { node_id, name, .. } => {
+      format_enum_value(&node_id, name, &new_node_topic(node_id))
+    }
 
     ASTNode::Block { statements, .. } => {
       if statements.is_empty() {
@@ -1961,7 +1956,7 @@ fn format_identifier(
 
   format!(
     "<span id=\"{}\" class=\"unknown\" data-topic=\"{}\">{}</span>",
-    node_id,
+    new_node_topic(node_id).id(),
     topic.id(),
     name,
   )
@@ -1979,7 +1974,7 @@ fn format_topic_token(
 ) -> String {
   format!(
     "<span id=\"{}\" class=\"{}\" data-topic=\"{}\" tabindex=\"0\">{}</span>",
-    node_id,
+    new_node_topic(node_id).id(),
     class,
     topic.id(),
     token
@@ -2008,6 +2003,14 @@ fn format_function_name(
   topic: &topic::Topic,
 ) -> String {
   format_topic_token(node_id, name, "function", topic)
+}
+
+fn format_enum_value(
+  node_id: &i32,
+  name: &String,
+  topic: &topic::Topic,
+) -> String {
+  format_topic_token(node_id, name, "enum-value", topic)
 }
 
 fn format_type(type_name: &String) -> String {

@@ -1551,7 +1551,7 @@ pub enum ASTNode {
     src_location: SourceLocation,
     /// The node ID of the VariableDeclaration parameter this argument maps to.
     /// None if the called function is a built-in or couldn't be resolved.
-    referenced_parameter: Option<Box<ASTNode>>,
+    parameter: Option<Box<ASTNode>>,
     /// The original argument expression from the compiler AST.
     argument: Box<ASTNode>,
   },
@@ -2550,7 +2550,7 @@ impl ASTNode {
       }
       ASTNode::Argument {
         argument,
-        referenced_parameter,
+        parameter: referenced_parameter,
         ..
       } => {
         let mut result = vec![&**argument];
@@ -3477,12 +3477,12 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     ASTNode::Argument {
       node_id,
       src_location,
-      referenced_parameter,
+      parameter: referenced_parameter,
       argument,
     } => ASTNode::Argument {
       node_id: node_id,
       src_location: src_location,
-      referenced_parameter: referenced_parameter,
+      parameter: referenced_parameter,
       argument: Box::new(node_to_stub(&argument)),
     },
   }
@@ -4350,7 +4350,7 @@ fn wrap_arguments_impl(
       ASTNode::Argument {
         node_id: generate_node_id(),
         src_location: arg_src_location,
-        referenced_parameter: referenced_param,
+        parameter: referenced_param,
         argument: Box::new(arg),
       }
     })
