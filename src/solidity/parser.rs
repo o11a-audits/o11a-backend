@@ -4105,12 +4105,29 @@ fn generate_node_id() -> i32 {
   }
 }
 
-/// Wraps a single statement in a Block containing a SemanticBlock.
+/// Wraps a single statement in a Block.
 /// If the statement is already a Block, returns it unchanged.
 fn wrap_statement_in_block(statement: Box<ASTNode>) -> Box<ASTNode> {
   match &*statement {
-    // If it's already a Block, return it as-is
-    ASTNode::Block { .. } => statement,
+    // If it's already a Block, check if it contains only one SemanticBlock.
+    // if it does, remove the single SemanticBlock and return its statements
+    // in the Block itself. This is because in the UI, a block with a single
+    // semantic block is redundant and annoying to traverse.
+    ASTNode::Block { statements, .. } if statements.len() == 1 => {
+      if let ASTNode::SemanticBlock { statements, .. } =
+        &*statements.first().unwrap()
+      {
+        Box::new(ASTNode::Block {
+          node_id: generate_node_id(),
+          src_location: statement.src_location().clone(),
+          statements: statements.clone(),
+        })
+      } else {
+        statement
+      }
+    }
+    // If it's a Block with more than one SemanticBlock, leave as-is.
+    ASTNode::SemanticBlock { .. } => statement,
     // Otherwise, wrap the single statement in a SemanticBlock and Block
     _ => {
       let stmt_src_location = statement.src_location().clone();
@@ -4950,7 +4967,9 @@ fn node_from_json(
         context,
       )?;
 
-      // Wrap single statements in Block and SemanticBlock
+      // Wrap all single statements if statements in a Block because
+      // Solidity allows for single statements without blocks in if
+      // statements, but we never want this because it is bad practice
       let true_body = wrap_statement_in_block(true_body);
       let false_body = false_body.map(wrap_statement_in_block);
 
