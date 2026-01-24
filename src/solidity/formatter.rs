@@ -1,5 +1,5 @@
 use crate::core::topic::{self, new_node_topic};
-use crate::core::{self, FunctionModProperties, VariableProperties};
+use crate::core::{self, FunctionModProperties, TopicMetadata};
 use crate::core::{ContractKind, FunctionKind, VariableMutability};
 use crate::solidity::parser::{
   ASTNode, AssignmentOperator, BinaryOperator, FunctionStateMutability,
@@ -27,7 +27,6 @@ pub fn node_to_source_text(
   nodes_map: &BTreeMap<topic::Topic, core::Node>,
   topic_metadata: &BTreeMap<topic::Topic, core::TopicMetadata>,
   function_mod_properties: &BTreeMap<topic::Topic, FunctionModProperties>,
-  variable_properties: &BTreeMap<topic::Topic, VariableProperties>,
 ) -> String {
   format!(
     "<pre><code>{}</code></pre>",
@@ -37,7 +36,6 @@ pub fn node_to_source_text(
       nodes_map,
       topic_metadata,
       function_mod_properties,
-      variable_properties
     )
   )
 }
@@ -48,7 +46,6 @@ fn do_node_to_source_text(
   nodes_map: &BTreeMap<topic::Topic, core::Node>,
   topic_metadata: &BTreeMap<topic::Topic, core::TopicMetadata>,
   function_mod_properties: &BTreeMap<topic::Topic, FunctionModProperties>,
-  variable_properties: &BTreeMap<topic::Topic, VariableProperties>,
 ) -> String {
   let node_str = match node.resolve(nodes_map) {
     ASTNode::Assignment {
@@ -64,7 +61,6 @@ fn do_node_to_source_text(
         nodes_map,
         topic_metadata,
         function_mod_properties,
-        variable_properties,
       );
       let op = assignment_operator_to_string(operator);
 
@@ -75,7 +71,6 @@ fn do_node_to_source_text(
         nodes_map,
         topic_metadata,
         function_mod_properties,
-        variable_properties,
       );
       format!(
         "{} {} {}{}",
@@ -99,7 +94,6 @@ fn do_node_to_source_text(
         nodes_map,
         topic_metadata,
         function_mod_properties,
-        variable_properties,
       );
       let op = binary_operator_to_string(operator);
 
@@ -113,7 +107,6 @@ fn do_node_to_source_text(
           nodes_map,
           topic_metadata,
           function_mod_properties,
-          variable_properties,
         );
         format!(
           "{}\n{}",
@@ -132,7 +125,6 @@ fn do_node_to_source_text(
           nodes_map,
           topic_metadata,
           function_mod_properties,
-          variable_properties,
         );
         format!(
           "{}{}",
@@ -162,7 +154,6 @@ fn do_node_to_source_text(
         nodes_map,
         topic_metadata,
         function_mod_properties,
-        variable_properties,
       );
 
       let indent_level = indent_level + 1;
@@ -176,7 +167,6 @@ fn do_node_to_source_text(
             nodes_map,
             topic_metadata,
             function_mod_properties,
-            variable_properties
           ),
           format_operator(":"),
           do_node_to_source_text(
@@ -185,7 +175,6 @@ fn do_node_to_source_text(
             nodes_map,
             topic_metadata,
             function_mod_properties,
-            variable_properties
           ),
         )
       } else {
@@ -198,7 +187,6 @@ fn do_node_to_source_text(
             nodes_map,
             topic_metadata,
             function_mod_properties,
-            variable_properties
           )
         )
       };
@@ -213,7 +201,6 @@ fn do_node_to_source_text(
         nodes_map,
         topic_metadata,
         function_mod_properties,
-        variable_properties,
       )
     }
 
@@ -230,7 +217,6 @@ fn do_node_to_source_text(
         nodes_map,
         topic_metadata,
         function_mod_properties,
-        variable_properties,
       );
 
       let indent_level = indent_level + 1;
@@ -245,7 +231,6 @@ fn do_node_to_source_text(
             nodes_map,
             topic_metadata,
             function_mod_properties,
-            variable_properties,
           )
         })
         .collect::<Vec<_>>()
@@ -284,7 +269,6 @@ fn do_node_to_source_text(
         nodes_map,
         topic_metadata,
         function_mod_properties,
-        variable_properties,
       );
 
       // Format as "parameter:\n\targument" if parameter is available
@@ -294,12 +278,11 @@ fn do_node_to_source_text(
             ASTNode::Identifier { name, .. } if name != "" => {
               // Only include parameter name if it's not empty
               let param_str = do_node_to_source_text(
-                node,
+                param,
                 indent_level,
                 nodes_map,
                 topic_metadata,
                 function_mod_properties,
-                variable_properties,
               );
               format!("{}:{}", param_str, indent(&arg_str, indent_level + 1))
             }
@@ -326,7 +309,6 @@ fn do_node_to_source_text(
         nodes_map,
         topic_metadata,
         function_mod_properties,
-        variable_properties,
       );
 
       let arg_str = do_node_to_source_text(
@@ -335,7 +317,6 @@ fn do_node_to_source_text(
         nodes_map,
         topic_metadata,
         function_mod_properties,
-        variable_properties,
       );
 
       format!(
@@ -357,7 +338,6 @@ fn do_node_to_source_text(
         nodes_map,
         topic_metadata,
         function_mod_properties,
-        variable_properties,
       );
 
       let indent_level = indent_level + 1;
@@ -370,7 +350,6 @@ fn do_node_to_source_text(
             nodes_map,
             topic_metadata,
             function_mod_properties,
-            variable_properties,
           )
         })
         .collect::<Vec<_>>()
@@ -390,7 +369,6 @@ fn do_node_to_source_text(
         nodes_map,
         topic_metadata,
         function_mod_properties,
-        variable_properties,
       );
 
       let indent_level = indent_level + 1;
@@ -403,7 +381,6 @@ fn do_node_to_source_text(
             nodes_map,
             topic_metadata,
             function_mod_properties,
-            variable_properties,
           )
         })
         .collect::<Vec<_>>()
@@ -446,7 +423,6 @@ fn do_node_to_source_text(
         nodes_map,
         topic_metadata,
         function_mod_properties,
-        variable_properties,
       );
       if let Some(idx) = index_expression {
         format!(
@@ -458,7 +434,6 @@ fn do_node_to_source_text(
             nodes_map,
             topic_metadata,
             function_mod_properties,
-            variable_properties
           )
         )
       } else {
@@ -535,7 +510,6 @@ fn do_node_to_source_text(
           nodes_map,
           topic_metadata,
           function_mod_properties,
-          variable_properties,
         );
         if let Some(member_node_id) = referenced_declaration {
           let member = format_identifier(
@@ -569,7 +543,6 @@ fn do_node_to_source_text(
           nodes_map,
           topic_metadata,
           function_mod_properties,
-          variable_properties
         )
       )
     }
@@ -585,7 +558,6 @@ fn do_node_to_source_text(
             nodes_map,
             topic_metadata,
             function_mod_properties,
-            variable_properties,
           )
         })
         .collect::<Vec<_>>()
@@ -614,7 +586,6 @@ fn do_node_to_source_text(
         nodes_map,
         topic_metadata,
         function_mod_properties,
-        variable_properties,
       );
       let keyword = match operator {
         UnaryOperator::Increment => format!("{} ", format_keyword("mut")),
@@ -661,7 +632,6 @@ fn do_node_to_source_text(
               nodes_map,
               topic_metadata,
               function_mod_properties,
-              variable_properties,
             )
           })
           .collect::<Vec<_>>()
@@ -691,7 +661,6 @@ fn do_node_to_source_text(
             nodes_map,
             topic_metadata,
             function_mod_properties,
-            variable_properties,
           )
         })
         .collect::<Vec<_>>()
@@ -722,7 +691,6 @@ fn do_node_to_source_text(
           nodes_map,
           topic_metadata,
           function_mod_properties,
-          variable_properties,
         )
       } else {
         String::new()
@@ -734,7 +702,6 @@ fn do_node_to_source_text(
           nodes_map,
           topic_metadata,
           function_mod_properties,
-          variable_properties,
         )
       } else {
         String::new()
@@ -762,7 +729,6 @@ fn do_node_to_source_text(
           nodes_map,
           topic_metadata,
           function_mod_properties,
-          variable_properties
         )
       )
     }
@@ -773,7 +739,6 @@ fn do_node_to_source_text(
       nodes_map,
       topic_metadata,
       function_mod_properties,
-      variable_properties,
     ),
 
     ASTNode::ForStatement {
@@ -791,7 +756,6 @@ fn do_node_to_source_text(
           nodes_map,
           topic_metadata,
           function_mod_properties,
-          variable_properties,
         )
       } else {
         String::new()
@@ -803,7 +767,6 @@ fn do_node_to_source_text(
           nodes_map,
           topic_metadata,
           function_mod_properties,
-          variable_properties,
         )
       } else {
         String::new()
@@ -815,7 +778,6 @@ fn do_node_to_source_text(
           nodes_map,
           topic_metadata,
           function_mod_properties,
-          variable_properties,
         )
       } else {
         String::new()
@@ -826,7 +788,6 @@ fn do_node_to_source_text(
         nodes_map,
         topic_metadata,
         function_mod_properties,
-        variable_properties,
       );
       format!(
         "{} (LoopExpr) {}",
@@ -848,7 +809,6 @@ fn do_node_to_source_text(
         nodes_map,
         topic_metadata,
         function_mod_properties,
-        variable_properties,
       );
       let true_b = do_node_to_source_text(
         true_body,
@@ -856,7 +816,6 @@ fn do_node_to_source_text(
         nodes_map,
         topic_metadata,
         function_mod_properties,
-        variable_properties,
       );
       let false_part = if let Some(false_b) = false_body {
         format!(
@@ -868,7 +827,6 @@ fn do_node_to_source_text(
             nodes_map,
             topic_metadata,
             function_mod_properties,
-            variable_properties
           )
         )
       } else {
@@ -904,7 +862,6 @@ fn do_node_to_source_text(
             nodes_map,
             topic_metadata,
             function_mod_properties,
-            variable_properties
           )
         )
       } else {
@@ -926,7 +883,6 @@ fn do_node_to_source_text(
           nodes_map,
           topic_metadata,
           function_mod_properties,
-          variable_properties
         )
       )
     }
@@ -945,7 +901,6 @@ fn do_node_to_source_text(
             nodes_map,
             topic_metadata,
             function_mod_properties,
-            variable_properties,
           )
         })
         .collect::<Vec<_>>()
@@ -979,7 +934,6 @@ fn do_node_to_source_text(
               nodes_map,
               topic_metadata,
               function_mod_properties,
-              variable_properties
             ),
             format_operator("="),
             indent(
@@ -989,7 +943,6 @@ fn do_node_to_source_text(
                 nodes_map,
                 topic_metadata,
                 function_mod_properties,
-                variable_properties
               ),
               indent_level
             ),
@@ -1016,7 +969,6 @@ fn do_node_to_source_text(
                 nodes_map,
                 topic_metadata,
                 function_mod_properties,
-                variable_properties,
               )
             })
             .collect::<Vec<_>>()
@@ -1028,7 +980,6 @@ fn do_node_to_source_text(
             nodes_map,
             topic_metadata,
             function_mod_properties,
-            variable_properties,
           );
 
           format!(
@@ -1049,7 +1000,6 @@ fn do_node_to_source_text(
               nodes_map,
               topic_metadata,
               function_mod_properties,
-              variable_properties,
             )
           })
           .collect::<Vec<_>>()
@@ -1077,7 +1027,6 @@ fn do_node_to_source_text(
         nodes_map,
         topic_metadata,
         function_mod_properties,
-        variable_properties,
       );
       let storage = storage_location_to_string(storage_location);
       let visibility_str = variable_visibility_to_string(visibility);
@@ -1085,16 +1034,14 @@ fn do_node_to_source_text(
       // If there are no mutations for the variable, set the mutability
       // to "immutable", otherwise set it to "mutable"
       let mutability = if *visibility == VariableVisibility::Internal {
-        if let Some(properties) =
-          variable_properties.get(&new_node_topic(node_id))
-        {
-          if properties.mutations.is_empty() {
-            &VariableMutability::Immutable
-          } else {
-            &VariableMutability::Mutable
-          }
+        // Check if this variable has mutations by looking for NamedMutableTopic
+        let has_mutations = topic_metadata
+          .get(&new_node_topic(node_id))
+          .map(|meta| matches!(meta, TopicMetadata::NamedMutableTopic { .. }))
+          .unwrap_or(false);
+        if has_mutations {
+          &VariableMutability::Mutable
         } else {
-          // If there are no properties, assume this local variable is immutable
           &VariableMutability::Immutable
         }
       } else {
@@ -1146,7 +1093,6 @@ fn do_node_to_source_text(
           nodes_map,
           topic_metadata,
           function_mod_properties,
-          variable_properties,
         );
         format!(
           "{} {} {}",
@@ -1171,7 +1117,6 @@ fn do_node_to_source_text(
         nodes_map,
         topic_metadata,
         function_mod_properties,
-        variable_properties,
       );
       let body_str = if let Some(b) = body {
         do_node_to_source_text(
@@ -1180,7 +1125,6 @@ fn do_node_to_source_text(
           nodes_map,
           topic_metadata,
           function_mod_properties,
-          variable_properties,
         )
       } else {
         format_brace("{}", indent_level)
@@ -1217,7 +1161,6 @@ fn do_node_to_source_text(
           nodes_map,
           topic_metadata,
           function_mod_properties,
-          variable_properties,
         );
         let remaining_bases = if base_contracts.len() > 1 {
           let remaining = base_contracts[1..]
@@ -1229,7 +1172,6 @@ fn do_node_to_source_text(
                 nodes_map,
                 topic_metadata,
                 function_mod_properties,
-                variable_properties,
               )
             })
             .collect::<Vec<_>>()
@@ -1260,7 +1202,6 @@ fn do_node_to_source_text(
               nodes_map,
               topic_metadata,
               function_mod_properties,
-              variable_properties,
             )
           })
           .collect::<Vec<_>>()
@@ -1292,7 +1233,6 @@ fn do_node_to_source_text(
         nodes_map,
         topic_metadata,
         function_mod_properties,
-        variable_properties,
       );
 
       if nodes.is_empty() {
@@ -1307,7 +1247,6 @@ fn do_node_to_source_text(
               nodes_map,
               topic_metadata,
               function_mod_properties,
-              variable_properties,
             )
           })
           .collect::<Vec<_>>()
@@ -1372,7 +1311,6 @@ fn do_node_to_source_text(
           nodes_map,
           topic_metadata,
           function_mod_properties,
-          variable_properties
         )
       );
       let modifiers_str = if !modifiers.is_empty() {
@@ -1386,7 +1324,6 @@ fn do_node_to_source_text(
               nodes_map,
               topic_metadata,
               function_mod_properties,
-              variable_properties,
             )
           })
           .collect::<Vec<_>>()
@@ -1406,7 +1343,6 @@ fn do_node_to_source_text(
           nodes_map,
           topic_metadata,
           function_mod_properties,
-          variable_properties
         )
       );
 
@@ -1431,7 +1367,6 @@ fn do_node_to_source_text(
         nodes_map,
         topic_metadata,
         function_mod_properties,
-        variable_properties,
       );
 
       let body_str = if let Some(b) = body {
@@ -1441,7 +1376,6 @@ fn do_node_to_source_text(
           nodes_map,
           topic_metadata,
           function_mod_properties,
-          variable_properties,
         )
       } else {
         String::new()
@@ -1462,7 +1396,6 @@ fn do_node_to_source_text(
         nodes_map,
         topic_metadata,
         function_mod_properties,
-        variable_properties,
       );
       format!(
         "{} {}{}",
@@ -1489,7 +1422,6 @@ fn do_node_to_source_text(
         nodes_map,
         topic_metadata,
         function_mod_properties,
-        variable_properties,
       );
       format!(
         "{} {}{}",
@@ -1519,7 +1451,6 @@ fn do_node_to_source_text(
         nodes_map,
         topic_metadata,
         function_mod_properties,
-        variable_properties,
       );
       let virtual_str = if *virtual_ {
         format!("{} ", format_keyword("virtual"))
@@ -1548,7 +1479,6 @@ fn do_node_to_source_text(
         nodes_map,
         topic_metadata,
         function_mod_properties,
-        variable_properties,
       );
 
       let body_str = do_node_to_source_text(
@@ -1557,7 +1487,6 @@ fn do_node_to_source_text(
         nodes_map,
         topic_metadata,
         function_mod_properties,
-        variable_properties,
       );
 
       format!("{} {}", sig_str, body_str)
@@ -1582,7 +1511,6 @@ fn do_node_to_source_text(
             nodes_map,
             topic_metadata,
             function_mod_properties,
-            variable_properties,
           )
         })
         .collect::<Vec<_>>()
@@ -1620,7 +1548,6 @@ fn do_node_to_source_text(
             nodes_map,
             topic_metadata,
             function_mod_properties,
-            variable_properties,
           )
         })
         .collect::<Vec<_>>()
@@ -1660,7 +1587,6 @@ fn do_node_to_source_text(
           nodes_map,
           topic_metadata,
           function_mod_properties,
-          variable_properties
         )
       )
     }
@@ -1689,7 +1615,6 @@ fn do_node_to_source_text(
           nodes_map,
           topic_metadata,
           function_mod_properties,
-          variable_properties,
         )
       } else {
         String::new()
@@ -1705,7 +1630,6 @@ fn do_node_to_source_text(
             nodes_map,
             topic_metadata,
             function_mod_properties,
-            variable_properties
           )
         )
       } else {
@@ -1723,7 +1647,6 @@ fn do_node_to_source_text(
           nodes_map,
           topic_metadata,
           function_mod_properties,
-          variable_properties,
         )
       })
       .collect::<Vec<_>>()
@@ -1735,7 +1658,6 @@ fn do_node_to_source_text(
       nodes_map,
       topic_metadata,
       function_mod_properties,
-      variable_properties,
     ),
 
     ASTNode::ElementaryTypeName { name, .. } => format_type(name),
@@ -1753,7 +1675,6 @@ fn do_node_to_source_text(
         nodes_map,
         topic_metadata,
         function_mod_properties,
-        variable_properties,
       );
       let visibility_str = function_visibility_to_string(visibility);
       let mutability_str = function_mutability_to_string(state_mutability);
@@ -1766,7 +1687,6 @@ fn do_node_to_source_text(
           nodes_map,
           topic_metadata,
           function_mod_properties,
-          variable_properties
         )
       );
 
@@ -1794,7 +1714,6 @@ fn do_node_to_source_text(
               nodes_map,
               topic_metadata,
               function_mod_properties,
-              variable_properties,
             )
           })
           .collect::<Vec<_>>()
@@ -1817,7 +1736,6 @@ fn do_node_to_source_text(
         nodes_map,
         topic_metadata,
         function_mod_properties,
-        variable_properties,
       );
       if let Some(args) = arguments {
         if args.is_empty() {
@@ -1832,7 +1750,6 @@ fn do_node_to_source_text(
                 nodes_map,
                 topic_metadata,
                 function_mod_properties,
-                variable_properties,
               )
             })
             .collect::<Vec<_>>()
@@ -1850,7 +1767,6 @@ fn do_node_to_source_text(
       nodes_map,
       topic_metadata,
       function_mod_properties,
-      variable_properties,
     ),
 
     ASTNode::ArrayTypeName { base_type, .. } => {
@@ -1862,7 +1778,6 @@ fn do_node_to_source_text(
           nodes_map,
           topic_metadata,
           function_mod_properties,
-          variable_properties
         )
       )
     }
@@ -1880,7 +1795,6 @@ fn do_node_to_source_text(
         nodes_map,
         topic_metadata,
         function_mod_properties,
-        variable_properties,
       );
       if let Some(name) = key_name {
         key = format!("{} {}", key, name)
@@ -1891,7 +1805,6 @@ fn do_node_to_source_text(
         nodes_map,
         topic_metadata,
         function_mod_properties,
-        variable_properties,
       );
       if let Some(name) = value_name {
         value = format!("{} {}", value, name)
@@ -1927,39 +1840,45 @@ fn format_identifier(
   topic_metadata: &BTreeMap<topic::Topic, core::TopicMetadata>,
 ) -> String {
   // Prefer metadata-based classification (single source of truth)
-  if let Some(core::TopicMetadata::NamedTopic { kind, .. }) =
-    topic_metadata.get(topic)
-  {
-    let css_class = match kind {
-      core::NamedTopicKind::Contract(_) => "contract",
-      core::NamedTopicKind::Struct => "struct",
-      core::NamedTopicKind::Enum => "enum",
-      core::NamedTopicKind::EnumMember => "enum-value",
-      core::NamedTopicKind::Error => "error",
-      core::NamedTopicKind::Event => "event",
-      core::NamedTopicKind::StateVariable(
-        core::VariableMutability::Constant,
-      ) => "constant",
-      core::NamedTopicKind::StateVariable(
-        core::VariableMutability::Immutable,
-      ) => "immutable-state-variable",
-      core::NamedTopicKind::StateVariable(
-        core::VariableMutability::Mutable,
-      ) => "state-variable",
-      core::NamedTopicKind::LocalVariable => "identifier",
-      core::NamedTopicKind::Function(_) => "function",
-      core::NamedTopicKind::Modifier => "modifier",
-      core::NamedTopicKind::Builtin => "global",
-    };
-    return format_topic_token(&node_id, name, css_class, topic);
+  match topic_metadata.get(topic) {
+    Some(core::TopicMetadata::NamedTopic { kind, .. }) => {
+      let css_class = match kind {
+        core::NamedTopicKind::Contract(_) => "contract",
+        core::NamedTopicKind::Struct => "struct",
+        core::NamedTopicKind::Enum => "enum",
+        core::NamedTopicKind::EnumMember => "enum-value",
+        core::NamedTopicKind::Error => "error",
+        core::NamedTopicKind::Event => "event",
+        core::NamedTopicKind::StateVariable(
+          core::VariableMutability::Constant,
+        ) => "constant",
+        core::NamedTopicKind::StateVariable(
+          core::VariableMutability::Mutable,
+        ) => "mutable-state-variable",
+        core::NamedTopicKind::StateVariable(
+          core::VariableMutability::Immutable,
+        ) => "immutable-state-variable",
+        core::NamedTopicKind::LocalVariable => "local-variable",
+        core::NamedTopicKind::Function(_) => "function",
+        core::NamedTopicKind::Modifier => "modifier",
+        core::NamedTopicKind::Builtin => "global",
+      };
+      format_topic_token(&node_id, name, css_class, topic)
+    }
+    Some(core::TopicMetadata::NamedMutableTopic { kind, .. }) => {
+      let css_class = match kind {
+        core::NamedMutableTopicKind::StateVariable => "mutable-state-variable",
+        core::NamedMutableTopicKind::LocalVariable => "mutable-local-variable",
+      };
+      format_topic_token(&node_id, name, css_class, topic)
+    }
+    _ => format!(
+      "<span id=\"{}\" class=\"unknown\" data-topic=\"{}\">{}</span>",
+      new_node_topic(node_id).id(),
+      topic.id(),
+      name,
+    ),
   }
-
-  format!(
-    "<span id=\"{}\" class=\"unknown\" data-topic=\"{}\">{}</span>",
-    new_node_topic(node_id).id(),
-    topic.id(),
-    name,
-  )
 }
 
 fn format_token(token: &str, class: &str) -> String {
@@ -1981,8 +1900,13 @@ fn format_topic_token(
   )
 }
 
-fn format_node(node_str: &str, id: i32, class: &str) -> String {
-  format!("<span class=\"{} {}\">{}</span>", class, id, node_str)
+fn format_node(node_str: &str, node_id: i32, class: &str) -> String {
+  format!(
+    "<span id=\"{}\" class=\"{}\">{}</span>",
+    new_node_topic(&node_id).id(),
+    class,
+    node_str
+  )
 }
 
 fn format_keyword(keyword: &str) -> String {
@@ -2064,7 +1988,7 @@ fn format_semantic_block(
 ) -> String {
   format!(
     "<div id=\"{}\" class=\"{}\" data-topic=\"{}\" tabindex=\"0\">{}</div>",
-    node_id,
+    new_node_topic(node_id).id(),
     class,
     topic.id(),
     token

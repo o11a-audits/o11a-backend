@@ -2,7 +2,7 @@ use crate::core::topic;
 use crate::core::{self, UnnamedTopicKind};
 use crate::core::{
   AST, DataContext, FunctionModProperties, NamedTopicKind, Node, Scope,
-  TopicMetadata, VariableProperties,
+  TopicMetadata,
 };
 use crate::solidity::parser::{
   self, ASTNode, FunctionVisibility, SolidityAST, VariableVisibility,
@@ -27,18 +27,19 @@ pub fn analyze(
     first_pass(&ast_map, &audit_data.in_scope_files)?;
 
   // Tree shaking: Build in-scope dictionary by following references from
-  // publicly visible declarations
-  let in_scope_source_topics = tree_shake(&first_pass_source_topics)?;
+  // publicly visible declarations. Also builds a map of variable mutations.
+  let (in_scope_source_topics, mutations_map) =
+    tree_shake(&first_pass_source_topics)?;
 
   // Second pass: Build final data structures for in-scope declarations
   // Pass mutable references to audit_data's maps directly
   second_pass(
     &ast_map,
     &in_scope_source_topics,
+    &mutations_map,
     &mut audit_data.nodes,
     &mut audit_data.topic_metadata,
     &mut audit_data.function_properties,
-    &mut audit_data.variable_properties,
   )?;
 
   // Insert ASTs with stubbed nodes
@@ -657,10 +658,10 @@ fn process_first_pass_ast_nodes(
 fn second_pass(
   ast_map: &BTreeMap<core::ProjectPath, Vec<SolidityAST>>,
   in_scope_source_topics: &BTreeMap<i32, InScopeDeclaration>,
+  mutations_map: &BTreeMap<i32, Vec<i32>>,
   nodes: &mut BTreeMap<topic::Topic, Node>,
   topic_metadata: &mut BTreeMap<topic::Topic, TopicMetadata>,
   function_properties: &mut BTreeMap<topic::Topic, FunctionModProperties>,
-  variable_properties: &mut BTreeMap<topic::Topic, VariableProperties>,
 ) -> Result<(), String> {
   // Process each AST file
   for (file_path, asts) in ast_map {
@@ -669,13 +670,13 @@ fn second_pass(
         &ast.nodes.iter().collect(),
         false, // Parent is not in scope automatically - check each node
         in_scope_source_topics,
+        mutations_map,
         nodes,
         &core::Scope::Container {
           container: file_path.clone(),
         },
         topic_metadata,
         function_properties,
-        variable_properties,
       )?;
     }
   }
@@ -689,19 +690,19 @@ fn process_second_pass_nodes(
   ast_nodes: &Vec<&ASTNode>,
   parent_in_scope: bool,
   in_scope_source_topics: &BTreeMap<i32, InScopeDeclaration>,
+  mutations_map: &BTreeMap<i32, Vec<i32>>,
   nodes: &mut BTreeMap<topic::Topic, Node>,
   scope: &Scope,
   topic_metadata: &mut BTreeMap<topic::Topic, TopicMetadata>,
   function_properties: &mut BTreeMap<topic::Topic, FunctionModProperties>,
-  variable_properties: &mut BTreeMap<topic::Topic, VariableProperties>,
 ) -> Result<(), String> {
   for node in ast_nodes {
     let node_id = node.node_id();
     let topic = topic::new_node_topic(&node_id);
 
     // Check if this node should be processed (either parent is in scope or it's in the in_scope_declarations)
-    let in_scope_topic_metadata = in_scope_source_topics.get(&node_id);
-    let is_in_scope = parent_in_scope || in_scope_topic_metadata.is_some();
+    let in_scope_topic_declaration = in_scope_source_topics.get(&node_id);
+    let is_in_scope = parent_in_scope || in_scope_topic_declaration.is_some();
 
     if is_in_scope {
       // Add the node with its children converted to stubs
@@ -712,28 +713,57 @@ fn process_second_pass_nodes(
     }
 
     // Process declarations only if they exist in in_scope_declarations
-    if let Some(in_scope_topic_metadata) = in_scope_topic_metadata {
-      // TODO! "statements that are not referenceable could be added to the dict here in the second pass once we know they are in scope"
+    if let Some(in_scope_topic_declaration) = in_scope_topic_declaration {
       // Build references to this declaration
-      let ref_topics: Vec<topic::Topic> = in_scope_topic_metadata
+      let ref_topics: Vec<topic::Topic> = in_scope_topic_declaration
         .references()
         .iter()
         .map(|&id| topic::new_node_topic(&id))
         .collect();
 
-      // Add declaration with references
-      topic_metadata.insert(
-        topic.clone(),
-        TopicMetadata::NamedTopic {
+      // Check if this declaration has mutations (making it a NamedMutableTopic)
+      let topic_metadata_entry = if let Some(mutation_node_ids) =
+        mutations_map.get(&node_id)
+        && *in_scope_topic_declaration.declaration_kind()
+          == NamedTopicKind::StateVariable(core::VariableMutability::Mutable)
+        && *in_scope_topic_declaration.declaration_kind()
+          == NamedTopicKind::LocalVariable
+      {
+        let mutation_topics: Vec<topic::Topic> = mutation_node_ids
+          .iter()
+          .map(|&id| topic::new_node_topic(&id))
+          .collect();
+        TopicMetadata::NamedMutableTopic {
           topic: topic.clone(),
-          kind: in_scope_topic_metadata.declaration_kind().clone(),
-          name: in_scope_topic_metadata.name().clone(),
+          kind: match in_scope_topic_declaration.declaration_kind() {
+            NamedTopicKind::StateVariable(..) => {
+              core::NamedMutableTopicKind::StateVariable
+            }
+            NamedTopicKind::LocalVariable => {
+              core::NamedMutableTopicKind::LocalVariable
+            }
+            _ => unreachable!(
+              "A declaration with mutations can only be a variable"
+            ),
+          },
+          name: in_scope_topic_declaration.name().clone(),
           scope: scope.clone(),
           references: ref_topics,
-        },
-      );
+          mutations: mutation_topics,
+        }
+      } else {
+        TopicMetadata::NamedTopic {
+          topic: topic.clone(),
+          kind: in_scope_topic_declaration.declaration_kind().clone(),
+          name: in_scope_topic_declaration.name().clone(),
+          scope: scope.clone(),
+          references: ref_topics,
+        }
+      };
 
-      match in_scope_topic_metadata {
+      topic_metadata.insert(topic.clone(), topic_metadata_entry);
+
+      match in_scope_topic_declaration {
         InScopeDeclaration::FunctionMod {
           require_revert_statements,
           function_calls,
@@ -750,27 +780,7 @@ fn process_second_pass_nodes(
             .collect();
           let mutation_topics: Vec<topic::Topic> = variable_mutations
             .iter()
-            .map(|ref_node| {
-              // Add mutation references to the audit data
-              let variable_topic =
-                topic::new_node_topic(&ref_node.referenced_node);
-              let statement_topic =
-                topic::new_node_topic(&ref_node.statement_node);
-
-              if let Some(properties) =
-                variable_properties.get_mut(&variable_topic)
-              {
-                properties.mutations.push(statement_topic);
-              } else {
-                variable_properties.insert(
-                  variable_topic,
-                  VariableProperties {
-                    mutations: vec![statement_topic],
-                  },
-                );
-              }
-              topic::new_node_topic(&ref_node.referenced_node)
-            })
+            .map(|ref_node| topic::new_node_topic(&ref_node.referenced_node))
             .collect();
 
           match node {
@@ -873,6 +883,29 @@ fn process_second_pass_nodes(
         ASTNode::TryStatement { .. } => UnnamedTopicKind::Try,
         ASTNode::UncheckedBlock { .. } => UnnamedTopicKind::UncheckedBlock,
         ASTNode::WhileStatement { .. } => UnnamedTopicKind::While,
+        ASTNode::MemberAccess {
+          referenced_declaration: None,
+          ..
+        } => UnnamedTopicKind::Reference,
+        ASTNode::Identifier {
+          referenced_declaration,
+          ..
+        }
+        | ASTNode::IdentifierPath {
+          referenced_declaration,
+          ..
+        }
+        | ASTNode::MemberAccess {
+          referenced_declaration: Some(referenced_declaration),
+          ..
+        } => {
+          // Check if the referenced variable has any mutations in scope
+          if mutations_map.contains_key(referenced_declaration) {
+            UnnamedTopicKind::MutableReference
+          } else {
+            UnnamedTopicKind::Reference
+          }
+        }
         _ => UnnamedTopicKind::Other,
       };
 
@@ -910,11 +943,11 @@ fn process_second_pass_nodes(
         &child_nodes,
         is_in_scope, // Children inherit parent's in-scope status
         in_scope_source_topics,
+        mutations_map,
         nodes,
         scope,
         topic_metadata,
         function_properties,
-        variable_properties,
       )?;
     }
   }
@@ -1027,24 +1060,48 @@ fn collect_references_and_statements(
       };
     }
 
-    // Mutations
+    // Mutations - Assignments (including compound assignments like +=, -=, etc.)
     ASTNode::Assignment {
       node_id,
       left_hand_side,
       ..
     } => {
-      // Check for variable mutations in assignments
-      if let ASTNode::Identifier {
-        referenced_declaration,
-        ..
-      } = left_hand_side.as_ref()
+      // Extract the base variable being mutated from the left hand side
+      if let Some(referenced_declaration) =
+        extract_base_variable_reference(left_hand_side)
       {
         variable_mutations.push(ReferencedNode {
           statement_node: *node_id,
-          referenced_node: *referenced_declaration,
+          referenced_node: referenced_declaration,
         });
-      };
+      }
     }
+
+    // Mutations - Unary operations (++, --, delete)
+    ASTNode::UnaryOperation {
+      node_id,
+      operator,
+      sub_expression,
+      ..
+    } => {
+      // Only increment, decrement, and delete are mutating operators
+      if matches!(
+        operator,
+        parser::UnaryOperator::Increment
+          | parser::UnaryOperator::Decrement
+          | parser::UnaryOperator::Delete
+      ) {
+        if let Some(referenced_declaration) =
+          extract_base_variable_reference(sub_expression)
+        {
+          variable_mutations.push(ReferencedNode {
+            statement_node: *node_id,
+            referenced_node: referenced_declaration,
+          });
+        }
+      }
+    }
+
     _ => (),
   }
 
@@ -1059,6 +1116,43 @@ fn collect_references_and_statements(
       function_calls,
       variable_mutations,
     );
+  }
+}
+
+/// Extracts the base variable's referenced_declaration from an expression that
+/// may be mutated. Handles direct variable references (Identifier, IdentifierPath),
+/// member access chains (e.g., someStruct.field), and index access chains
+/// (e.g., arr[i], mapping[key]).
+///
+/// Returns the referenced_declaration of the base variable, or None if it cannot
+/// be determined (e.g., for complex expressions or when the reference is missing).
+fn extract_base_variable_reference(node: &ASTNode) -> Option<i32> {
+  match node {
+    // Direct variable reference
+    ASTNode::Identifier {
+      referenced_declaration,
+      ..
+    } => Some(*referenced_declaration),
+
+    // Path-based variable reference (e.g., SomeContract.someVar)
+    ASTNode::IdentifierPath {
+      referenced_declaration,
+      ..
+    } => Some(*referenced_declaration),
+
+    // Member access (e.g., someStruct.field) - recurse to find the base variable
+    ASTNode::MemberAccess { expression, .. } => {
+      extract_base_variable_reference(expression)
+    }
+
+    // Index access (e.g., arr[i], mapping[key]) - recurse to find the base variable
+    ASTNode::IndexAccess {
+      base_expression, ..
+    } => extract_base_variable_reference(base_expression),
+
+    // For other node types (e.g., function calls returning values), we can't
+    // determine a base variable
+    _ => None,
   }
 }
 
@@ -1114,11 +1208,15 @@ impl FirstPassDeclaration {
 }
 
 /// Tree shake the first pass declarations to include only in-scope and used declarations.
-/// Returns a map of node_id to InScopeDeclaration containing all nodes that reference each declaration.
+/// Returns a tuple of:
+/// - A map of node_id to InScopeDeclaration containing all nodes that reference each declaration
+/// - A map of variable node_id to Vec of mutation node_ids (assignment/unary operation nodes)
 fn tree_shake(
   first_pass_declarations: &BTreeMap<i32, FirstPassDeclaration>,
-) -> Result<BTreeMap<i32, InScopeDeclaration>, String> {
+) -> Result<(BTreeMap<i32, InScopeDeclaration>, BTreeMap<i32, Vec<i32>>), String>
+{
   let mut in_scope_declarations = BTreeMap::new();
+  let mut mutations_map: BTreeMap<i32, Vec<i32>> = BTreeMap::new();
   let mut visiting = HashSet::new(); // For cycle detection
 
   // First, collect all publicly in-scope declarations as starting points
@@ -1141,11 +1239,12 @@ fn tree_shake(
       ReferenceProcessingMethod::ProcessAllContractMembers, // Process all public members of in scope contracts
       first_pass_declarations,
       &mut in_scope_declarations,
+      &mut mutations_map,
       &mut visiting,
     )?;
   }
 
-  Ok(in_scope_declarations)
+  Ok((in_scope_declarations, mutations_map))
 }
 
 /// Recursively process a declaration and all its references
@@ -1155,6 +1254,7 @@ fn process_tree_shake_declarations(
   reference_processing_method: ReferenceProcessingMethod,
   first_pass_declarations: &BTreeMap<i32, FirstPassDeclaration>,
   in_scope_declarations: &mut BTreeMap<i32, InScopeDeclaration>,
+  mutations_map: &mut BTreeMap<i32, Vec<i32>>,
   visiting: &mut HashSet<i32>,
 ) -> Result<(), String> {
   // Cycle detection
@@ -1211,6 +1311,15 @@ fn process_tree_shake_declarations(
         })
         .cloned()
         .collect();
+
+      // Collect mutations into the mutations_map
+      // Maps variable_node_id -> Vec<mutation_node_id>
+      for mutation in variable_mutations {
+        mutations_map
+          .entry(mutation.referenced_node)
+          .or_insert_with(Vec::new)
+          .push(mutation.statement_node);
+      }
 
       let references = referencing_node.into_iter().collect();
       InScopeDeclaration::FunctionMod {
@@ -1269,6 +1378,7 @@ fn process_tree_shake_declarations(
           ReferenceProcessingMethod::Normal,
           first_pass_declarations,
           in_scope_declarations,
+          mutations_map,
           visiting,
         )?;
       }
@@ -1288,6 +1398,7 @@ fn process_tree_shake_declarations(
           ReferenceProcessingMethod::ProcessAllContractMembers,
           first_pass_declarations,
           in_scope_declarations,
+          mutations_map,
           visiting,
         )?;
       }
@@ -1300,6 +1411,7 @@ fn process_tree_shake_declarations(
           ReferenceProcessingMethod::Normal,
           first_pass_declarations,
           in_scope_declarations,
+          mutations_map,
           visiting,
         )?;
       }
@@ -1312,6 +1424,7 @@ fn process_tree_shake_declarations(
           ReferenceProcessingMethod::Normal,
           first_pass_declarations,
           in_scope_declarations,
+          mutations_map,
           visiting,
         )?;
       }
@@ -1327,6 +1440,7 @@ fn process_tree_shake_declarations(
             ReferenceProcessingMethod::Normal,
             first_pass_declarations,
             in_scope_declarations,
+            mutations_map,
             visiting,
           )?;
         }

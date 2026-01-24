@@ -265,6 +265,7 @@ pub async fn get_contracts(
         matches!(kind, crate::core::NamedTopicKind::Contract(_))
       }
       crate::core::TopicMetadata::UnnamedTopic { .. } => false,
+      crate::core::TopicMetadata::NamedMutableTopic { .. } => false,
     };
 
     if is_contract {
@@ -325,7 +326,6 @@ pub async fn get_source_text(
         &audit_data.nodes,
         &audit_data.topic_metadata,
         &audit_data.function_properties,
-        &audit_data.variable_properties,
       )
     }
     Node::Documentation(doc_node) => {
@@ -433,14 +433,20 @@ fn topic_metadata_to_response(
       ),
       kind => (format!("{:?}", kind), None),
     },
+    crate::core::TopicMetadata::NamedMutableTopic { kind, .. } => {
+      (format!("{:?}", kind), None)
+    }
     crate::core::TopicMetadata::UnnamedTopic { kind, .. } => {
       (format!("{:?}", kind), None)
     }
   };
 
-  // Only include name for NamedTopic
+  // Only include name for NamedTopic and NamedMutableTopic
   let name = match metadata {
-    crate::core::TopicMetadata::NamedTopic { name, .. } => Some(name.clone()),
+    crate::core::TopicMetadata::NamedTopic { name, .. }
+    | crate::core::TopicMetadata::NamedMutableTopic { name, .. } => {
+      Some(name.clone())
+    }
     crate::core::TopicMetadata::UnnamedTopic { .. } => None,
   };
 

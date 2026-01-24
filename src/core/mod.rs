@@ -36,8 +36,6 @@ pub struct AuditData {
   pub topic_metadata: BTreeMap<topic::Topic, TopicMetadata>,
   // Contains the function properties for a given topic
   pub function_properties: BTreeMap<topic::Topic, FunctionModProperties>,
-  // Contains the variable properties for a given topic
-  pub variable_properties: BTreeMap<topic::Topic, VariableProperties>,
 }
 
 pub struct DataContext {
@@ -141,6 +139,12 @@ pub enum NamedTopicKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NamedMutableTopicKind {
+  StateVariable,
+  LocalVariable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UnnamedTopicKind {
   VariableMutation,
   Arithmetic,
@@ -166,6 +170,8 @@ pub enum UnnamedTopicKind {
   Try,
   UncheckedBlock,
   While,
+  Reference,
+  MutableReference,
   DocumentationSection,
   DocumentationParagraph,
   Other,
@@ -180,6 +186,15 @@ pub enum TopicMetadata {
     name: String,
     references: Vec<topic::Topic>,
   },
+  NamedMutableTopic {
+    topic: topic::Topic,
+    scope: Scope,
+    kind: NamedMutableTopicKind,
+    name: String,
+    references: Vec<topic::Topic>,
+    /// The assignment or unary operation nodes that mutate this variable
+    mutations: Vec<topic::Topic>,
+  },
   UnnamedTopic {
     topic: topic::Topic,
     scope: Scope,
@@ -190,28 +205,32 @@ pub enum TopicMetadata {
 impl TopicMetadata {
   pub fn scope(&self) -> &Scope {
     match self {
-      TopicMetadata::NamedTopic { scope, .. } => scope,
-      TopicMetadata::UnnamedTopic { scope, .. } => scope,
+      TopicMetadata::NamedTopic { scope, .. }
+      | TopicMetadata::NamedMutableTopic { scope, .. }
+      | TopicMetadata::UnnamedTopic { scope, .. } => scope,
     }
   }
 
   pub fn name(&self) -> &str {
     match self {
-      TopicMetadata::NamedTopic { name, .. } => name,
+      TopicMetadata::NamedTopic { name, .. }
+      | TopicMetadata::NamedMutableTopic { name, .. } => name,
       TopicMetadata::UnnamedTopic { topic, .. } => topic.id(),
     }
   }
 
   pub fn topic(&self) -> &topic::Topic {
     match self {
-      TopicMetadata::NamedTopic { topic, .. } => topic,
-      TopicMetadata::UnnamedTopic { topic, .. } => topic,
+      TopicMetadata::NamedTopic { topic, .. }
+      | TopicMetadata::NamedMutableTopic { topic, .. }
+      | TopicMetadata::UnnamedTopic { topic, .. } => topic,
     }
   }
 
   pub fn references(&self) -> &[topic::Topic] {
     match self {
-      TopicMetadata::NamedTopic { references, .. } => references,
+      TopicMetadata::NamedTopic { references, .. }
+      | TopicMetadata::NamedMutableTopic { references, .. } => references,
       TopicMetadata::UnnamedTopic { .. } => &[],
     }
   }
@@ -304,12 +323,6 @@ pub enum FunctionModProperties {
     // Topic IDs of the declarations of the state variables mutated
     mutations: Vec<topic::Topic>,
   },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct VariableProperties {
-  // The statements where the variable is mutated
-  pub mutations: Vec<topic::Topic>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -486,7 +499,6 @@ pub fn new_audit_data(
     nodes: BTreeMap::new(),
     topic_metadata,
     function_properties: BTreeMap::new(),
-    variable_properties: BTreeMap::new(),
   }
 }
 
