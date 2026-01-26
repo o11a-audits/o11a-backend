@@ -1,8 +1,9 @@
 use crate::core::topic;
 use crate::core::{self, UnnamedTopicKind};
 use crate::core::{
-  AST, DataContext, FunctionModProperties, NamedTopicKind, Node, Scope,
-  TopicMetadata,
+  AST, DataContext, ElementaryType, FunctionModProperties, NamedTopicKind,
+  Node, RevertCondition, RevertConstraint, RevertConstraintKind, Scope,
+  SolidityType, TopicMetadata,
 };
 use crate::solidity::parser::{
   self, ASTNode, FunctionVisibility, SolidityAST, VariableVisibility,
@@ -40,6 +41,8 @@ pub fn analyze(
     &mut audit_data.nodes,
     &mut audit_data.topic_metadata,
     &mut audit_data.function_properties,
+    &mut audit_data.variable_types,
+    &mut audit_data.variable_constraints,
   )?;
 
   // Insert ASTs with stubbed nodes
@@ -63,6 +66,45 @@ pub fn analyze(
   Ok(())
 }
 
+// ============================================================================
+// First Pass Revert Constraint Types
+// ============================================================================
+
+/// Tracks the context of enclosing if statements during AST traversal.
+/// Used to determine which conditions lead to a revert statement.
+#[derive(Debug, Clone)]
+pub struct IfContext {
+  /// The node ID of the condition expression
+  pub condition_node: i32,
+  /// true if we're in the true branch, false if in else branch
+  pub in_true_branch: bool,
+  /// Variable node IDs referenced in this condition (collected during traversal)
+  pub referenced_variable_nodes: Vec<i32>,
+}
+
+/// A single condition in the path to a revert (first pass, using node IDs).
+#[derive(Debug, Clone)]
+pub struct FirstPassRevertCondition {
+  pub condition_node: i32,
+  pub must_be_true: bool,
+}
+
+/// Represents a constraint from a require or revert statement (first pass).
+#[derive(Debug, Clone)]
+pub struct FirstPassRevertConstraint {
+  pub statement_node: i32,
+  /// Chain of if-conditions leading to this revert (outermost first)
+  pub conditions: Vec<FirstPassRevertCondition>,
+  pub kind: RevertConstraintKind,
+  /// Node IDs of variables referenced in the condition expressions.
+  /// Collected during first pass traversal when we have access to the full AST.
+  pub referenced_variable_nodes: Vec<i32>,
+}
+
+// ============================================================================
+// First Pass Declaration Types
+// ============================================================================
+
 /// First pass declaration structure used during initial AST traversal.
 /// Contains basic declaration information and references without topic IDs.
 /// This is used to build a comprehensive dictionary of all declarations
@@ -72,7 +114,7 @@ pub fn analyze(
 ///
 /// Two variants exist:
 /// - Block: For declarations that contain executable code (functions, modifiers)
-///   These track referenced nodes and require/revert statements for analysis
+///   These track referenced nodes and revert constraints for analysis
 /// - Flat: For simple declarations without executable code (contracts, structs, etc.)
 ///   These only track basic declaration information
 #[derive(Debug, Clone)]
@@ -81,7 +123,7 @@ pub enum FirstPassDeclaration {
     declaration_kind: NamedTopicKind,
     name: String,
     referenced_nodes: Vec<ReferencedNode>,
-    require_revert_statements: Vec<i32>,
+    revert_constraints: Vec<FirstPassRevertConstraint>,
     function_calls: Vec<i32>,
     variable_mutations: Vec<ReferencedNode>,
   },
@@ -112,13 +154,131 @@ pub enum ReferenceProcessingMethod {
   ProcessAllContractMembers,
 }
 
+// ============================================================================
+// Type Extraction
+// ============================================================================
+
+/// Extracts a SolidityType from a type AST node.
+/// Returns None if the type cannot be determined.
+pub fn extract_solidity_type(type_node: &ASTNode) -> Option<SolidityType> {
+  match type_node {
+    ASTNode::ElementaryTypeName { name, .. } => {
+      parse_elementary_type_name(name).map(SolidityType::Elementary)
+    }
+    ASTNode::UserDefinedTypeName {
+      referenced_declaration,
+      ..
+    } => Some(SolidityType::UserDefined {
+      declaration_topic: topic::new_node_topic(referenced_declaration),
+    }),
+    ASTNode::ArrayTypeName { base_type, .. } => {
+      let base = extract_solidity_type(base_type)?;
+      // TODO: Extract array length from the AST if it's a fixed-size array
+      Some(SolidityType::Array {
+        base_type: Box::new(base),
+        length: None,
+      })
+    }
+    ASTNode::Mapping {
+      key_type,
+      value_type,
+      ..
+    } => {
+      let key = extract_solidity_type(key_type)?;
+      let value = extract_solidity_type(value_type)?;
+      Some(SolidityType::Mapping {
+        key_type: Box::new(key),
+        value_type: Box::new(value),
+      })
+    }
+    ASTNode::FunctionTypeName {
+      parameter_types,
+      return_parameter_types,
+      ..
+    } => {
+      let params = extract_parameter_types(parameter_types);
+      let returns = extract_parameter_types(return_parameter_types);
+      Some(SolidityType::Function {
+        parameter_types: params,
+        return_types: returns,
+      })
+    }
+    _ => None,
+  }
+}
+
+/// Extracts types from a ParameterList node
+fn extract_parameter_types(param_list: &ASTNode) -> Vec<SolidityType> {
+  if let ASTNode::ParameterList { parameters, .. } = param_list {
+    parameters
+      .iter()
+      .filter_map(|param| {
+        if let ASTNode::VariableDeclaration { type_name, .. } = param {
+          extract_solidity_type(type_name)
+        } else {
+          None
+        }
+      })
+      .collect()
+  } else {
+    Vec::new()
+  }
+}
+
+/// Parses an elementary type name string into an ElementaryType.
+/// Handles: bool, address, address payable, string, bytes, bytesN, intN, uintN
+fn parse_elementary_type_name(name: &str) -> Option<ElementaryType> {
+  match name {
+    "bool" => Some(ElementaryType::Bool),
+    "address" => Some(ElementaryType::Address),
+    "address payable" => Some(ElementaryType::AddressPayable),
+    "string" => Some(ElementaryType::String),
+    "bytes" => Some(ElementaryType::Bytes),
+    _ => {
+      // Try to parse bytesN (bytes1 to bytes32)
+      if let Some(suffix) = name.strip_prefix("bytes") {
+        if let Ok(n) = suffix.parse::<u8>() {
+          if n >= 1 && n <= 32 {
+            return Some(ElementaryType::FixedBytes(n));
+          }
+        }
+      }
+      // Try to parse uintN (uint8 to uint256)
+      if let Some(suffix) = name.strip_prefix("uint") {
+        if suffix.is_empty() {
+          // "uint" defaults to uint256
+          return Some(ElementaryType::Uint { bits: 256 });
+        }
+        if let Ok(bits) = suffix.parse::<u16>() {
+          if bits >= 8 && bits <= 256 && bits % 8 == 0 {
+            return Some(ElementaryType::Uint { bits });
+          }
+        }
+      }
+      // Try to parse intN (int8 to int256)
+      if let Some(suffix) = name.strip_prefix("int") {
+        if suffix.is_empty() {
+          // "int" defaults to int256
+          return Some(ElementaryType::Int { bits: 256 });
+        }
+        if let Ok(bits) = suffix.parse::<u16>() {
+          if bits >= 8 && bits <= 256 && bits % 8 == 0 {
+            return Some(ElementaryType::Int { bits });
+          }
+        }
+      }
+      None
+    }
+  }
+}
+
 pub enum InScopeDeclaration {
   // Functions and Modifiers
   FunctionMod {
     declaration_kind: NamedTopicKind,
     name: String,
     references: Vec<i32>,
-    require_revert_statements: Vec<i32>,
+    revert_constraints: Vec<FirstPassRevertConstraint>,
     function_calls: Vec<i32>,
     variable_mutations: Vec<ReferencedNode>,
   },
@@ -453,16 +613,17 @@ fn process_first_pass_ast_nodes(
         };
 
         let mut referenced_nodes = Vec::new();
-        let mut require_revert_statements = Vec::new();
+        let mut revert_constraints = Vec::new();
         let mut function_calls = Vec::new();
         let mut variable_mutations = Vec::new();
 
-        // Process entire function node to find references and require/revert statements
+        // Process entire function node to find references and revert constraints
         collect_references_and_statements(
           node,
           None, // No semantic block context initially
+          &[],  // No enclosing if statements initially
           &mut referenced_nodes,
-          &mut require_revert_statements,
+          &mut revert_constraints,
           &mut function_calls,
           &mut variable_mutations,
         );
@@ -473,7 +634,7 @@ fn process_first_pass_ast_nodes(
             declaration_kind: NamedTopicKind::Function(*kind),
             name: name.clone(),
             referenced_nodes,
-            require_revert_statements,
+            revert_constraints,
             function_calls,
             variable_mutations,
           },
@@ -497,16 +658,17 @@ fn process_first_pass_ast_nodes(
         };
 
         let mut referenced_nodes = Vec::new();
-        let mut require_revert_statements = Vec::new();
+        let mut revert_constraints = Vec::new();
         let mut function_calls = Vec::new();
         let mut variable_mutations = Vec::new();
 
-        // Process entire modifier node to find references and require/revert statements
+        // Process entire modifier node to find references and revert constraints
         collect_references_and_statements(
           node,
           None, // No semantic block context initially
+          &[],  // No enclosing if statements initially
           &mut referenced_nodes,
-          &mut require_revert_statements,
+          &mut revert_constraints,
           &mut function_calls,
           &mut variable_mutations,
         );
@@ -517,7 +679,7 @@ fn process_first_pass_ast_nodes(
             declaration_kind: NamedTopicKind::Modifier,
             name: name.clone(),
             referenced_nodes,
-            require_revert_statements,
+            revert_constraints,
             function_calls,
             variable_mutations,
           },
@@ -662,6 +824,8 @@ fn second_pass(
   nodes: &mut BTreeMap<topic::Topic, Node>,
   topic_metadata: &mut BTreeMap<topic::Topic, TopicMetadata>,
   function_properties: &mut BTreeMap<topic::Topic, FunctionModProperties>,
+  variable_types: &mut BTreeMap<topic::Topic, SolidityType>,
+  variable_constraints: &mut BTreeMap<topic::Topic, Vec<topic::Topic>>,
 ) -> Result<(), String> {
   // Process each AST file
   for (file_path, asts) in ast_map {
@@ -677,6 +841,8 @@ fn second_pass(
         },
         topic_metadata,
         function_properties,
+        variable_types,
+        variable_constraints,
       )?;
     }
   }
@@ -695,6 +861,8 @@ fn process_second_pass_nodes(
   scope: &Scope,
   topic_metadata: &mut BTreeMap<topic::Topic, TopicMetadata>,
   function_properties: &mut BTreeMap<topic::Topic, FunctionModProperties>,
+  variable_types: &mut BTreeMap<topic::Topic, SolidityType>,
+  variable_constraints: &mut BTreeMap<topic::Topic, Vec<topic::Topic>>,
 ) -> Result<(), String> {
   for node in ast_nodes {
     let node_id = node.node_id();
@@ -765,15 +933,75 @@ fn process_second_pass_nodes(
 
       match in_scope_topic_declaration {
         InScopeDeclaration::FunctionMod {
-          require_revert_statements,
+          revert_constraints: first_pass_constraints,
           function_calls,
           variable_mutations,
           ..
         } => {
-          let revert_topics: Vec<topic::Topic> = require_revert_statements
+          // Convert first-pass constraints to final RevertConstraint objects
+          // and collect variable references for the variable_constraints map
+          let final_revert_constraints: Vec<RevertConstraint> =
+            first_pass_constraints
+              .iter()
+              .map(|fp_constraint| {
+                let statement_topic =
+                  topic::new_node_topic(&fp_constraint.statement_node);
+
+                // Convert conditions from node IDs to topics
+                let conditions: Vec<RevertCondition> = fp_constraint
+                  .conditions
+                  .iter()
+                  .map(|cond| RevertCondition {
+                    condition_topic: topic::new_node_topic(
+                      &cond.condition_node,
+                    ),
+                    must_be_true: cond.must_be_true,
+                  })
+                  .collect();
+
+                // Convert pre-collected reference node IDs to topics.
+                // Filter to only include in-scope variable declarations
+                // (excluding constants, enums, structs, etc.)
+                let referenced_variables: Vec<topic::Topic> = fp_constraint
+                  .referenced_variable_nodes
+                  .iter()
+                  .filter_map(|&node_id| {
+                    if let Some(decl) = in_scope_source_topics.get(&node_id) {
+                      if matches!(
+                        decl.declaration_kind(),
+                        NamedTopicKind::StateVariable(_)
+                          | NamedTopicKind::LocalVariable
+                      ) {
+                        return Some(topic::new_node_topic(&node_id));
+                      }
+                    }
+                    None
+                  })
+                  .collect();
+
+                // Index this constraint by each referenced variable
+                for var_topic in &referenced_variables {
+                  variable_constraints
+                    .entry(var_topic.clone())
+                    .or_insert_with(Vec::new)
+                    .push(statement_topic.clone());
+                }
+
+                RevertConstraint {
+                  statement_topic,
+                  conditions,
+                  kind: fp_constraint.kind,
+                  referenced_variables,
+                }
+              })
+              .collect();
+
+          // Keep the simple revert topics list for backwards compatibility
+          let revert_topics: Vec<topic::Topic> = first_pass_constraints
             .iter()
-            .map(|&id| topic::new_node_topic(&id))
+            .map(|c| topic::new_node_topic(&c.statement_node))
             .collect();
+
           let call_topics: Vec<topic::Topic> = function_calls
             .iter()
             .map(|&id| topic::new_node_topic(&id))
@@ -805,6 +1033,7 @@ fn process_second_pass_nodes(
                   reverts: revert_topics,
                   calls: call_topics,
                   mutations: mutation_topics,
+                  revert_constraints: final_revert_constraints,
                 },
               );
             }
@@ -824,6 +1053,7 @@ fn process_second_pass_nodes(
                   reverts: revert_topics,
                   calls: call_topics,
                   mutations: mutation_topics,
+                  revert_constraints: final_revert_constraints,
                 },
               );
             }
@@ -833,6 +1063,13 @@ fn process_second_pass_nodes(
         }
 
         _ => (),
+      }
+
+      // Extract variable types for VariableDeclaration nodes
+      if let ASTNode::VariableDeclaration { type_name, .. } = node {
+        if let Some(solidity_type) = extract_solidity_type(type_name) {
+          variable_types.insert(topic.clone(), solidity_type);
+        }
       }
     } else {
       let kind = match node {
@@ -948,6 +1185,8 @@ fn process_second_pass_nodes(
         scope,
         topic_metadata,
         function_properties,
+        variable_types,
+        variable_constraints,
       )?;
     }
   }
@@ -968,11 +1207,42 @@ fn extract_parameter_topics(parameter_list: &ASTNode) -> Vec<topic::Topic> {
   topics
 }
 
+/// Collects all reference node IDs from an expression during first pass.
+/// This recursively traverses the expression tree to find all Identifier/IdentifierPath
+/// nodes. The actual filtering to variables happens during the second pass when we
+/// have the in-scope declarations.
+fn collect_potential_variable_refs_from_expression(
+  node: &ASTNode,
+  refs: &mut Vec<i32>,
+) {
+  match node {
+    ASTNode::Identifier {
+      referenced_declaration,
+      ..
+    }
+    | ASTNode::IdentifierPath {
+      referenced_declaration,
+      ..
+    } => {
+      if !refs.contains(referenced_declaration) {
+        refs.push(*referenced_declaration);
+      }
+    }
+    _ => {}
+  }
+
+  // Recursively process all children
+  for child in node.nodes() {
+    collect_potential_variable_refs_from_expression(child, refs);
+  }
+}
+
 fn collect_references_and_statements(
   node: &ASTNode,
   current_semantic_block: Option<i32>,
+  enclosing_ifs: &[IfContext],
   referenced_nodes: &mut Vec<ReferencedNode>,
-  require_revert_statements: &mut Vec<i32>,
+  revert_constraints: &mut Vec<FirstPassRevertConstraint>,
   function_calls: &mut Vec<i32>,
   variable_mutations: &mut Vec<ReferencedNode>,
 ) {
@@ -1014,13 +1284,13 @@ fn collect_references_and_statements(
       }
     }
 
-    // Function calls
+    // Function calls - check for require() which creates a constraint
     ASTNode::FunctionCall {
+      node_id,
       expression,
       arguments,
       ..
     } => {
-      // Check if this is a require or revert function call
       if let ASTNode::Identifier {
         name,
         referenced_declaration,
@@ -1028,15 +1298,73 @@ fn collect_references_and_statements(
       } = expression.as_ref()
       {
         if name == "require" {
-          // For require, add the second argument (error message) if it exists
-          if arguments.len() >= 2 {
-            require_revert_statements.push(arguments[1].node_id());
+          // require(condition) reverts when condition is false
+          // Create a constraint with the condition and must_be_true=false
+          if !arguments.is_empty() {
+            let condition_node = arguments[0].node_id();
+
+            // Collect variable references from require's condition
+            let mut referenced_variable_nodes: Vec<i32> = Vec::new();
+            collect_potential_variable_refs_from_expression(
+              &arguments[0],
+              &mut referenced_variable_nodes,
+            );
+
+            // Also collect from enclosing if conditions
+            for ctx in enclosing_ifs {
+              for var_ref in &ctx.referenced_variable_nodes {
+                if !referenced_variable_nodes.contains(var_ref) {
+                  referenced_variable_nodes.push(*var_ref);
+                }
+              }
+            }
+
+            let mut conditions: Vec<FirstPassRevertCondition> = enclosing_ifs
+              .iter()
+              .map(|ctx| FirstPassRevertCondition {
+                condition_node: ctx.condition_node,
+                must_be_true: ctx.in_true_branch,
+              })
+              .collect();
+            // Add the require condition itself (reverts when false)
+            conditions.push(FirstPassRevertCondition {
+              condition_node,
+              must_be_true: false,
+            });
+            revert_constraints.push(FirstPassRevertConstraint {
+              statement_node: *node_id,
+              conditions,
+              kind: RevertConstraintKind::Require,
+              referenced_variable_nodes,
+            });
           }
         } else if name == "revert" {
-          // For revert function call, add the first argument if it exists
-          if !arguments.is_empty() {
-            require_revert_statements.push(arguments[0].node_id());
+          // revert() as a function call (with optional error)
+          // Capture all enclosing if conditions
+          let conditions: Vec<FirstPassRevertCondition> = enclosing_ifs
+            .iter()
+            .map(|ctx| FirstPassRevertCondition {
+              condition_node: ctx.condition_node,
+              must_be_true: ctx.in_true_branch,
+            })
+            .collect();
+
+          // Collect variable references from enclosing if conditions
+          let mut referenced_variable_nodes: Vec<i32> = Vec::new();
+          for ctx in enclosing_ifs {
+            for var_ref in &ctx.referenced_variable_nodes {
+              if !referenced_variable_nodes.contains(var_ref) {
+                referenced_variable_nodes.push(*var_ref);
+              }
+            }
           }
+
+          revert_constraints.push(FirstPassRevertConstraint {
+            statement_node: *node_id,
+            conditions,
+            kind: RevertConstraintKind::Revert,
+            referenced_variable_nodes,
+          });
         } else {
           // For other function calls, extract the function reference
           function_calls.push(*referenced_declaration);
@@ -1044,20 +1372,97 @@ fn collect_references_and_statements(
       }
     }
 
-    // Reverts
-    ASTNode::RevertStatement { error_call, .. } => {
-      // For RevertStatement, extract the error identifier from the error_call
-      // The error_call is a FunctionCall node
-      if let ASTNode::FunctionCall { expression, .. } = error_call.as_ref() {
-        // The expression contains the error identifier
-        if let ASTNode::Identifier {
-          referenced_declaration,
-          ..
-        } = expression.as_ref()
-        {
-          require_revert_statements.push(*referenced_declaration);
+    // RevertStatement - capture all enclosing if conditions
+    ASTNode::RevertStatement { node_id, .. } => {
+      let conditions: Vec<FirstPassRevertCondition> = enclosing_ifs
+        .iter()
+        .map(|ctx| FirstPassRevertCondition {
+          condition_node: ctx.condition_node,
+          must_be_true: ctx.in_true_branch,
+        })
+        .collect();
+
+      // Collect variable references from enclosing if conditions
+      let mut referenced_variable_nodes: Vec<i32> = Vec::new();
+      for ctx in enclosing_ifs {
+        for var_ref in &ctx.referenced_variable_nodes {
+          if !referenced_variable_nodes.contains(var_ref) {
+            referenced_variable_nodes.push(*var_ref);
+          }
         }
-      };
+      }
+
+      revert_constraints.push(FirstPassRevertConstraint {
+        statement_node: *node_id,
+        conditions,
+        kind: RevertConstraintKind::Revert,
+        referenced_variable_nodes,
+      });
+    }
+
+    // IfStatement - handle true and false branches with different contexts
+    ASTNode::IfStatement {
+      condition,
+      true_body,
+      false_body,
+      ..
+    } => {
+      // First, collect references from the condition itself
+      collect_references_and_statements(
+        condition,
+        semantic_block,
+        enclosing_ifs,
+        referenced_nodes,
+        revert_constraints,
+        function_calls,
+        variable_mutations,
+      );
+
+      // Collect variable references from the condition expression
+      let mut condition_var_refs: Vec<i32> = Vec::new();
+      collect_potential_variable_refs_from_expression(
+        condition,
+        &mut condition_var_refs,
+      );
+
+      // Process true branch with condition context (must_be_true = true)
+      let mut true_branch_ifs = enclosing_ifs.to_vec();
+      true_branch_ifs.push(IfContext {
+        condition_node: condition.node_id(),
+        in_true_branch: true,
+        referenced_variable_nodes: condition_var_refs.clone(),
+      });
+      collect_references_and_statements(
+        true_body,
+        semantic_block,
+        &true_branch_ifs,
+        referenced_nodes,
+        revert_constraints,
+        function_calls,
+        variable_mutations,
+      );
+
+      // Process false branch (else) with condition context (must_be_true = false)
+      if let Some(false_branch) = false_body {
+        let mut false_branch_ifs = enclosing_ifs.to_vec();
+        false_branch_ifs.push(IfContext {
+          condition_node: condition.node_id(),
+          in_true_branch: false,
+          referenced_variable_nodes: condition_var_refs,
+        });
+        collect_references_and_statements(
+          false_branch,
+          semantic_block,
+          &false_branch_ifs,
+          referenced_nodes,
+          revert_constraints,
+          function_calls,
+          variable_mutations,
+        );
+      }
+
+      // Don't process children again - we handled them above
+      return;
     }
 
     // Mutations - Assignments (including compound assignments like +=, -=, etc.)
@@ -1111,8 +1516,9 @@ fn collect_references_and_statements(
     collect_references_and_statements(
       child,
       semantic_block,
+      enclosing_ifs,
       referenced_nodes,
-      require_revert_statements,
+      revert_constraints,
       function_calls,
       variable_mutations,
     );
@@ -1288,7 +1694,7 @@ fn process_tree_shake_declarations(
     FirstPassDeclaration::FunctionMod {
       declaration_kind,
       name,
-      require_revert_statements,
+      revert_constraints,
       function_calls,
       variable_mutations,
       ..
@@ -1326,7 +1732,7 @@ fn process_tree_shake_declarations(
         declaration_kind: declaration_kind.clone(),
         name: name.clone(),
         references,
-        require_revert_statements: require_revert_statements.clone(),
+        revert_constraints: revert_constraints.clone(),
         function_calls: filtered_function_calls,
         variable_mutations: variable_mutations.clone(),
       }
@@ -1453,4 +1859,317 @@ fn process_tree_shake_declarations(
   visiting.remove(&node_id);
 
   Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::solidity::parser::SourceLocation;
+
+  fn dummy_src_location() -> SourceLocation {
+    SourceLocation {
+      start: None,
+      length: None,
+      index: None,
+    }
+  }
+
+  // =========================================================================
+  // Type Extraction Tests
+  // =========================================================================
+
+  #[test]
+  fn test_parse_elementary_type_uint256() {
+    let result = parse_elementary_type_name("uint256");
+    assert_eq!(result, Some(ElementaryType::Uint { bits: 256 }));
+  }
+
+  #[test]
+  fn test_parse_elementary_type_uint_default() {
+    // "uint" without size defaults to uint256
+    let result = parse_elementary_type_name("uint");
+    assert_eq!(result, Some(ElementaryType::Uint { bits: 256 }));
+  }
+
+  #[test]
+  fn test_parse_elementary_type_uint8() {
+    let result = parse_elementary_type_name("uint8");
+    assert_eq!(result, Some(ElementaryType::Uint { bits: 8 }));
+  }
+
+  #[test]
+  fn test_parse_elementary_type_int256() {
+    let result = parse_elementary_type_name("int256");
+    assert_eq!(result, Some(ElementaryType::Int { bits: 256 }));
+  }
+
+  #[test]
+  fn test_parse_elementary_type_int_default() {
+    // "int" without size defaults to int256
+    let result = parse_elementary_type_name("int");
+    assert_eq!(result, Some(ElementaryType::Int { bits: 256 }));
+  }
+
+  #[test]
+  fn test_parse_elementary_type_int8() {
+    let result = parse_elementary_type_name("int8");
+    assert_eq!(result, Some(ElementaryType::Int { bits: 8 }));
+  }
+
+  #[test]
+  fn test_parse_elementary_type_address() {
+    let result = parse_elementary_type_name("address");
+    assert_eq!(result, Some(ElementaryType::Address));
+  }
+
+  #[test]
+  fn test_parse_elementary_type_address_payable() {
+    let result = parse_elementary_type_name("address payable");
+    assert_eq!(result, Some(ElementaryType::AddressPayable));
+  }
+
+  #[test]
+  fn test_parse_elementary_type_bool() {
+    let result = parse_elementary_type_name("bool");
+    assert_eq!(result, Some(ElementaryType::Bool));
+  }
+
+  #[test]
+  fn test_parse_elementary_type_string() {
+    let result = parse_elementary_type_name("string");
+    assert_eq!(result, Some(ElementaryType::String));
+  }
+
+  #[test]
+  fn test_parse_elementary_type_bytes() {
+    let result = parse_elementary_type_name("bytes");
+    assert_eq!(result, Some(ElementaryType::Bytes));
+  }
+
+  #[test]
+  fn test_parse_elementary_type_bytes32() {
+    let result = parse_elementary_type_name("bytes32");
+    assert_eq!(result, Some(ElementaryType::FixedBytes(32)));
+  }
+
+  #[test]
+  fn test_parse_elementary_type_bytes1() {
+    let result = parse_elementary_type_name("bytes1");
+    assert_eq!(result, Some(ElementaryType::FixedBytes(1)));
+  }
+
+  #[test]
+  fn test_extract_solidity_type_elementary() {
+    let node = ASTNode::ElementaryTypeName {
+      node_id: 1,
+      src_location: dummy_src_location(),
+      name: "uint256".to_string(),
+    };
+
+    let result = extract_solidity_type(&node);
+    assert_eq!(
+      result,
+      Some(SolidityType::Elementary(ElementaryType::Uint { bits: 256 }))
+    );
+  }
+
+  #[test]
+  fn test_extract_solidity_type_array() {
+    let base_type = ASTNode::ElementaryTypeName {
+      node_id: 2,
+      src_location: dummy_src_location(),
+      name: "uint256".to_string(),
+    };
+
+    let node = ASTNode::ArrayTypeName {
+      node_id: 1,
+      src_location: dummy_src_location(),
+      base_type: Box::new(base_type),
+    };
+
+    let result = extract_solidity_type(&node);
+    assert_eq!(
+      result,
+      Some(SolidityType::Array {
+        base_type: Box::new(SolidityType::Elementary(ElementaryType::Uint {
+          bits: 256
+        })),
+        length: None,
+      })
+    );
+  }
+
+  #[test]
+  fn test_extract_solidity_type_mapping() {
+    let key_type = ASTNode::ElementaryTypeName {
+      node_id: 2,
+      src_location: dummy_src_location(),
+      name: "address".to_string(),
+    };
+
+    let value_type = ASTNode::ElementaryTypeName {
+      node_id: 3,
+      src_location: dummy_src_location(),
+      name: "uint256".to_string(),
+    };
+
+    let node = ASTNode::Mapping {
+      node_id: 1,
+      src_location: dummy_src_location(),
+      key_name: None,
+      key_name_location: dummy_src_location(),
+      key_type: Box::new(key_type),
+      value_name: None,
+      value_name_location: dummy_src_location(),
+      value_type: Box::new(value_type),
+    };
+
+    let result = extract_solidity_type(&node);
+    assert_eq!(
+      result,
+      Some(SolidityType::Mapping {
+        key_type: Box::new(SolidityType::Elementary(ElementaryType::Address)),
+        value_type: Box::new(SolidityType::Elementary(ElementaryType::Uint {
+          bits: 256
+        })),
+      })
+    );
+  }
+
+  #[test]
+  fn test_extract_solidity_type_user_defined() {
+    let path_node = ASTNode::IdentifierPath {
+      node_id: 2,
+      src_location: dummy_src_location(),
+      name: "MyStruct".to_string(),
+      name_locations: vec![],
+      referenced_declaration: 100,
+    };
+
+    let node = ASTNode::UserDefinedTypeName {
+      node_id: 1,
+      src_location: dummy_src_location(),
+      referenced_declaration: 100,
+      path_node: Box::new(path_node),
+    };
+
+    let result = extract_solidity_type(&node);
+    assert_eq!(
+      result,
+      Some(SolidityType::UserDefined {
+        declaration_topic: topic::new_node_topic(&100),
+      })
+    );
+  }
+
+  // =========================================================================
+  // Constraint Collection Tests
+  // =========================================================================
+
+  #[test]
+  fn test_if_context_tracking() {
+    // Test that IfContext correctly tracks condition node, branch, and variable refs
+    let ctx = IfContext {
+      condition_node: 42,
+      in_true_branch: true,
+      referenced_variable_nodes: vec![100, 101],
+    };
+    assert_eq!(ctx.condition_node, 42);
+    assert!(ctx.in_true_branch);
+    assert_eq!(ctx.referenced_variable_nodes, vec![100, 101]);
+
+    let ctx_false = IfContext {
+      condition_node: 43,
+      in_true_branch: false,
+      referenced_variable_nodes: vec![],
+    };
+    assert_eq!(ctx_false.condition_node, 43);
+    assert!(!ctx_false.in_true_branch);
+    assert!(ctx_false.referenced_variable_nodes.is_empty());
+  }
+
+  #[test]
+  fn test_first_pass_revert_constraint_require() {
+    // Test creating a require constraint with variable references
+    let constraint = FirstPassRevertConstraint {
+      statement_node: 100,
+      conditions: vec![FirstPassRevertCondition {
+        condition_node: 101,
+        must_be_true: false, // require reverts when condition is false
+      }],
+      kind: RevertConstraintKind::Require,
+      referenced_variable_nodes: vec![200, 201], // Variables in the condition
+    };
+
+    assert_eq!(constraint.statement_node, 100);
+    assert_eq!(constraint.conditions.len(), 1);
+    assert_eq!(constraint.conditions[0].condition_node, 101);
+    assert!(!constraint.conditions[0].must_be_true);
+    assert_eq!(constraint.kind, RevertConstraintKind::Require);
+    assert_eq!(constraint.referenced_variable_nodes, vec![200, 201]);
+  }
+
+  #[test]
+  fn test_first_pass_revert_constraint_nested_if() {
+    // Test creating a revert constraint with nested if conditions
+    // Simulating: if (a > 0) { if (b < 10) { revert(); } }
+    let constraint = FirstPassRevertConstraint {
+      statement_node: 200,
+      conditions: vec![
+        FirstPassRevertCondition {
+          condition_node: 201, // a > 0
+          must_be_true: true,
+        },
+        FirstPassRevertCondition {
+          condition_node: 202, // b < 10
+          must_be_true: true,
+        },
+      ],
+      kind: RevertConstraintKind::Revert,
+      referenced_variable_nodes: vec![300, 301], // a and b
+    };
+
+    assert_eq!(constraint.statement_node, 200);
+    assert_eq!(constraint.conditions.len(), 2);
+    assert!(constraint.conditions[0].must_be_true);
+    assert!(constraint.conditions[1].must_be_true);
+    assert_eq!(constraint.kind, RevertConstraintKind::Revert);
+    assert_eq!(constraint.referenced_variable_nodes.len(), 2);
+  }
+
+  #[test]
+  fn test_first_pass_revert_constraint_else_branch() {
+    // Test creating a revert constraint in an else branch
+    // Simulating: if (condition) { ... } else { revert(); }
+    let constraint = FirstPassRevertConstraint {
+      statement_node: 300,
+      conditions: vec![FirstPassRevertCondition {
+        condition_node: 301,
+        must_be_true: false, // In else branch, condition must be false
+      }],
+      kind: RevertConstraintKind::Revert,
+      referenced_variable_nodes: vec![400],
+    };
+
+    assert_eq!(constraint.conditions.len(), 1);
+    assert!(!constraint.conditions[0].must_be_true);
+    assert_eq!(constraint.referenced_variable_nodes, vec![400]);
+  }
+
+  #[test]
+  fn test_elementary_type_is_numeric() {
+    assert!(ElementaryType::Uint { bits: 256 }.is_numeric());
+    assert!(ElementaryType::Int { bits: 8 }.is_numeric());
+    assert!(!ElementaryType::Address.is_numeric());
+    assert!(!ElementaryType::Bool.is_numeric());
+    assert!(!ElementaryType::String.is_numeric());
+  }
+
+  #[test]
+  fn test_elementary_type_is_address() {
+    assert!(ElementaryType::Address.is_address());
+    assert!(ElementaryType::AddressPayable.is_address());
+    assert!(!ElementaryType::Uint { bits: 256 }.is_address());
+    assert!(!ElementaryType::Bool.is_address());
+  }
 }

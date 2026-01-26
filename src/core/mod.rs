@@ -5,6 +5,119 @@ pub mod topic;
 
 use std::collections::{BTreeMap, HashSet};
 
+// ============================================================================
+// Solidity Type System (for checker module)
+// ============================================================================
+
+/// Represents a Solidity type for use in the checker.
+/// Contains enough detail to derive valid value ranges.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SolidityType {
+  /// Elementary types with full detail for value range derivation
+  Elementary(ElementaryType),
+  /// User-defined types reference the declaration topic
+  UserDefined { declaration_topic: topic::Topic },
+  /// Array types - length is Some for fixed-size arrays
+  Array {
+    base_type: Box<SolidityType>,
+    length: Option<u64>,
+  },
+  /// Mapping types
+  Mapping {
+    key_type: Box<SolidityType>,
+    value_type: Box<SolidityType>,
+  },
+  /// Function types
+  Function {
+    parameter_types: Vec<SolidityType>,
+    return_types: Vec<SolidityType>,
+  },
+}
+
+/// Elementary types with enough detail to derive value ranges.
+/// Numbers include bit size so the checker can compute min/max values.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ElementaryType {
+  /// Boolean: range is {false, true}
+  Bool,
+  /// Address: 20 bytes, range is 0 to 2^160-1
+  Address,
+  /// Payable address: same range as Address
+  AddressPayable,
+  /// Fixed-size bytes: bytesN where N is 1-32
+  /// Range is 0 to 2^(N*8)-1
+  FixedBytes(u8),
+  /// Dynamic bytes: no fixed range
+  Bytes,
+  /// String: no fixed numeric range
+  String,
+  /// Signed integer: intN where bits is 8, 16, 24, ... 256
+  /// Range is -2^(bits-1) to 2^(bits-1)-1
+  Int { bits: u16 },
+  /// Unsigned integer: uintN where bits is 8, 16, 24, ... 256
+  /// Range is 0 to 2^bits-1
+  Uint { bits: u16 },
+}
+
+impl ElementaryType {
+  /// Returns true if this type has a numeric value range
+  pub fn is_numeric(&self) -> bool {
+    matches!(
+      self,
+      ElementaryType::Int { .. } | ElementaryType::Uint { .. }
+    )
+  }
+
+  /// Returns true if this type is an address
+  pub fn is_address(&self) -> bool {
+    matches!(
+      self,
+      ElementaryType::Address | ElementaryType::AddressPayable
+    )
+  }
+}
+
+// ============================================================================
+// Revert Constraint Types (for checker module)
+// ============================================================================
+
+/// Represents a single condition in the path to a revert.
+/// Multiple conditions form a chain when reverts are nested in if statements.
+#[derive(Debug, Clone)]
+pub struct RevertCondition {
+  /// The topic of the condition expression (e.g., the if condition)
+  pub condition_topic: topic::Topic,
+  /// Whether the revert happens when this condition is true or false.
+  /// For `if (cond) { revert }` -> must_be_true = true
+  /// For `if (cond) { } else { revert }` -> must_be_true = false
+  pub must_be_true: bool,
+}
+
+/// Represents a constraint from a require or revert statement.
+#[derive(Debug, Clone)]
+pub struct RevertConstraint {
+  /// The topic of the revert or require statement node
+  pub statement_topic: topic::Topic,
+  /// The chain of conditions leading to this revert.
+  /// Empty for unconditional reverts.
+  /// For require(cond): single entry with cond and must_be_true=false (reverts when false)
+  /// For nested if statements: multiple entries, all must hold for revert to occur
+  pub conditions: Vec<RevertCondition>,
+  /// The kind of revert statement
+  pub kind: RevertConstraintKind,
+  /// Variables referenced in the condition expressions.
+  /// Used to index constraints by variable for UI lookup.
+  pub referenced_variables: Vec<topic::Topic>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RevertConstraintKind {
+  /// require(condition) - reverts when condition is false
+  Require,
+  /// revert with enclosing if conditions
+  Revert,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FunctionKind {
   Constructor,
@@ -36,6 +149,11 @@ pub struct AuditData {
   pub topic_metadata: BTreeMap<topic::Topic, TopicMetadata>,
   // Contains the function properties for a given topic
   pub function_properties: BTreeMap<topic::Topic, FunctionModProperties>,
+  /// Maps variable topic IDs to their Solidity types (for checker module)
+  pub variable_types: BTreeMap<topic::Topic, SolidityType>,
+  /// Maps variable topics to constraint statement topics that reference them.
+  /// Allows UI to show "constraints involving this variable".
+  pub variable_constraints: BTreeMap<topic::Topic, Vec<topic::Topic>>,
 }
 
 pub struct DataContext {
@@ -310,6 +428,8 @@ pub enum FunctionModProperties {
     calls: Vec<topic::Topic>,
     // Topic IDs of the declarations of the state variables mutated
     mutations: Vec<topic::Topic>,
+    /// Full constraint information for the checker module
+    revert_constraints: Vec<RevertConstraint>,
   },
   ModifierProperties {
     // Topic IDs of the local declarations of the modifier parameters
@@ -322,6 +442,8 @@ pub enum FunctionModProperties {
     calls: Vec<topic::Topic>,
     // Topic IDs of the declarations of the state variables mutated
     mutations: Vec<topic::Topic>,
+    /// Full constraint information for the checker module
+    revert_constraints: Vec<RevertConstraint>,
   },
 }
 
@@ -499,6 +621,8 @@ pub fn new_audit_data(
     nodes: BTreeMap::new(),
     topic_metadata,
     function_properties: BTreeMap::new(),
+    variable_types: BTreeMap::new(),
+    variable_constraints: BTreeMap::new(),
   }
 }
 
