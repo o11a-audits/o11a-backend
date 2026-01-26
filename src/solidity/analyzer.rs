@@ -1127,6 +1127,9 @@ fn process_second_pass_nodes(
             UnnamedTopicKind::Reference
           }
         }
+        ASTNode::FunctionSignature { .. }
+        | ASTNode::ModifierSignature { .. }
+        | ASTNode::ContractSignature { .. } => UnnamedTopicKind::Signature,
         _ => UnnamedTopicKind::Other,
       };
 

@@ -290,6 +290,7 @@ pub enum UnnamedTopicKind {
   While,
   Reference,
   MutableReference,
+  Signature,
   DocumentationSection,
   DocumentationParagraph,
   Other,
