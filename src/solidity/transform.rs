@@ -586,8 +586,11 @@ fn transform_node(node: &mut ASTNode, context: &TransformContext) {
       let new_arguments = wrap_arguments(arguments, expression, context);
       *arguments = new_arguments;
 
-      // Recurse into expression
+      // Recurse into expression and wrapped arguments
       transform_node(expression.as_mut(), context);
+      for arg in arguments.iter_mut() {
+        transform_node(arg, context);
+      }
     }
 
     ASTNode::StructConstructor {
@@ -599,14 +602,19 @@ fn transform_node(node: &mut ASTNode, context: &TransformContext) {
       let new_arguments = wrap_struct_arguments(arguments, expression, context);
       *arguments = new_arguments;
 
-      // Recurse into expression
+      // Recurse into expression and wrapped arguments
       transform_node(expression.as_mut(), context);
+      for arg in arguments.iter_mut() {
+        transform_node(arg, context);
+      }
     }
 
     // Set implementation_declaration on interface parameter VariableDeclarations
     ASTNode::VariableDeclaration {
       node_id,
       implementation_declaration,
+      type_name,
+      value,
       ..
     } => {
       // Check if this parameter has a mapping to an implementation parameter
@@ -616,7 +624,11 @@ fn transform_node(node: &mut ASTNode, context: &TransformContext) {
         *implementation_declaration = Some(impl_param_id);
       }
 
-      // VariableDeclaration has no children that need transformation
+      // Recurse into children - type_name and value may contain FunctionCalls
+      transform_node(type_name.as_mut(), context);
+      if let Some(val) = value {
+        transform_node(val.as_mut(), context);
+      }
     }
 
     // Recurse into all child nodes
