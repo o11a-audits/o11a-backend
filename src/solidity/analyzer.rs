@@ -899,10 +899,10 @@ fn process_second_pass_nodes(
       // Check if this declaration has mutations (making it a NamedMutableTopic)
       let topic_metadata_entry = if let Some(mutation_node_ids) =
         mutations_map.get(&node_id)
-        && *in_scope_topic_declaration.declaration_kind()
+        && (*in_scope_topic_declaration.declaration_kind()
           == NamedTopicKind::StateVariable(core::VariableMutability::Mutable)
-        && *in_scope_topic_declaration.declaration_kind()
-          == NamedTopicKind::LocalVariable
+          || *in_scope_topic_declaration.declaration_kind()
+            == NamedTopicKind::LocalVariable)
       {
         let mutation_topics: Vec<topic::Topic> = mutation_node_ids
           .iter()
