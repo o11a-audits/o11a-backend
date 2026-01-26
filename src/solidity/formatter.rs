@@ -8,6 +8,14 @@ use crate::solidity::parser::{
 };
 use std::collections::BTreeMap;
 
+/// Context passed through the recursive formatting process.
+pub struct Context {
+  /// The topic that is being formatted (the target of `node_to_source_text`).
+  /// This allows recursive formatting logic to distinguish between the target
+  /// node and recursively formatted child nodes.
+  pub target_topic: topic::Topic,
+}
+
 pub fn global_to_source_text(topic: &topic::Topic) -> Option<String> {
   match topic.id.as_str() {
     "N-8" => Some(format_topic_token(&-8, "keccak256", "global", topic)),
@@ -27,9 +35,13 @@ pub fn node_to_source_text(
   nodes_map: &BTreeMap<topic::Topic, core::Node>,
   topic_metadata: &BTreeMap<topic::Topic, core::TopicMetadata>,
 ) -> String {
+  let ctx = Context {
+    target_topic: new_node_topic(&node.node_id()),
+  };
+
   format!(
     "<pre><code>{}</code></pre>",
-    do_node_to_source_text(node, 0, nodes_map, topic_metadata,)
+    do_node_to_source_text(node, 0, nodes_map, topic_metadata, &ctx)
   )
 }
 
@@ -38,6 +50,7 @@ fn do_node_to_source_text(
   indent_level: usize,
   nodes_map: &BTreeMap<topic::Topic, core::Node>,
   topic_metadata: &BTreeMap<topic::Topic, core::TopicMetadata>,
+  ctx: &Context,
 ) -> String {
   let node_str = match node.resolve(nodes_map) {
     ASTNode::Assignment {
@@ -52,6 +65,7 @@ fn do_node_to_source_text(
         indent_level,
         nodes_map,
         topic_metadata,
+        ctx,
       );
       let op = assignment_operator_to_string(operator);
 
@@ -61,6 +75,7 @@ fn do_node_to_source_text(
         indent_level,
         nodes_map,
         topic_metadata,
+        ctx,
       );
       format!(
         "{} {} {}{}",
@@ -83,6 +98,7 @@ fn do_node_to_source_text(
         indent_level,
         nodes_map,
         topic_metadata,
+        ctx,
       );
       let op = binary_operator_to_string(operator);
 
@@ -95,6 +111,7 @@ fn do_node_to_source_text(
           indent_level,
           nodes_map,
           topic_metadata,
+          ctx,
         );
         format!(
           "{}\n{}",
@@ -112,6 +129,7 @@ fn do_node_to_source_text(
           indent_level,
           nodes_map,
           topic_metadata,
+          ctx,
         );
         format!(
           "{}{}",
@@ -140,6 +158,7 @@ fn do_node_to_source_text(
         indent_level,
         nodes_map,
         topic_metadata,
+        ctx,
       );
 
       let indent_level = indent_level + 1;
@@ -152,6 +171,7 @@ fn do_node_to_source_text(
             indent_level,
             nodes_map,
             topic_metadata,
+            ctx
           ),
           format_operator(":"),
           do_node_to_source_text(
@@ -159,6 +179,7 @@ fn do_node_to_source_text(
             indent_level,
             nodes_map,
             topic_metadata,
+            ctx
           ),
         )
       } else {
@@ -170,6 +191,7 @@ fn do_node_to_source_text(
             indent_level,
             nodes_map,
             topic_metadata,
+            ctx
           )
         )
       };
@@ -178,7 +200,13 @@ fn do_node_to_source_text(
     }
 
     ASTNode::ElementaryTypeNameExpression { type_name, .. } => {
-      do_node_to_source_text(type_name, indent_level, nodes_map, topic_metadata)
+      do_node_to_source_text(
+        type_name,
+        indent_level,
+        nodes_map,
+        topic_metadata,
+        ctx,
+      )
     }
 
     ASTNode::FunctionCall {
@@ -193,6 +221,7 @@ fn do_node_to_source_text(
         indent_level,
         nodes_map,
         topic_metadata,
+        ctx,
       );
 
       let indent_level = indent_level + 1;
@@ -201,7 +230,13 @@ fn do_node_to_source_text(
       let args = arguments
         .iter()
         .map(|arg| {
-          do_node_to_source_text(arg, indent_level, nodes_map, topic_metadata)
+          do_node_to_source_text(
+            arg,
+            indent_level,
+            nodes_map,
+            topic_metadata,
+            ctx,
+          )
         })
         .collect::<Vec<_>>()
         .join("\n");
@@ -238,6 +273,7 @@ fn do_node_to_source_text(
         indent_level + 1,
         nodes_map,
         topic_metadata,
+        ctx,
       );
 
       // Format as "parameter:\n\targument" if parameter is available
@@ -251,6 +287,7 @@ fn do_node_to_source_text(
                 indent_level,
                 nodes_map,
                 topic_metadata,
+                ctx,
               );
               format!("{}:{}", param_str, indent(&arg_str, indent_level + 1))
             }
@@ -276,6 +313,7 @@ fn do_node_to_source_text(
         indent_level,
         nodes_map,
         topic_metadata,
+        ctx,
       );
 
       let arg_str = do_node_to_source_text(
@@ -283,6 +321,7 @@ fn do_node_to_source_text(
         indent_level,
         nodes_map,
         topic_metadata,
+        ctx,
       );
 
       format!(
@@ -303,13 +342,20 @@ fn do_node_to_source_text(
         indent_level,
         nodes_map,
         topic_metadata,
+        ctx,
       );
 
       let indent_level = indent_level + 1;
       let args = arguments
         .iter()
         .map(|arg| {
-          do_node_to_source_text(arg, indent_level, nodes_map, topic_metadata)
+          do_node_to_source_text(
+            arg,
+            indent_level,
+            nodes_map,
+            topic_metadata,
+            ctx,
+          )
         })
         .collect::<Vec<_>>()
         .join("\n");
@@ -327,13 +373,20 @@ fn do_node_to_source_text(
         indent_level,
         nodes_map,
         topic_metadata,
+        ctx,
       );
 
       let indent_level = indent_level + 1;
       let opts = options
         .iter()
         .map(|opt| {
-          do_node_to_source_text(opt, indent_level, nodes_map, topic_metadata)
+          do_node_to_source_text(
+            opt,
+            indent_level,
+            nodes_map,
+            topic_metadata,
+            ctx,
+          )
         })
         .collect::<Vec<_>>()
         .join("\n");
@@ -374,12 +427,19 @@ fn do_node_to_source_text(
         indent_level,
         nodes_map,
         topic_metadata,
+        ctx,
       );
       if let Some(idx) = index_expression {
         format!(
           "{}[{}]",
           base,
-          do_node_to_source_text(idx, indent_level, nodes_map, topic_metadata,)
+          do_node_to_source_text(
+            idx,
+            indent_level,
+            nodes_map,
+            topic_metadata,
+            ctx
+          )
         )
       } else {
         base
@@ -454,6 +514,7 @@ fn do_node_to_source_text(
           indent_level,
           nodes_map,
           topic_metadata,
+          ctx,
         );
         if let Some(member_node_id) = referenced_declaration {
           let member = format_identifier(
@@ -486,6 +547,7 @@ fn do_node_to_source_text(
           indent_level,
           nodes_map,
           topic_metadata,
+          ctx
         )
       )
     }
@@ -495,7 +557,13 @@ fn do_node_to_source_text(
       let comps = components
         .iter()
         .map(|c| {
-          do_node_to_source_text(c, indent_level, nodes_map, topic_metadata)
+          do_node_to_source_text(
+            c,
+            indent_level,
+            nodes_map,
+            topic_metadata,
+            ctx,
+          )
         })
         .collect::<Vec<_>>()
         .join(",\n");
@@ -522,6 +590,7 @@ fn do_node_to_source_text(
         indent_level,
         nodes_map,
         topic_metadata,
+        ctx,
       );
       let keyword = match operator {
         UnaryOperator::Increment => format!("{} ", format_keyword("mut")),
@@ -562,7 +631,13 @@ fn do_node_to_source_text(
         let stmts = statements
           .iter()
           .map(|s| {
-            do_node_to_source_text(s, indent_level, nodes_map, topic_metadata)
+            do_node_to_source_text(
+              s,
+              indent_level,
+              nodes_map,
+              topic_metadata,
+              ctx,
+            )
           })
           .collect::<Vec<_>>()
           .join("\n\n");
@@ -585,17 +660,28 @@ fn do_node_to_source_text(
       let statements = statements
         .iter()
         .map(|s| {
-          do_node_to_source_text(s, indent_level, nodes_map, topic_metadata)
+          do_node_to_source_text(
+            s,
+            indent_level,
+            nodes_map,
+            topic_metadata,
+            ctx,
+          )
         })
         .collect::<Vec<_>>()
         .join("\n");
 
-      format_semantic_block(
-        &node_id,
-        &statements,
-        "semantic-block",
-        &topic::new_node_topic(node_id),
-      )
+      let topic = topic::new_node_topic(node_id);
+
+      if ctx.target_topic == topic {
+        // When the semantic block is the target topic, we don't need to
+        // render it, as it is redundant with its container. This is especially
+        // impactful for the references panel, where it can be annoying to have
+        // to pass over each semantic block containing each reference.
+        statements
+      } else {
+        format_semantic_block(&node_id, &statements, "semantic-block", &topic)
+      }
     }
 
     ASTNode::Break { .. } => format_keyword("break"),
@@ -609,7 +695,7 @@ fn do_node_to_source_text(
       ..
     } => {
       let body_str = if let Some(b) = body {
-        do_node_to_source_text(b, indent_level, nodes_map, topic_metadata)
+        do_node_to_source_text(b, indent_level, nodes_map, topic_metadata, ctx)
       } else {
         String::new()
       };
@@ -619,6 +705,7 @@ fn do_node_to_source_text(
           indent_level,
           nodes_map,
           topic_metadata,
+          ctx,
         )
       } else {
         String::new()
@@ -645,6 +732,7 @@ fn do_node_to_source_text(
           indent_level,
           nodes_map,
           topic_metadata,
+          ctx
         )
       )
     }
@@ -654,6 +742,7 @@ fn do_node_to_source_text(
       indent_level,
       nodes_map,
       topic_metadata,
+      ctx,
     ),
 
     ASTNode::ForStatement {
@@ -670,6 +759,7 @@ fn do_node_to_source_text(
           indent_level,
           nodes_map,
           topic_metadata,
+          ctx,
         )
       } else {
         String::new()
@@ -680,17 +770,29 @@ fn do_node_to_source_text(
           indent_level,
           nodes_map,
           topic_metadata,
+          ctx,
         )
       } else {
         String::new()
       };
       let _loop_expr = if let Some(l_expr) = loop_expression {
-        do_node_to_source_text(l_expr, indent_level, nodes_map, topic_metadata)
+        do_node_to_source_text(
+          l_expr,
+          indent_level,
+          nodes_map,
+          topic_metadata,
+          ctx,
+        )
       } else {
         String::new()
       };
-      let body_str =
-        do_node_to_source_text(body, indent_level, nodes_map, topic_metadata);
+      let body_str = do_node_to_source_text(
+        body,
+        indent_level,
+        nodes_map,
+        topic_metadata,
+        ctx,
+      );
       format!(
         "{} (LoopExpr) {}",
         format_topic_keyword(&node_id, "for", &new_node_topic(node_id)),
@@ -710,12 +812,14 @@ fn do_node_to_source_text(
         indent_level,
         nodes_map,
         topic_metadata,
+        ctx,
       );
       let true_b = do_node_to_source_text(
         true_body,
         indent_level,
         nodes_map,
         topic_metadata,
+        ctx,
       );
       let false_part = if let Some(false_b) = false_body {
         format!(
@@ -726,6 +830,7 @@ fn do_node_to_source_text(
             indent_level,
             nodes_map,
             topic_metadata,
+            ctx
           )
         )
       } else {
@@ -755,7 +860,13 @@ fn do_node_to_source_text(
         format!(
           "{} {}",
           format_topic_keyword(&node_id, "return", &new_node_topic(node_id)),
-          do_node_to_source_text(expr, indent_level, nodes_map, topic_metadata,)
+          do_node_to_source_text(
+            expr,
+            indent_level,
+            nodes_map,
+            topic_metadata,
+            ctx
+          )
         )
       } else {
         format_topic_keyword(&node_id, "return", &new_node_topic(node_id))
@@ -775,6 +886,7 @@ fn do_node_to_source_text(
           indent_level,
           nodes_map,
           topic_metadata,
+          ctx
         )
       )
     }
@@ -787,7 +899,13 @@ fn do_node_to_source_text(
       let stmts = statements
         .iter()
         .map(|s| {
-          do_node_to_source_text(s, indent_level, nodes_map, topic_metadata)
+          do_node_to_source_text(
+            s,
+            indent_level,
+            nodes_map,
+            topic_metadata,
+            ctx,
+          )
         })
         .collect::<Vec<_>>()
         .join("\n");
@@ -819,6 +937,7 @@ fn do_node_to_source_text(
               indent_level,
               nodes_map,
               topic_metadata,
+              ctx
             ),
             format_operator("="),
             indent(
@@ -827,6 +946,7 @@ fn do_node_to_source_text(
                 indent_level,
                 nodes_map,
                 topic_metadata,
+                ctx
               ),
               indent_level
             ),
@@ -852,6 +972,7 @@ fn do_node_to_source_text(
                 indent_level + 1,
                 nodes_map,
                 topic_metadata,
+                ctx,
               )
             })
             .collect::<Vec<_>>()
@@ -862,6 +983,7 @@ fn do_node_to_source_text(
             indent_level,
             nodes_map,
             topic_metadata,
+            ctx,
           );
 
           format!(
@@ -876,7 +998,13 @@ fn do_node_to_source_text(
         declarations
           .iter()
           .map(|d| {
-            do_node_to_source_text(d, indent_level, nodes_map, topic_metadata)
+            do_node_to_source_text(
+              d,
+              indent_level,
+              nodes_map,
+              topic_metadata,
+              ctx,
+            )
           })
           .collect::<Vec<_>>()
           .join("\n")
@@ -902,6 +1030,7 @@ fn do_node_to_source_text(
         indent_level,
         nodes_map,
         topic_metadata,
+        ctx,
       );
       let storage = storage_location_to_string(storage_location);
       let visibility_str = variable_visibility_to_string(visibility);
@@ -962,8 +1091,13 @@ fn do_node_to_source_text(
       if let Some(val) = value
         && !constant
       {
-        let val =
-          do_node_to_source_text(val, indent_level, nodes_map, topic_metadata);
+        let val = do_node_to_source_text(
+          val,
+          indent_level,
+          nodes_map,
+          topic_metadata,
+          ctx,
+        );
         format!(
           "{} {} {}",
           decl,
@@ -986,9 +1120,10 @@ fn do_node_to_source_text(
         indent_level,
         nodes_map,
         topic_metadata,
+        ctx,
       );
       let body_str = if let Some(b) = body {
-        do_node_to_source_text(b, indent_level, nodes_map, topic_metadata)
+        do_node_to_source_text(b, indent_level, nodes_map, topic_metadata, ctx)
       } else {
         format_brace("{}", indent_level)
       };
@@ -1023,6 +1158,7 @@ fn do_node_to_source_text(
           base_indent_level,
           nodes_map,
           topic_metadata,
+          ctx,
         );
         let remaining_bases = if base_contracts.len() > 1 {
           let remaining = base_contracts[1..]
@@ -1033,6 +1169,7 @@ fn do_node_to_source_text(
                 base_indent_level,
                 nodes_map,
                 topic_metadata,
+                ctx,
               )
             })
             .collect::<Vec<_>>()
@@ -1062,6 +1199,7 @@ fn do_node_to_source_text(
               base_indent_level,
               nodes_map,
               topic_metadata,
+              ctx,
             )
           })
           .collect::<Vec<_>>()
@@ -1092,6 +1230,7 @@ fn do_node_to_source_text(
         indent_level,
         nodes_map,
         topic_metadata,
+        ctx,
       );
 
       if nodes.is_empty() {
@@ -1105,6 +1244,7 @@ fn do_node_to_source_text(
               indent_level + 1,
               nodes_map,
               topic_metadata,
+              ctx,
             )
           })
           .collect::<Vec<_>>()
@@ -1168,6 +1308,7 @@ fn do_node_to_source_text(
           indent_level,
           nodes_map,
           topic_metadata,
+          ctx
         )
       );
       let modifiers_str = if !modifiers.is_empty() {
@@ -1175,7 +1316,13 @@ fn do_node_to_source_text(
         let mods = modifiers
           .iter()
           .map(|m| {
-            do_node_to_source_text(m, indent_level, nodes_map, topic_metadata)
+            do_node_to_source_text(
+              m,
+              indent_level,
+              nodes_map,
+              topic_metadata,
+              ctx,
+            )
           })
           .collect::<Vec<_>>()
           .join("\n");
@@ -1193,6 +1340,7 @@ fn do_node_to_source_text(
           indent_level,
           nodes_map,
           topic_metadata,
+          ctx
         )
       );
 
@@ -1216,10 +1364,11 @@ fn do_node_to_source_text(
         indent_level,
         nodes_map,
         topic_metadata,
+        ctx,
       );
 
       let body_str = if let Some(b) = body {
-        do_node_to_source_text(b, indent_level, nodes_map, topic_metadata)
+        do_node_to_source_text(b, indent_level, nodes_map, topic_metadata, ctx)
       } else {
         String::new()
       };
@@ -1238,6 +1387,7 @@ fn do_node_to_source_text(
         indent_level,
         nodes_map,
         topic_metadata,
+        ctx,
       );
       format!(
         "{} {}{}",
@@ -1263,6 +1413,7 @@ fn do_node_to_source_text(
         indent_level,
         nodes_map,
         topic_metadata,
+        ctx,
       );
       format!(
         "{} {}{}",
@@ -1291,6 +1442,7 @@ fn do_node_to_source_text(
         indent_level,
         nodes_map,
         topic_metadata,
+        ctx,
       );
       let virtual_str = if *virtual_ {
         format!("{} ", format_keyword("virtual"))
@@ -1318,10 +1470,16 @@ fn do_node_to_source_text(
         indent_level,
         nodes_map,
         topic_metadata,
+        ctx,
       );
 
-      let body_str =
-        do_node_to_source_text(body, indent_level, nodes_map, topic_metadata);
+      let body_str = do_node_to_source_text(
+        body,
+        indent_level,
+        nodes_map,
+        topic_metadata,
+        ctx,
+      );
 
       format!("{} {}", sig_str, body_str)
     }
@@ -1339,7 +1497,13 @@ fn do_node_to_source_text(
       let members_str = members
         .iter()
         .map(|m| {
-          do_node_to_source_text(m, indent_level, nodes_map, topic_metadata)
+          do_node_to_source_text(
+            m,
+            indent_level,
+            nodes_map,
+            topic_metadata,
+            ctx,
+          )
         })
         .collect::<Vec<_>>()
         .join("\n");
@@ -1370,7 +1534,13 @@ fn do_node_to_source_text(
       let members_str = members
         .iter()
         .map(|m| {
-          do_node_to_source_text(m, indent_level, nodes_map, topic_metadata)
+          do_node_to_source_text(
+            m,
+            indent_level,
+            nodes_map,
+            topic_metadata,
+            ctx,
+          )
         })
         .collect::<Vec<_>>()
         .join("\n");
@@ -1408,6 +1578,7 @@ fn do_node_to_source_text(
           indent_level,
           nodes_map,
           topic_metadata,
+          ctx
         )
       )
     }
@@ -1435,6 +1606,7 @@ fn do_node_to_source_text(
           indent_level,
           nodes_map,
           topic_metadata,
+          ctx,
         )
       } else {
         String::new()
@@ -1449,6 +1621,7 @@ fn do_node_to_source_text(
             for_indent_level,
             nodes_map,
             topic_metadata,
+            ctx
           )
         )
       } else {
@@ -1460,14 +1633,18 @@ fn do_node_to_source_text(
     ASTNode::SourceUnit { nodes, .. } => nodes
       .iter()
       .map(|n| {
-        do_node_to_source_text(n, indent_level, nodes_map, topic_metadata)
+        do_node_to_source_text(n, indent_level, nodes_map, topic_metadata, ctx)
       })
       .collect::<Vec<_>>()
       .join("\n\n"),
 
-    ASTNode::InheritanceSpecifier { base_name, .. } => {
-      do_node_to_source_text(base_name, indent_level, nodes_map, topic_metadata)
-    }
+    ASTNode::InheritanceSpecifier { base_name, .. } => do_node_to_source_text(
+      base_name,
+      indent_level,
+      nodes_map,
+      topic_metadata,
+      ctx,
+    ),
 
     ASTNode::ElementaryTypeName { name, .. } => format_type(name),
 
@@ -1483,6 +1660,7 @@ fn do_node_to_source_text(
         indent_level,
         nodes_map,
         topic_metadata,
+        ctx,
       );
       let visibility_str = function_visibility_to_string(visibility);
       let mutability_str = function_mutability_to_string(state_mutability);
@@ -1494,6 +1672,7 @@ fn do_node_to_source_text(
           indent_level,
           nodes_map,
           topic_metadata,
+          ctx
         )
       );
 
@@ -1515,7 +1694,13 @@ fn do_node_to_source_text(
         let params = parameters
           .iter()
           .map(|p| {
-            do_node_to_source_text(p, indent_level, nodes_map, topic_metadata)
+            do_node_to_source_text(
+              p,
+              indent_level,
+              nodes_map,
+              topic_metadata,
+              ctx,
+            )
           })
           .collect::<Vec<_>>()
           .join("\n");
@@ -1536,6 +1721,7 @@ fn do_node_to_source_text(
         indent_level,
         nodes_map,
         topic_metadata,
+        ctx,
       );
       if let Some(args) = arguments {
         if args.is_empty() {
@@ -1544,7 +1730,13 @@ fn do_node_to_source_text(
           let args_str = args
             .iter()
             .map(|a| {
-              do_node_to_source_text(a, indent_level, nodes_map, topic_metadata)
+              do_node_to_source_text(
+                a,
+                indent_level,
+                nodes_map,
+                topic_metadata,
+                ctx,
+              )
             })
             .collect::<Vec<_>>()
             .join("\n");
@@ -1555,9 +1747,13 @@ fn do_node_to_source_text(
       }
     }
 
-    ASTNode::UserDefinedTypeName { path_node, .. } => {
-      do_node_to_source_text(path_node, indent_level, nodes_map, topic_metadata)
-    }
+    ASTNode::UserDefinedTypeName { path_node, .. } => do_node_to_source_text(
+      path_node,
+      indent_level,
+      nodes_map,
+      topic_metadata,
+      ctx,
+    ),
 
     ASTNode::ArrayTypeName { base_type, .. } => {
       format!(
@@ -1567,6 +1763,7 @@ fn do_node_to_source_text(
           indent_level,
           nodes_map,
           topic_metadata,
+          ctx
         )
       )
     }
@@ -1583,6 +1780,7 @@ fn do_node_to_source_text(
         indent_level,
         nodes_map,
         topic_metadata,
+        ctx,
       );
       if let Some(name) = key_name {
         key = format!("{} {}", key, name)
@@ -1592,6 +1790,7 @@ fn do_node_to_source_text(
         indent_level,
         nodes_map,
         topic_metadata,
+        ctx,
       );
       if let Some(name) = value_name {
         value = format!("{} {}", value, name)
