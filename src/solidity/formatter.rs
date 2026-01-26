@@ -14,6 +14,11 @@ pub struct Context {
   /// This allows recursive formatting logic to distinguish between the target
   /// node and recursively formatted child nodes.
   pub target_topic: topic::Topic,
+  pub omit_variable_declaration_let: bool,
+  /// When true, a parameter variable that is the target topic will be formatted
+  /// as its parent signature node. Set to false when recursively formatting the
+  /// signature to prevent infinite recursion.
+  pub format_parameter_variable_as_signature: bool,
 }
 
 pub fn global_to_source_text(topic: &topic::Topic) -> Option<String> {
@@ -37,6 +42,8 @@ pub fn node_to_source_text(
 ) -> String {
   let ctx = Context {
     target_topic: new_node_topic(&node.node_id()),
+    omit_variable_declaration_let: false,
+    format_parameter_variable_as_signature: true,
   };
 
   format!(
@@ -953,26 +960,22 @@ fn do_node_to_source_text(
           )
         } else {
           // Multiple declarations: use tuple syntax
+          // Use a context that omits the "let" keyword for each declaration
+          let tuple_ctx = Context {
+            target_topic: ctx.target_topic.clone(),
+            omit_variable_declaration_let: true,
+            format_parameter_variable_as_signature: ctx
+              .format_parameter_variable_as_signature,
+          };
           let declarations_str = declarations
             .iter()
             .map(|declaration| {
-              // Resolve the declaration (in case it's a Stub) and override
-              // the parameter_variable property so that it gets formatted
-              // without the "let" keyword in the tuple expression
-              let mut decl = declaration.resolve(nodes_map).clone();
-              if let ASTNode::VariableDeclaration {
-                parameter_variable, ..
-              } = &mut decl
-              {
-                *parameter_variable = true;
-              }
-
               do_node_to_source_text(
-                &decl,
+                declaration,
                 indent_level + 1,
                 nodes_map,
                 topic_metadata,
-                ctx,
+                &tuple_ctx,
               )
             })
             .collect::<Vec<_>>()
@@ -1021,91 +1024,126 @@ fn do_node_to_source_text(
       name,
       constant,
       parameter_variable,
-      struct_field,
       implementation_declaration,
       ..
     } => {
-      let type_str = do_node_to_source_text(
-        type_name,
-        indent_level,
-        nodes_map,
-        topic_metadata,
-        ctx,
-      );
-      let storage = storage_location_to_string(storage_location);
-      let visibility_str = variable_visibility_to_string(visibility);
-
-      // If there are no mutations for the variable, set the mutability
-      // to "immutable", otherwise set it to "mutable"
-      let mutability = if *visibility == VariableVisibility::Internal {
-        // Check if this variable has mutations by looking for NamedMutableTopic
-        let has_mutations = topic_metadata
-          .get(&new_node_topic(node_id))
-          .map(|meta| matches!(meta, TopicMetadata::NamedMutableTopic { .. }))
-          .unwrap_or(false);
-        if has_mutations {
-          &VariableMutability::Mutable
+      // If this is a parameter variable and it's the target topic, format the
+      // parent signature node instead
+      let signature_node = parameter_variable.and_then(|signature_node_id| {
+        let is_target = ctx.target_topic == new_node_topic(node_id);
+        if is_target {
+          let signature_topic = new_node_topic(&signature_node_id);
+          if let Some(core::Node::Solidity(sig_node)) =
+            nodes_map.get(&signature_topic)
+          {
+            Some(sig_node)
+          } else {
+            None
+          }
         } else {
-          &VariableMutability::Immutable
+          None
         }
+      });
+
+      if let Some(sig_node) = signature_node
+        && ctx.format_parameter_variable_as_signature
+      {
+        // Set format_parameter_variable_as_signature to false to prevent
+        // infinite recursion when the signature contains this variable
+        let sig_ctx = Context {
+          target_topic: ctx.target_topic.clone(),
+          omit_variable_declaration_let: false,
+          format_parameter_variable_as_signature: false,
+        };
+        do_node_to_source_text(
+          sig_node,
+          indent_level,
+          nodes_map,
+          topic_metadata,
+          &sig_ctx,
+        )
       } else {
-        mutability
-      };
-      let mutability_str = variable_mutability_to_string(mutability);
-
-      let mut parts = vec![];
-      // Do not render a visibility modifier for internal variables (they are
-      // assumed to be internal)
-      if *visibility != VariableVisibility::Internal {
-        parts.push(format_keyword(&visibility_str));
-      }
-      // Only render "let" for local variables that are not parameters or struct fields
-      if *visibility == VariableVisibility::Internal
-        && !parameter_variable
-        && !struct_field
-      {
-        parts.push(format_keyword("let"));
-      }
-      // Do not render an immutable modifier for internal variables (they are
-      // assumed to be immutable unless mutated)
-      if !(*visibility == VariableVisibility::Internal
-        && *mutability == VariableMutability::Immutable)
-      {
-        parts.push(format_keyword(&mutability_str));
-      }
-      if !storage.is_empty() {
-        parts.push(format_keyword(&storage));
-      }
-      if !name.is_empty() {
-        let topic =
-          new_node_topic(&implementation_declaration.unwrap_or(*node_id));
-
-        parts.push(format!(
-          "{}:",
-          format_identifier(&node_id, name, &topic, topic_metadata)
-        ));
-      }
-      parts.push(type_str);
-
-      let decl = parts.join(" ");
-      if let Some(val) = value
-        && !constant
-      {
-        let val = do_node_to_source_text(
-          val,
+        let type_str = do_node_to_source_text(
+          type_name,
           indent_level,
           nodes_map,
           topic_metadata,
           ctx,
         );
-        format!(
-          "{} {} {}",
-          decl,
-          format_operator("="),
-          indent(&val, indent_level)
-        )
-      } else {
-        decl
+        let storage = storage_location_to_string(storage_location);
+        let visibility_str = variable_visibility_to_string(visibility);
+
+        // If there are no mutations for the variable, set the mutability
+        // to "immutable", otherwise set it to "mutable"
+        let mutability = if *visibility == VariableVisibility::Internal {
+          // Check if this variable has mutations by looking for NamedMutableTopic
+          let has_mutations = topic_metadata
+            .get(&new_node_topic(node_id))
+            .map(|meta| matches!(meta, TopicMetadata::NamedMutableTopic { .. }))
+            .unwrap_or(false);
+          if has_mutations {
+            &VariableMutability::Mutable
+          } else {
+            &VariableMutability::Immutable
+          }
+        } else {
+          mutability
+        };
+        let mutability_str = variable_mutability_to_string(mutability);
+
+        let mut parts = vec![];
+        // Do not render a visibility modifier for internal variables (they are
+        // assumed to be internal)
+        if *visibility != VariableVisibility::Internal {
+          parts.push(format_keyword(&visibility_str));
+        }
+        // Only render "let" for local variables that are not parameters or struct fields
+        if *visibility == VariableVisibility::Internal
+          && !ctx.omit_variable_declaration_let
+        {
+          parts.push(format_keyword("let"));
+        }
+        // Do not render an immutable modifier for internal variables (they are
+        // assumed to be immutable unless mutated)
+        if !(*visibility == VariableVisibility::Internal
+          && *mutability == VariableMutability::Immutable)
+        {
+          parts.push(format_keyword(&mutability_str));
+        }
+        if !storage.is_empty() {
+          parts.push(format_keyword(&storage));
+        }
+        if !name.is_empty() {
+          let topic =
+            new_node_topic(&implementation_declaration.unwrap_or(*node_id));
+
+          parts.push(format!(
+            "{}:",
+            format_identifier(&node_id, name, &topic, topic_metadata)
+          ));
+        }
+        parts.push(type_str);
+
+        let decl = parts.join(" ");
+        if let Some(val) = value
+          && !constant
+        {
+          let val = do_node_to_source_text(
+            val,
+            indent_level,
+            nodes_map,
+            topic_metadata,
+            ctx,
+          );
+          format!(
+            "{} {} {}",
+            decl,
+            format_operator("="),
+            indent(&val, indent_level)
+          )
+        } else {
+          decl
+        }
       }
     }
 
@@ -1494,6 +1532,12 @@ fn do_node_to_source_text(
       let visibility_str =
         format_keyword(&variable_visibility_to_string(&visibility));
       let indent_level = indent_level + 1;
+      let member_ctx = Context {
+        target_topic: ctx.target_topic.clone(),
+        omit_variable_declaration_let: true,
+        format_parameter_variable_as_signature: ctx
+          .format_parameter_variable_as_signature,
+      };
       let members_str = members
         .iter()
         .map(|m| {
@@ -1502,7 +1546,7 @@ fn do_node_to_source_text(
             indent_level,
             nodes_map,
             topic_metadata,
-            ctx,
+            &member_ctx,
           )
         })
         .collect::<Vec<_>>()
@@ -1691,6 +1735,12 @@ fn do_node_to_source_text(
         String::from("()")
       } else {
         let indent_level = indent_level + 1;
+        let param_ctx = Context {
+          target_topic: ctx.target_topic.clone(),
+          omit_variable_declaration_let: true,
+          format_parameter_variable_as_signature: ctx
+            .format_parameter_variable_as_signature,
+        };
         let params = parameters
           .iter()
           .map(|p| {
@@ -1699,7 +1749,7 @@ fn do_node_to_source_text(
               indent_level,
               nodes_map,
               topic_metadata,
-              ctx,
+              &param_ctx,
             )
           })
           .collect::<Vec<_>>()
