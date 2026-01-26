@@ -418,8 +418,6 @@ impl TopicMetadata {
 
 pub enum FunctionModProperties {
   FunctionProperties {
-    // Topic IDs of the declarations of the function return values
-    returns: Vec<topic::Topic>,
     // Topic IDs of the declarations of the function revert nodes. This is either
     // the error call for a revert statement, or the literal string node passed
     // as the second argument to a require call
@@ -432,8 +430,6 @@ pub enum FunctionModProperties {
     revert_constraints: Vec<RevertConstraint>,
   },
   ModifierProperties {
-    // Topic IDs of the local declarations of the modifier parameters
-    parameters: Vec<topic::Topic>,
     // Topic IDs of the declarations of the modifier revert nodes. This is either
     // the error call for a revert statement, or the literal string node passed
     // as the second argument to a require call

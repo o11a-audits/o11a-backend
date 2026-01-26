@@ -325,7 +325,6 @@ pub async fn get_source_text(
         solidity_node,
         &audit_data.nodes,
         &audit_data.topic_metadata,
-        &audit_data.function_properties,
       )
     }
     Node::Documentation(doc_node) => {

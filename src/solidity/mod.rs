@@ -5,6 +5,7 @@ pub mod analyzer;
 pub mod collaborator;
 pub mod formatter;
 pub mod parser;
+pub mod transform;
 
 // Re-export core types
 pub use crate::core::{

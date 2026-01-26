@@ -8,6 +8,7 @@ use crate::core::{
 use crate::solidity::parser::{
   self, ASTNode, FunctionVisibility, SolidityAST, VariableVisibility,
 };
+use crate::solidity::transform;
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
@@ -23,14 +24,20 @@ pub fn analyze(
 
   // First pass: Parse all ASTs and build comprehensive declaration dictionary
   // This processes every declaration in every file, regardless of scope
-  let ast_map = parser::process(project_root)?;
+  let mut ast_map = parser::process(project_root)?;
   let first_pass_source_topics =
     first_pass(&ast_map, &audit_data.in_scope_files)?;
 
   // Tree shaking: Build in-scope dictionary by following references from
   // publicly visible declarations. Also builds a map of variable mutations.
-  let (in_scope_source_topics, mutations_map) =
+  let (mut in_scope_source_topics, mutations_map) =
     tree_shake(&first_pass_source_topics)?;
+
+  // Transform phase: Apply AST transformations after tree-shaking
+  // This wraps function call arguments with Argument nodes and applies
+  // interface-to-implementation mappings. Also transfers references from
+  // interface members to their implementations.
+  transform::transform(&mut ast_map, &mut in_scope_source_topics)?;
 
   // Second pass: Build final data structures for in-scope declarations
   // Pass mutable references to audit_data's maps directly
@@ -299,7 +306,7 @@ pub enum InScopeDeclaration {
 }
 
 impl InScopeDeclaration {
-  fn add_reference_if_not_present(&mut self, reference: i32) {
+  pub fn add_reference_if_not_present(&mut self, reference: i32) {
     match self {
       InScopeDeclaration::FunctionMod { references, .. }
       | InScopeDeclaration::Flat { references, .. }
@@ -1012,24 +1019,10 @@ fn process_second_pass_nodes(
             .collect();
 
           match node {
-            ASTNode::FunctionDefinition { signature, .. } => {
-              // Extract parameters from the signature
-              let return_parameters = match signature.as_ref() {
-                ASTNode::FunctionSignature {
-                  return_parameters, ..
-                } => return_parameters,
-                _ => panic!(
-                  "Expected FunctionSignature in FunctionDefinition.signature"
-                ),
-              };
-
-              // Extract function properties
-              let return_topics = extract_parameter_topics(return_parameters);
-
+            ASTNode::FunctionDefinition { .. } => {
               function_properties.insert(
                 topic.clone(),
                 FunctionModProperties::FunctionProperties {
-                  returns: return_topics,
                   reverts: revert_topics,
                   calls: call_topics,
                   mutations: mutation_topics,
@@ -1037,19 +1030,10 @@ fn process_second_pass_nodes(
                 },
               );
             }
-            ASTNode::ModifierDefinition { signature, .. } => {
-              let parameters = match signature.as_ref() {
-                ASTNode::ModifierSignature { parameters, .. } => parameters,
-                _ => panic!("Expected ModifierSignature"),
-              };
-
-              // Extract modifier properties
-              let param_topics = extract_parameter_topics(parameters);
-
+            ASTNode::ModifierDefinition { .. } => {
               function_properties.insert(
                 topic.clone(),
                 FunctionModProperties::ModifierProperties {
-                  parameters: param_topics,
                   reverts: revert_topics,
                   calls: call_topics,
                   mutations: mutation_topics,
@@ -1192,19 +1176,6 @@ fn process_second_pass_nodes(
   }
 
   Ok(())
-}
-
-/// Extract parameter topic IDs from a ParameterList node
-fn extract_parameter_topics(parameter_list: &ASTNode) -> Vec<topic::Topic> {
-  let mut topics = Vec::new();
-
-  if let ASTNode::ParameterList { parameters, .. } = parameter_list {
-    for param in parameters {
-      topics.push(topic::new_node_topic(&param.node_id()));
-    }
-  }
-
-  topics
 }
 
 /// Collects all reference node IDs from an expression during first pass.
