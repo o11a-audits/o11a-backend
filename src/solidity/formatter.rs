@@ -1660,7 +1660,7 @@ fn format_identifier(
       format_topic_token(&node_id, name, css_class, topic)
     }
     _ => format!(
-      "<span id=\"{}\" class=\"unknown\" data-topic=\"{}\">{}</span>",
+      "<span id=\"{}\" class=\"unknown {}\">{}</span>",
       new_node_topic(node_id).id(),
       topic.id(),
       name,
