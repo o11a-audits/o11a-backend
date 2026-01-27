@@ -357,6 +357,8 @@ pub struct TopicMetadataResponse {
   pub kind: String,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub sub_kind: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub visibility: Option<String>,
   pub scope: ScopeInfo,
   pub references: Vec<String>,
   pub ancestors: Vec<String>,
@@ -474,11 +476,22 @@ fn topic_metadata_to_response(
     | crate::core::TopicMetadata::UnnamedTopic { .. } => None,
   };
 
+  let visibility = match metadata {
+    crate::core::TopicMetadata::NamedTopic { visibility, .. } => {
+      Some(format!("{:?}", visibility))
+    }
+    crate::core::TopicMetadata::NamedMutableTopic { visibility, .. } => {
+      Some(format!("{:?}", visibility))
+    }
+    crate::core::TopicMetadata::UnnamedTopic { .. } => None,
+  };
+
   TopicMetadataResponse {
     topic_id: topic.id.clone(),
     name,
     kind: kind_str,
     sub_kind,
+    visibility,
     scope: scope_info,
     references,
     ancestors,

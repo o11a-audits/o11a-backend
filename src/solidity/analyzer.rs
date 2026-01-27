@@ -1,3 +1,5 @@
+use foundry_compilers_artifacts::Visibility;
+
 use crate::core::topic;
 use crate::core::{self, UnnamedTopicKind};
 use crate::core::{
@@ -140,6 +142,7 @@ pub struct FirstPassRevertConstraint {
 pub enum FirstPassDeclaration {
   FunctionMod {
     declaration_kind: NamedTopicKind,
+    visibility: Visibility,
     name: String,
     referenced_nodes: Vec<ReferencedNode>,
     revert_constraints: Vec<FirstPassRevertConstraint>,
@@ -149,6 +152,7 @@ pub enum FirstPassDeclaration {
   Contract {
     is_publicly_in_scope: bool,
     declaration_kind: NamedTopicKind,
+    visibility: Visibility,
     name: String,
     base_contracts: Vec<ReferencedNode>,
     other_contracts: Vec<ReferencedNode>,
@@ -157,6 +161,7 @@ pub enum FirstPassDeclaration {
   },
   Flat {
     declaration_kind: NamedTopicKind,
+    visibility: Visibility,
     name: String,
   },
 }
@@ -295,6 +300,7 @@ pub enum InScopeDeclaration {
   // Functions and Modifiers
   FunctionMod {
     declaration_kind: NamedTopicKind,
+    visibility: Visibility,
     name: String,
     references: Vec<i32>,
     revert_constraints: Vec<FirstPassRevertConstraint>,
@@ -303,6 +309,7 @@ pub enum InScopeDeclaration {
   },
   Contract {
     declaration_kind: NamedTopicKind,
+    visibility: Visibility,
     name: String,
     references: Vec<i32>,
     base_contracts: Vec<ReferencedNode>,
@@ -312,6 +319,7 @@ pub enum InScopeDeclaration {
   // All other declarations
   Flat {
     declaration_kind: NamedTopicKind,
+    visibility: Visibility,
     name: String,
     references: Vec<i32>,
   },
@@ -358,6 +366,14 @@ impl InScopeDeclaration {
       InScopeDeclaration::FunctionMod { references, .. }
       | InScopeDeclaration::Contract { references, .. }
       | InScopeDeclaration::Flat { references, .. } => references,
+    }
+  }
+
+  pub fn visibility(&self) -> &Visibility {
+    match self {
+      InScopeDeclaration::FunctionMod { visibility, .. }
+      | InScopeDeclaration::Contract { visibility, .. }
+      | InScopeDeclaration::Flat { visibility, .. } => visibility,
     }
   }
 }
@@ -624,6 +640,7 @@ fn process_first_pass_ast_nodes(
             is_publicly_in_scope: is_file_in_scope, // All contracts are publicly visible
             name: name.clone(),
             declaration_kind,
+            visibility: Visibility::Public,
             base_contracts: base_contract_ids,
             other_contracts: using_for_contracts,
             public_members: public_member_ids,
@@ -642,9 +659,14 @@ fn process_first_pass_ast_nodes(
       ASTNode::FunctionDefinition {
         node_id, signature, ..
       } => {
-        // Extract name and kind from the signature
-        let (name, kind) = match signature.as_ref() {
-          ASTNode::FunctionSignature { name, kind, .. } => (name, kind),
+        // Extract name, kind, and visibility from the signature
+        let (name, kind, visibility) = match signature.as_ref() {
+          ASTNode::FunctionSignature {
+            name,
+            kind,
+            visibility,
+            ..
+          } => (name, kind, visibility),
           _ => {
             panic!("Expected FunctionSignature in FunctionDefinition.signature")
           }
@@ -670,6 +692,7 @@ fn process_first_pass_ast_nodes(
           *node_id,
           FirstPassDeclaration::FunctionMod {
             declaration_kind: NamedTopicKind::Function(*kind),
+            visibility: function_visibility_to_visibility(visibility),
             name: name.clone(),
             referenced_nodes,
             revert_constraints,
@@ -711,10 +734,12 @@ fn process_first_pass_ast_nodes(
           &mut variable_mutations,
         );
 
+        // Modifiers are always internal visibility
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::FunctionMod {
             declaration_kind: NamedTopicKind::Modifier,
+            visibility: Visibility::Internal,
             name: name.clone(),
             referenced_nodes,
             revert_constraints,
@@ -737,6 +762,7 @@ fn process_first_pass_ast_nodes(
         state_variable,
         mutability,
         name,
+        visibility,
         ..
       } => {
         let declaration_kind = if *state_variable {
@@ -749,16 +775,19 @@ fn process_first_pass_ast_nodes(
           *node_id,
           FirstPassDeclaration::Flat {
             declaration_kind,
+            visibility: variable_visibility_to_visibility(visibility),
             name: name.clone(),
           },
         );
       }
 
       ASTNode::EventDefinition { node_id, name, .. } => {
+        // Events don't have visibility in Solidity, but are effectively public
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::Flat {
             declaration_kind: NamedTopicKind::Event,
+            visibility: Visibility::Public,
             name: name.clone(),
           },
         );
@@ -773,10 +802,12 @@ fn process_first_pass_ast_nodes(
       }
 
       ASTNode::ErrorDefinition { node_id, name, .. } => {
+        // Errors don't have visibility in Solidity, but are effectively public
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::Flat {
             declaration_kind: NamedTopicKind::Error,
+            visibility: Visibility::Public,
             name: name.clone(),
           },
         );
@@ -790,11 +821,18 @@ fn process_first_pass_ast_nodes(
         )?;
       }
 
-      ASTNode::StructDefinition { node_id, name, .. } => {
+      ASTNode::StructDefinition {
+        node_id,
+        name,
+        visibility,
+        ..
+      } => {
+        // Structs don't have visibility in Solidity, but are effectively public
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::Flat {
             declaration_kind: NamedTopicKind::Struct,
+            visibility: variable_visibility_to_visibility(visibility),
             name: name.clone(),
           },
         );
@@ -809,10 +847,12 @@ fn process_first_pass_ast_nodes(
       }
 
       ASTNode::EnumDefinition { node_id, name, .. } => {
+        // Enums don't have visibility in Solidity, but are effectively public
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::Flat {
             declaration_kind: NamedTopicKind::Enum,
+            visibility: Visibility::Public,
             name: name.clone(),
           },
         );
@@ -827,10 +867,12 @@ fn process_first_pass_ast_nodes(
       }
 
       ASTNode::EnumValue { node_id, name, .. } => {
+        // Enum values don't have visibility in Solidity, but are effectively public
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::Flat {
             declaration_kind: NamedTopicKind::EnumMember,
+            visibility: Visibility::Public,
             name: name.clone(),
           },
         );
@@ -969,6 +1011,9 @@ fn process_second_pass_nodes(
               "A declaration with mutations can only be a variable"
             ),
           },
+          visibility: visibility_to_variable_visibility(
+            in_scope_topic_declaration.visibility(),
+          ),
           name: in_scope_topic_declaration.name().clone(),
           scope: scope.clone(),
           references: ref_topics,
@@ -980,6 +1025,9 @@ fn process_second_pass_nodes(
         TopicMetadata::NamedTopic {
           topic: topic.clone(),
           kind: in_scope_topic_declaration.declaration_kind().clone(),
+          visibility: visibility_to_named_topic_visibility(
+            in_scope_topic_declaration.visibility(),
+          ),
           name: in_scope_topic_declaration.name().clone(),
           scope: scope.clone(),
           references: ref_topics,
@@ -1654,6 +1702,54 @@ impl FirstPassDeclaration {
   }
 }
 
+/// Convert parser::FunctionVisibility to foundry_compilers_artifacts::Visibility
+fn function_visibility_to_visibility(
+  vis: &parser::FunctionVisibility,
+) -> Visibility {
+  match vis {
+    parser::FunctionVisibility::Public => Visibility::Public,
+    parser::FunctionVisibility::Private => Visibility::Private,
+    parser::FunctionVisibility::Internal => Visibility::Internal,
+    parser::FunctionVisibility::External => Visibility::External,
+  }
+}
+
+/// Convert parser::VariableVisibility to foundry_compilers_artifacts::Visibility
+fn variable_visibility_to_visibility(
+  vis: &parser::VariableVisibility,
+) -> Visibility {
+  match vis {
+    parser::VariableVisibility::Public => Visibility::Public,
+    parser::VariableVisibility::Private => Visibility::Private,
+    parser::VariableVisibility::Internal => Visibility::Internal,
+  }
+}
+
+/// Convert foundry_compilers_artifacts::Visibility to core::NamedTopicVisibility
+fn visibility_to_named_topic_visibility(
+  vis: &Visibility,
+) -> core::NamedTopicVisibility {
+  match vis {
+    Visibility::Public => core::NamedTopicVisibility::Public,
+    Visibility::Private => core::NamedTopicVisibility::Private,
+    Visibility::Internal => core::NamedTopicVisibility::Internal,
+    Visibility::External => core::NamedTopicVisibility::External,
+  }
+}
+
+/// Convert foundry_compilers_artifacts::Visibility to parser::VariableVisibility
+fn visibility_to_variable_visibility(
+  vis: &Visibility,
+) -> parser::VariableVisibility {
+  match vis {
+    Visibility::Public => parser::VariableVisibility::Public,
+    Visibility::Private => parser::VariableVisibility::Private,
+    Visibility::Internal => parser::VariableVisibility::Internal,
+    // External is not valid for variables, treat as internal
+    Visibility::External => parser::VariableVisibility::Internal,
+  }
+}
+
 /// Tree shake the first pass declarations to include only in-scope and used declarations.
 /// Returns a tuple of:
 /// - A map of node_id to InScopeDeclaration containing all nodes that reference each declaration
@@ -1734,6 +1830,7 @@ fn process_tree_shake_declarations(
   let in_scope_decl = match first_pass_decl {
     FirstPassDeclaration::FunctionMod {
       declaration_kind,
+      visibility,
       name,
       revert_constraints,
       function_calls,
@@ -1771,6 +1868,7 @@ fn process_tree_shake_declarations(
       let references = referencing_node.into_iter().collect();
       InScopeDeclaration::FunctionMod {
         declaration_kind: declaration_kind.clone(),
+        visibility: visibility.clone(),
         name: name.clone(),
         references,
         revert_constraints: revert_constraints.clone(),
@@ -1780,18 +1878,21 @@ fn process_tree_shake_declarations(
     }
     FirstPassDeclaration::Flat {
       declaration_kind,
+      visibility,
       name,
       ..
     } => {
       let references = referencing_node.into_iter().collect();
       InScopeDeclaration::Flat {
         declaration_kind: declaration_kind.clone(),
+        visibility: visibility.clone(),
         name: name.clone(),
         references,
       }
     }
     FirstPassDeclaration::Contract {
       declaration_kind,
+      visibility,
       name,
       base_contracts,
       other_contracts,
@@ -1801,6 +1902,7 @@ fn process_tree_shake_declarations(
       let references = referencing_node.into_iter().collect();
       InScopeDeclaration::Contract {
         declaration_kind: declaration_kind.clone(),
+        visibility: visibility.clone(),
         name: name.clone(),
         references,
         base_contracts: base_contracts.clone(),

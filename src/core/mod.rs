@@ -5,6 +5,8 @@ pub mod topic;
 
 use std::collections::{BTreeMap, HashSet};
 
+use crate::solidity::parser;
+
 // ============================================================================
 // Solidity Type System (for checker module)
 // ============================================================================
@@ -297,12 +299,21 @@ pub enum UnnamedTopicKind {
 }
 
 #[derive(Debug, Clone)]
+pub enum NamedTopicVisibility {
+  Public,
+  Private,
+  Internal,
+  External,
+}
+
+#[derive(Debug, Clone)]
 pub enum TopicMetadata {
   NamedTopic {
     topic: topic::Topic,
     scope: Scope,
     kind: NamedTopicKind,
     name: String,
+    visibility: NamedTopicVisibility,
     references: Vec<topic::Topic>,
     /// Variables that contribute to this variable's value (e.g., RHS of assignments,
     /// function arguments that flow into parameters, return expression variables).
@@ -317,6 +328,7 @@ pub enum TopicMetadata {
     scope: Scope,
     kind: NamedMutableTopicKind,
     name: String,
+    visibility: parser::VariableVisibility,
     references: Vec<topic::Topic>,
     /// The assignment or unary operation nodes that mutate this variable
     mutations: Vec<topic::Topic>,
@@ -608,6 +620,7 @@ pub fn new_audit_data(
       topic: keccak256_topic,
       scope: Scope::Global,
       kind: NamedTopicKind::Builtin,
+      visibility: NamedTopicVisibility::Public,
       name: "keccak256".to_string(),
       references: Vec::new(),
       ancestors: Vec::new(),
@@ -623,6 +636,7 @@ pub fn new_audit_data(
       topic: type_topic,
       scope: Scope::Global,
       kind: NamedTopicKind::Builtin,
+      visibility: NamedTopicVisibility::Public,
       name: "type".to_string(),
       references: Vec::new(),
       ancestors: Vec::new(),
@@ -638,6 +652,7 @@ pub fn new_audit_data(
       topic: this_topic,
       scope: Scope::Global,
       kind: NamedTopicKind::Builtin,
+      visibility: NamedTopicVisibility::Public,
       name: "this".to_string(),
       references: Vec::new(),
       ancestors: Vec::new(),
