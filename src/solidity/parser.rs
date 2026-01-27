@@ -600,6 +600,9 @@ pub enum ASTNode {
     names: Vec<String>,
     try_call: bool,
     type_descriptions: TypeDescriptions,
+    /// Node IDs of the return parameter VariableDeclarations from the called function.
+    /// Populated during the transform phase; empty when initially parsed.
+    referenced_return_declarations: Vec<i32>,
   },
   /// Wrapper node for function call arguments that links the argument to its
   /// corresponding parameter declaration. Generated during post-processing,
@@ -2071,6 +2074,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       names,
       try_call,
       type_descriptions,
+      referenced_return_declarations,
     } => ASTNode::FunctionCall {
       node_id: node_id,
       src_location: src_location,
@@ -2080,6 +2084,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       names: names,
       try_call: try_call,
       type_descriptions: type_descriptions,
+      referenced_return_declarations: referenced_return_declarations,
     },
     ASTNode::TypeConversion {
       node_id,
@@ -3611,6 +3616,24 @@ pub fn get_function_parameters(func_def: &ASTNode) -> Option<&Vec<ASTNode>> {
   }
 }
 
+/// Gets the return parameters from a function definition node.
+pub fn get_function_return_parameters(
+  func_def: &ASTNode,
+) -> Option<&Vec<ASTNode>> {
+  match func_def {
+    ASTNode::FunctionDefinition { signature, .. } => match &**signature {
+      ASTNode::FunctionSignature {
+        return_parameters, ..
+      } => match &**return_parameters {
+        ASTNode::ParameterList { parameters, .. } => Some(parameters),
+        _ => None,
+      },
+      _ => None,
+    },
+    _ => None,
+  }
+}
+
 /// Gets the members from a struct definition node.
 pub fn get_struct_members(struct_def: &ASTNode) -> Option<&Vec<ASTNode>> {
   match struct_def {
@@ -3815,7 +3838,8 @@ fn node_from_json(
       match kind_str.as_str() {
         "functionCall" => {
           // Arguments are stored as raw expressions; they will be wrapped
-          // with Argument nodes during the transform phase after tree-shaking
+          // with Argument nodes during the transform phase after tree-shaking.
+          // referenced_return_declarations is populated during transform phase.
           Ok(ASTNode::FunctionCall {
             node_id,
             src_location,
@@ -3825,6 +3849,7 @@ fn node_from_json(
             names,
             try_call,
             type_descriptions,
+            referenced_return_declarations: Vec::new(),
           })
         }
         "typeConversion" => {

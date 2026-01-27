@@ -11,7 +11,7 @@
 use crate::core::{ContractKind, ProjectPath};
 use crate::solidity::parser::{
   self, ASTNode, SolidityAST, generate_node_id, get_definition_parameters,
-  get_referenced_function_id,
+  get_function_return_parameters, get_referenced_function_id,
 };
 use std::collections::BTreeMap;
 
@@ -24,6 +24,9 @@ use std::collections::BTreeMap;
 pub struct CallableDefinition {
   /// The parameters of this callable (VariableDeclaration nodes)
   pub parameters: Vec<ASTNode>,
+  /// The return parameters of this callable (VariableDeclaration nodes)
+  /// Only applicable to functions; empty for events, errors, and modifiers.
+  pub return_parameters: Vec<ASTNode>,
 }
 
 /// Information about a struct definition.
@@ -226,10 +229,14 @@ fn collect_definitions_from_node(
 
     ASTNode::FunctionDefinition { node_id, .. } => {
       if let Some(params) = get_definition_parameters(node) {
+        let return_params = get_function_return_parameters(node)
+          .cloned()
+          .unwrap_or_default();
         callables.insert(
           *node_id,
           CallableDefinition {
             parameters: params.clone(),
+            return_parameters: return_params,
           },
         );
       }
@@ -248,6 +255,7 @@ fn collect_definitions_from_node(
             *node_id,
             CallableDefinition {
               parameters: params.clone(),
+              return_parameters: Vec::new(),
             },
           );
         }
@@ -267,6 +275,7 @@ fn collect_definitions_from_node(
           *node_id,
           CallableDefinition {
             parameters: params.clone(),
+            return_parameters: Vec::new(),
           },
         );
       }
@@ -285,6 +294,7 @@ fn collect_definitions_from_node(
           *node_id,
           CallableDefinition {
             parameters: params.clone(),
+            return_parameters: Vec::new(),
           },
         );
       }
@@ -592,11 +602,16 @@ fn transform_node(node: &mut ASTNode, context: &TransformContext) {
     ASTNode::FunctionCall {
       arguments,
       expression,
+      referenced_return_declarations,
       ..
     } => {
       // Wrap arguments with Argument nodes
       let new_arguments = wrap_arguments(arguments, expression, context);
       *arguments = new_arguments;
+
+      // Populate referenced_return_declarations with return parameter node IDs
+      *referenced_return_declarations =
+        get_return_declaration_ids(expression, context);
 
       // Recurse into expression and wrapped arguments
       transform_node(expression.as_mut(), context);
@@ -760,6 +775,31 @@ fn wrap_arguments(
       .map(|def| &def.parameters);
 
   wrap_arguments_impl(std::mem::take(arguments), parameters)
+}
+
+/// Gets the node IDs of return parameter declarations for a function call.
+fn get_return_declaration_ids(
+  expression: &ASTNode,
+  context: &TransformContext,
+) -> Vec<i32> {
+  get_referenced_function_id(expression)
+    .and_then(|def_id| {
+      // First check if this is an interface member that maps to an implementation
+      let effective_id = context
+        .interface_to_implementation
+        .get(&def_id)
+        .copied()
+        .unwrap_or(def_id);
+      context.callables.get(&effective_id)
+    })
+    .map(|def| {
+      def
+        .return_parameters
+        .iter()
+        .map(|param| param.node_id())
+        .collect()
+    })
+    .unwrap_or_default()
 }
 
 /// Wraps struct constructor arguments with Argument nodes.
