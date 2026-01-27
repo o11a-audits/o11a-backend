@@ -3494,23 +3494,13 @@ fn wrap_statement_in_block(statement: Box<ASTNode>) -> Box<ASTNode> {
     }
     // If it's a Block with more than one SemanticBlock, leave as-is.
     ASTNode::SemanticBlock { .. } => statement,
-    // Otherwise, wrap the single statement in a SemanticBlock and Block
+    // Otherwise, wrap the single statement in a Block
     _ => {
-      let stmt_src_location = statement.src_location().clone();
-
-      // Create a SemanticBlock containing the single statement
-      let semantic_block = ASTNode::SemanticBlock {
-        node_id: generate_node_id(),
-        src_location: stmt_src_location.clone(),
-        documentation: None,
-        statements: vec![*statement],
-      };
-
       // Wrap the SemanticBlock in a Block
       Box::new(ASTNode::Block {
         node_id: generate_node_id(),
-        src_location: stmt_src_location,
-        statements: vec![semantic_block],
+        src_location: statement.src_location().clone(),
+        statements: vec![*statement],
       })
     }
   }
