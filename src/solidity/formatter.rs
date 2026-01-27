@@ -1063,13 +1063,6 @@ fn do_node_to_source_text(
           &sig_ctx,
         )
       } else {
-        let type_str = do_node_to_source_text(
-          type_name,
-          indent_level,
-          nodes_map,
-          topic_metadata,
-          ctx,
-        );
         let storage = storage_location_to_string(storage_location);
         let visibility_str = variable_visibility_to_string(visibility);
 
@@ -1113,16 +1106,31 @@ fn do_node_to_source_text(
         if !storage.is_empty() {
           parts.push(format_keyword(&storage));
         }
+        let type_str = do_node_to_source_text(
+          type_name,
+          indent_level,
+          nodes_map,
+          topic_metadata,
+          ctx,
+        );
+        let topic =
+          new_node_topic(&implementation_declaration.unwrap_or(*node_id));
         if !name.is_empty() {
-          let topic =
-            new_node_topic(&implementation_declaration.unwrap_or(*node_id));
-
           parts.push(format!(
             "{}:",
             format_identifier(&node_id, name, &topic, topic_metadata)
           ));
-        }
-        parts.push(type_str);
+
+          parts.push(type_str);
+        } else {
+          // Format the type as an identifier
+          parts.push(format_topic_token(
+            node_id,
+            &type_str,
+            "unnamed-parameter",
+            &topic,
+          ));
+        };
 
         let decl = parts.join(" ");
         if let Some(val) = value
