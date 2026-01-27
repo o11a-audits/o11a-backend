@@ -22,22 +22,25 @@ pub fn analyze(
     .get_audit_mut(audit_id)
     .ok_or_else(|| format!("Audit '{}' not found", audit_id))?;
 
-  // First pass: Parse all ASTs and build comprehensive declaration dictionary
-  // This processes every declaration in every file, regardless of scope
+  // Parse all ASTs
   let mut ast_map = parser::process(project_root)?;
+
+  // Transform phase: Apply AST transformations before the first pass
+  // This wraps function call arguments with Argument nodes and remaps
+  // interface member references to their implementation members in the AST.
+  transform::transform_ast(&mut ast_map)?;
+
+  // First pass: build a comprehensive declaration dictionary
+  // This processes every declaration in every file, regardless of scope
   let first_pass_source_topics =
     first_pass(&ast_map, &audit_data.in_scope_files)?;
 
   // Tree shaking: Build in-scope dictionary by following references from
   // publicly visible declarations. Also builds a map of variable mutations.
-  let (mut in_scope_source_topics, mutations_map) =
+  // Note: Interface references are already remapped to implementations in the AST
+  // by the transform phase, so tree shaking naturally follows implementation references.
+  let (in_scope_source_topics, mutations_map) =
     tree_shake(&first_pass_source_topics)?;
-
-  // Transform phase: Apply AST transformations after tree-shaking
-  // This wraps function call arguments with Argument nodes and applies
-  // interface-to-implementation mappings. Also transfers references from
-  // interface members to their implementations.
-  transform::transform(&mut ast_map, &mut in_scope_source_topics)?;
 
   // Second pass: Build final data structures for in-scope declarations
   // Pass mutable references to audit_data's maps directly
@@ -1263,8 +1266,21 @@ fn collect_references_and_statements(
       node_id,
       expression,
       arguments,
+      referenced_return_declarations,
       ..
     } => {
+      // Add references to the function's return parameter declarations
+      // This links the function call to the return variable nodes, enabling
+      // ancestry traversal through the return values
+      if let Some(block_id) = semantic_block {
+        for &return_decl_id in referenced_return_declarations {
+          referenced_nodes.push(ReferencedNode {
+            statement_node: block_id,
+            referenced_node: return_decl_id,
+          });
+        }
+      }
+
       if let ASTNode::Identifier {
         name,
         referenced_declaration,

@@ -1,12 +1,14 @@
 //! AST transformation module.
 //!
-//! This module handles transformations on the parsed AST after tree-shaking.
+//! This module handles transformations on the parsed AST before tree-shaking.
 //! Transformations include:
 //! - Wrapping function call arguments with Argument nodes
-//! - Mapping interface members to their implementations
+//! - Remapping interface member references to their implementations in the AST
 //!
-//! The transform phase operates on the complete AST and produces a transformed
-//! AST with the same type but additional semantic information.
+//! The transform phase operates on the complete AST and mutates it in place.
+//! By remapping `referenced_declaration` fields directly in Identifier,
+//! IdentifierPath, and MemberAccess nodes, tree shaking naturally follows
+//! implementation references without needing a separate reference transfer phase.
 
 use crate::core::{ContractKind, ProjectPath};
 use crate::solidity::parser::{
@@ -88,30 +90,21 @@ pub struct TransformContext {
 /// Transforms the AST map by:
 /// 1. Collecting all definitions (functions, structs, events, errors)
 /// 2. Building interface-to-implementation mappings
-/// 3. Transferring interface member references to their implementations
-/// 4. Wrapping function call and struct constructor arguments with Argument nodes
+/// 3. Wrapping function call and struct constructor arguments with Argument nodes
+/// 4. Remapping interface references to implementation references in the AST
 ///
-/// This function mutates the AST and definition_references in place.
-pub fn transform(
+/// This function runs BEFORE tree shaking and mutates the AST in place.
+/// Interface member references (in Identifier, IdentifierPath, and MemberAccess nodes)
+/// are remapped to their implementation members, so tree shaking naturally follows
+/// implementation references without needing a separate reference transfer phase.
+pub fn transform_ast(
   ast_map: &mut BTreeMap<ProjectPath, Vec<SolidityAST>>,
-  definition_references: &mut BTreeMap<
-    i32,
-    crate::solidity::analyzer::InScopeDeclaration,
-  >,
 ) -> Result<(), String> {
   // Phase 1: Collect all definitions and contract info
   let (callables, structs, contracts) = collect_definitions(ast_map);
 
   // Phase 2: Build interface-to-implementation mapping
   let interface_to_implementation = build_interface_member_map(&contracts);
-
-  // Phase 3: Transfer interface references to implementations
-  // For each interface member that maps to an implementation, copy the interface's
-  // references to the implementation's references
-  transfer_interface_references(
-    &interface_to_implementation,
-    definition_references,
-  );
 
   // Create transform context
   let context = TransformContext {
@@ -120,7 +113,7 @@ pub fn transform(
     interface_to_implementation,
   };
 
-  // Phase 4: Transform the AST (wrap arguments, apply interface mappings)
+  // Phase 3: Transform the AST (wrap arguments, apply interface mappings)
   for (_path, asts) in ast_map.iter_mut() {
     for ast in asts.iter_mut() {
       for node in ast.nodes.iter_mut() {
@@ -130,41 +123,6 @@ pub fn transform(
   }
 
   Ok(())
-}
-
-/// Transfers references from interface members to their implementation members.
-/// When an interface function is referenced, that reference should also count as
-/// a reference to the implementation.
-fn transfer_interface_references(
-  interface_to_implementation: &BTreeMap<i32, i32>,
-  definition_references: &mut BTreeMap<
-    i32,
-    crate::solidity::analyzer::InScopeDeclaration,
-  >,
-) {
-  // Collect the references to transfer (interface_id -> Vec<reference_node_ids>)
-  let mut references_to_transfer: Vec<(i32, Vec<i32>)> = Vec::new();
-
-  for (&interface_member_id, &impl_member_id) in interface_to_implementation {
-    // Get references from the interface member
-    if let Some(interface_decl) =
-      definition_references.get(&interface_member_id)
-    {
-      let refs: Vec<i32> = interface_decl.references().to_vec();
-      if !refs.is_empty() {
-        references_to_transfer.push((impl_member_id, refs));
-      }
-    }
-  }
-
-  // Apply the transfers
-  for (impl_member_id, refs) in references_to_transfer {
-    if let Some(impl_decl) = definition_references.get_mut(&impl_member_id) {
-      for ref_id in refs {
-        impl_decl.add_reference_if_not_present(ref_id);
-      }
-    }
-  }
 }
 
 // ============================================================================
