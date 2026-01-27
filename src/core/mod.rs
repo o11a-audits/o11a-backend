@@ -304,6 +304,13 @@ pub enum TopicMetadata {
     kind: NamedTopicKind,
     name: String,
     references: Vec<topic::Topic>,
+    /// Variables that contribute to this variable's value (e.g., RHS of assignments,
+    /// function arguments that flow into parameters, return expression variables).
+    /// Only populated for variable declarations.
+    ancestors: Vec<topic::Topic>,
+    /// Variables whose values are derived from this variable.
+    /// Only populated for variable declarations.
+    descendants: Vec<topic::Topic>,
   },
   NamedMutableTopic {
     topic: topic::Topic,
@@ -313,6 +320,11 @@ pub enum TopicMetadata {
     references: Vec<topic::Topic>,
     /// The assignment or unary operation nodes that mutate this variable
     mutations: Vec<topic::Topic>,
+    /// Variables that contribute to this variable's value (e.g., RHS of assignments,
+    /// function arguments that flow into parameters, return expression variables).
+    ancestors: Vec<topic::Topic>,
+    /// Variables whose values are derived from this variable.
+    descendants: Vec<topic::Topic>,
   },
   UnnamedTopic {
     topic: topic::Topic,
@@ -350,6 +362,22 @@ impl TopicMetadata {
     match self {
       TopicMetadata::NamedTopic { references, .. }
       | TopicMetadata::NamedMutableTopic { references, .. } => references,
+      TopicMetadata::UnnamedTopic { .. } => &[],
+    }
+  }
+
+  pub fn ancestors(&self) -> &[topic::Topic] {
+    match self {
+      TopicMetadata::NamedTopic { ancestors, .. }
+      | TopicMetadata::NamedMutableTopic { ancestors, .. } => ancestors,
+      TopicMetadata::UnnamedTopic { .. } => &[],
+    }
+  }
+
+  pub fn descendants(&self) -> &[topic::Topic] {
+    match self {
+      TopicMetadata::NamedTopic { descendants, .. }
+      | TopicMetadata::NamedMutableTopic { descendants, .. } => descendants,
       TopicMetadata::UnnamedTopic { .. } => &[],
     }
   }
@@ -582,6 +610,8 @@ pub fn new_audit_data(
       kind: NamedTopicKind::Builtin,
       name: "keccak256".to_string(),
       references: Vec::new(),
+      ancestors: Vec::new(),
+      descendants: Vec::new(),
     },
   );
 
@@ -595,6 +625,8 @@ pub fn new_audit_data(
       kind: NamedTopicKind::Builtin,
       name: "type".to_string(),
       references: Vec::new(),
+      ancestors: Vec::new(),
+      descendants: Vec::new(),
     },
   );
 
@@ -608,6 +640,8 @@ pub fn new_audit_data(
       kind: NamedTopicKind::Builtin,
       name: "this".to_string(),
       references: Vec::new(),
+      ancestors: Vec::new(),
+      descendants: Vec::new(),
     },
   );
 

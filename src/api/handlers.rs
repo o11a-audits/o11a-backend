@@ -359,6 +359,8 @@ pub struct TopicMetadataResponse {
   pub sub_kind: Option<String>,
   pub scope: ScopeInfo,
   pub references: Vec<String>,
+  pub ancestors: Vec<String>,
+  pub descendants: Vec<String>,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub mutations: Option<Vec<String>>,
 }
@@ -455,6 +457,15 @@ fn topic_metadata_to_response(
   let references: Vec<String> =
     metadata.references().iter().map(|t| t.id.clone()).collect();
 
+  // Extract ancestors and descendants
+  let ancestors: Vec<String> =
+    metadata.ancestors().iter().map(|t| t.id.clone()).collect();
+  let descendants: Vec<String> = metadata
+    .descendants()
+    .iter()
+    .map(|t| t.id.clone())
+    .collect();
+
   let mutations = match metadata {
     crate::core::TopicMetadata::NamedMutableTopic { mutations, .. } => {
       Some(mutations.iter().map(|t| t.id.clone()).collect())
@@ -470,6 +481,8 @@ fn topic_metadata_to_response(
     sub_kind,
     scope: scope_info,
     references,
+    ancestors,
+    descendants,
     mutations,
   }
 }

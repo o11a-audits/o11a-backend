@@ -35,6 +35,9 @@ pub fn analyze(
   let first_pass_source_topics =
     first_pass(&ast_map, &audit_data.in_scope_files)?;
 
+  // Ancestry pass: collect variable ancestry relationships
+  let all_ancestors = ancestry_pass(&ast_map);
+
   // Tree shaking: Build in-scope dictionary by following references from
   // publicly visible declarations. Also builds a map of variable mutations.
   // Note: Interface references are already remapped to implementations in the AST
@@ -42,12 +45,18 @@ pub fn analyze(
   let (in_scope_source_topics, mutations_map) =
     tree_shake(&first_pass_source_topics)?;
 
+  // Filter ancestors to only in-scope variables and derive descendants
+  let (ancestors_map, descendants_map) =
+    filter_and_derive_descendants(&all_ancestors, &in_scope_source_topics);
+
   // Second pass: Build final data structures for in-scope declarations
   // Pass mutable references to audit_data's maps directly
   second_pass(
     &ast_map,
     &in_scope_source_topics,
     &mutations_map,
+    &ancestors_map,
+    &descendants_map,
     &mut audit_data.nodes,
     &mut audit_data.topic_metadata,
     &mut audit_data.function_properties,
@@ -372,6 +381,25 @@ fn first_pass(
   }
 
   Ok(first_pass_declarations)
+}
+
+/// Ancestry pass: Collects variable ancestry relationships from the AST.
+/// This traverses the AST to find assignments, initializations, function arguments,
+/// and return statements to determine which variables flow into which other variables.
+fn ancestry_pass(
+  ast_map: &std::collections::BTreeMap<core::ProjectPath, Vec<SolidityAST>>,
+) -> AncestorsMap {
+  let mut ancestors_map = AncestorsMap::new();
+
+  for (_path, asts) in ast_map {
+    for ast in asts {
+      for node in &ast.nodes {
+        collect_ancestry_from_node(node, None, &mut ancestors_map);
+      }
+    }
+  }
+
+  ancestors_map
 }
 
 fn process_first_pass_ast_nodes(
@@ -831,6 +859,8 @@ fn second_pass(
   ast_map: &BTreeMap<core::ProjectPath, Vec<SolidityAST>>,
   in_scope_source_topics: &BTreeMap<i32, InScopeDeclaration>,
   mutations_map: &BTreeMap<i32, Vec<i32>>,
+  ancestors_map: &AncestorsMap,
+  descendants_map: &DescendantsMap,
   nodes: &mut BTreeMap<topic::Topic, Node>,
   topic_metadata: &mut BTreeMap<topic::Topic, TopicMetadata>,
   function_properties: &mut BTreeMap<topic::Topic, FunctionModProperties>,
@@ -845,6 +875,8 @@ fn second_pass(
         false, // Parent is not in scope automatically - check each node
         in_scope_source_topics,
         mutations_map,
+        ancestors_map,
+        descendants_map,
         nodes,
         &core::Scope::Container {
           container: file_path.clone(),
@@ -867,6 +899,8 @@ fn process_second_pass_nodes(
   parent_in_scope: bool,
   in_scope_source_topics: &BTreeMap<i32, InScopeDeclaration>,
   mutations_map: &BTreeMap<i32, Vec<i32>>,
+  ancestors_map: &AncestorsMap,
+  descendants_map: &DescendantsMap,
   nodes: &mut BTreeMap<topic::Topic, Node>,
   scope: &Scope,
   topic_metadata: &mut BTreeMap<topic::Topic, TopicMetadata>,
@@ -899,6 +933,17 @@ fn process_second_pass_nodes(
         .map(|&id| topic::new_node_topic(&id))
         .collect();
 
+      // Build ancestor and descendant topics for this declaration
+      let ancestor_topics: Vec<topic::Topic> = ancestors_map
+        .get(&node_id)
+        .map(|ids| ids.iter().map(|&id| topic::new_node_topic(&id)).collect())
+        .unwrap_or_default();
+
+      let descendant_topics: Vec<topic::Topic> = descendants_map
+        .get(&node_id)
+        .map(|ids| ids.iter().map(|&id| topic::new_node_topic(&id)).collect())
+        .unwrap_or_default();
+
       // Check if this declaration has mutations (making it a NamedMutableTopic)
       let topic_metadata_entry = if let Some(mutation_node_ids) =
         mutations_map.get(&node_id)
@@ -928,6 +973,8 @@ fn process_second_pass_nodes(
           scope: scope.clone(),
           references: ref_topics,
           mutations: mutation_topics,
+          ancestors: ancestor_topics,
+          descendants: descendant_topics,
         }
       } else {
         TopicMetadata::NamedTopic {
@@ -936,6 +983,8 @@ fn process_second_pass_nodes(
           name: in_scope_topic_declaration.name().clone(),
           scope: scope.clone(),
           references: ref_topics,
+          ancestors: ancestor_topics,
+          descendants: descendant_topics,
         }
       };
 
@@ -1171,6 +1220,8 @@ fn process_second_pass_nodes(
         is_in_scope, // Children inherit parent's in-scope status
         in_scope_source_topics,
         mutations_map,
+        ancestors_map,
+        descendants_map,
         nodes,
         scope,
         topic_metadata,
@@ -1849,6 +1900,424 @@ fn process_tree_shake_declarations(
   visiting.remove(&node_id);
 
   Ok(())
+}
+
+// ============================================================================
+// Ancestry Pass
+// ============================================================================
+
+/// Maps variable node_id -> Vec of ancestor variable node_ids (direct ancestors only)
+pub type AncestorsMap = BTreeMap<i32, Vec<i32>>;
+
+/// Maps variable node_id -> Vec of descendant variable node_ids
+pub type DescendantsMap = BTreeMap<i32, Vec<i32>>;
+
+/// Context for tracking function return parameters during ancestry collection.
+/// Used when processing Return statements to link expression variables to return parameters.
+struct AncestryContext {
+  /// The return parameter node IDs for the current function being processed
+  return_parameter_ids: Vec<i32>,
+}
+
+/// Recursively collects ancestry relationships from a node and its children.
+fn collect_ancestry_from_node(
+  node: &ASTNode,
+  context: Option<&AncestryContext>,
+  ancestors_map: &mut AncestorsMap,
+) {
+  match node {
+    // Variable declaration with initializer (state variable or local)
+    ASTNode::VariableDeclaration {
+      node_id,
+      value: Some(initial_value),
+      ..
+    } => {
+      // Collect all variable references from the initial value expression
+      let ancestor_ids = collect_variable_refs_from_expression(initial_value);
+      add_ancestors(ancestors_map, *node_id, &ancestor_ids);
+
+      // Recurse into the initial value
+      collect_ancestry_from_node(initial_value, context, ancestors_map);
+    }
+
+    // Variable declaration statement (local variables with initializer)
+    ASTNode::VariableDeclarationStatement {
+      declarations,
+      initial_value: Some(init_value),
+      ..
+    } => {
+      // Check if this is a multi-return function call
+      if let ASTNode::FunctionCall {
+        referenced_return_declarations,
+        ..
+      } = init_value.as_ref()
+      {
+        if referenced_return_declarations.len() > 1
+          && declarations.len() == referenced_return_declarations.len()
+        {
+          // Multi-return case: pair each declaration with its corresponding return declaration
+          for (i, decl) in declarations.iter().enumerate() {
+            if let ASTNode::VariableDeclaration { node_id, .. } = decl {
+              // The return declaration is an ancestor of this variable
+              add_ancestors(
+                ancestors_map,
+                *node_id,
+                &[referenced_return_declarations[i]],
+              );
+            }
+          }
+          // Also recurse into the function call to process its arguments
+          collect_ancestry_from_node(init_value, context, ancestors_map);
+          // Recurse into declarations (they may have nested structures)
+          for decl in declarations {
+            collect_ancestry_from_node(decl, context, ancestors_map);
+          }
+          return;
+        }
+      }
+
+      // Single variable or single-return function call case
+      // Collect all variable references from the initial value
+      let ancestor_ids = collect_variable_refs_from_expression(init_value);
+
+      // Add ancestors to each declared variable
+      for decl in declarations {
+        if let ASTNode::VariableDeclaration { node_id, .. } = decl {
+          add_ancestors(ancestors_map, *node_id, &ancestor_ids);
+        }
+      }
+
+      // Recurse into initial value and declarations
+      collect_ancestry_from_node(init_value, context, ancestors_map);
+      for decl in declarations {
+        collect_ancestry_from_node(decl, context, ancestors_map);
+      }
+    }
+
+    // Assignment: RHS variables are ancestors of LHS base variable
+    // Also handles index access on LHS (e.g., myMap[key] = val)
+    ASTNode::Assignment {
+      left_hand_side,
+      right_hand_side,
+      ..
+    } => {
+      if let Some(target_var_id) =
+        extract_base_variable_reference(left_hand_side)
+      {
+        // Collect ancestors from RHS
+        let mut ancestor_ids =
+          collect_variable_refs_from_expression(right_hand_side);
+
+        // Also collect index expressions from LHS (for mappings/arrays)
+        collect_index_refs_from_lhs(left_hand_side, &mut ancestor_ids);
+
+        add_ancestors(ancestors_map, target_var_id, &ancestor_ids);
+      }
+
+      // Recurse into both sides
+      collect_ancestry_from_node(left_hand_side, context, ancestors_map);
+      collect_ancestry_from_node(right_hand_side, context, ancestors_map);
+    }
+
+    // Function call with Argument nodes: argument variables are ancestors of parameter variables
+    ASTNode::FunctionCall {
+      arguments,
+      expression,
+      ..
+    } => {
+      for arg in arguments {
+        if let ASTNode::Argument {
+          parameter: Some(param_identifier),
+          argument: arg_expr,
+          ..
+        } = arg
+        {
+          // The parameter identifier references the VariableDeclaration
+          if let ASTNode::Identifier {
+            referenced_declaration: param_var_id,
+            ..
+          } = param_identifier.as_ref()
+          {
+            let ancestor_ids = collect_variable_refs_from_expression(arg_expr);
+            add_ancestors(ancestors_map, *param_var_id, &ancestor_ids);
+          }
+        }
+        // Recurse into argument
+        collect_ancestry_from_node(arg, context, ancestors_map);
+      }
+
+      // Recurse into expression
+      collect_ancestry_from_node(expression, context, ancestors_map);
+    }
+
+    // Return statement: expression variables are ancestors of return parameter variables
+    ASTNode::Return {
+      expression: Some(return_expr),
+      ..
+    } => {
+      // We need the return parameters from context or look them up
+      // The function_return_parameters field is the node_id of the ParameterList
+      // We need to find the actual parameter VariableDeclarations
+      if let Some(ctx) = context {
+        let ancestor_ids = collect_variable_refs_from_expression(return_expr);
+
+        // Handle tuple returns: if return_expr is a TupleExpression, pair with return params
+        if let ASTNode::TupleExpression { components, .. } =
+          return_expr.as_ref()
+        {
+          if components.len() == ctx.return_parameter_ids.len() {
+            // Pair each component with its corresponding return parameter
+            for (i, component) in components.iter().enumerate() {
+              let comp_ancestors =
+                collect_variable_refs_from_expression(component);
+              add_ancestors(
+                ancestors_map,
+                ctx.return_parameter_ids[i],
+                &comp_ancestors,
+              );
+            }
+          } else {
+            // Fallback: all expression variables are ancestors of all return params
+            for &ret_param_id in &ctx.return_parameter_ids {
+              add_ancestors(ancestors_map, ret_param_id, &ancestor_ids);
+            }
+          }
+        } else {
+          // Single return value - all expression variables are ancestors of all return params
+          // (typically there's only one return param in this case)
+          for &ret_param_id in &ctx.return_parameter_ids {
+            add_ancestors(ancestors_map, ret_param_id, &ancestor_ids);
+          }
+        }
+      }
+      // Note: If we don't have context, we can't resolve the return parameters.
+      // This is handled by building context when entering functions.
+
+      // Still recurse into the return expression
+      collect_ancestry_from_node(return_expr, context, ancestors_map);
+    }
+
+    // Function definition: build context with return parameters and recurse
+    ASTNode::FunctionDefinition {
+      signature, body, ..
+    } => {
+      let return_param_ids = extract_return_parameter_ids(signature);
+      let func_context = AncestryContext {
+        return_parameter_ids: return_param_ids,
+      };
+
+      // Recurse into signature and body with the function context
+      collect_ancestry_from_node(signature, Some(&func_context), ancestors_map);
+      if let Some(body_node) = body {
+        collect_ancestry_from_node(
+          body_node,
+          Some(&func_context),
+          ancestors_map,
+        );
+      }
+    }
+
+    // Modifier definition: similar to function
+    ASTNode::ModifierDefinition {
+      signature, body, ..
+    } => {
+      // Modifiers don't have return parameters, but we still recurse
+      collect_ancestry_from_node(signature, context, ancestors_map);
+      collect_ancestry_from_node(body, context, ancestors_map);
+    }
+
+    // For all other nodes, just recurse into children
+    _ => {
+      for child in node.nodes() {
+        collect_ancestry_from_node(child, context, ancestors_map);
+      }
+    }
+  }
+}
+
+/// Extracts return parameter node IDs from a FunctionSignature
+fn extract_return_parameter_ids(signature: &ASTNode) -> Vec<i32> {
+  if let ASTNode::FunctionSignature {
+    return_parameters, ..
+  } = signature
+  {
+    if let ASTNode::ParameterList { parameters, .. } =
+      return_parameters.as_ref()
+    {
+      return parameters
+        .iter()
+        .filter_map(|p| {
+          if let ASTNode::VariableDeclaration { node_id, .. } = p {
+            Some(*node_id)
+          } else {
+            None
+          }
+        })
+        .collect();
+    }
+  }
+  Vec::new()
+}
+
+/// Collects all variable reference node IDs from an expression.
+/// Returns the referenced_declaration values (variable node IDs), not the expression node IDs.
+fn collect_variable_refs_from_expression(node: &ASTNode) -> Vec<i32> {
+  let mut refs = Vec::new();
+  collect_variable_refs_recursive(node, &mut refs);
+  refs
+}
+
+/// Recursive helper for collecting variable references
+fn collect_variable_refs_recursive(node: &ASTNode, refs: &mut Vec<i32>) {
+  match node {
+    ASTNode::Identifier {
+      referenced_declaration,
+      ..
+    }
+    | ASTNode::IdentifierPath {
+      referenced_declaration,
+      ..
+    } => {
+      if !refs.contains(referenced_declaration) {
+        refs.push(*referenced_declaration);
+      }
+    }
+
+    ASTNode::MemberAccess {
+      referenced_declaration: Some(ref_decl),
+      expression,
+      ..
+    } => {
+      if !refs.contains(ref_decl) {
+        refs.push(*ref_decl);
+      }
+      // Also recurse into the expression (e.g., for chained access)
+      collect_variable_refs_recursive(expression, refs);
+    }
+
+    ASTNode::MemberAccess {
+      referenced_declaration: None,
+      expression,
+      ..
+    } => {
+      // No direct reference, but recurse into expression
+      collect_variable_refs_recursive(expression, refs);
+    }
+
+    // Function calls: include the return declaration references
+    ASTNode::FunctionCall {
+      referenced_return_declarations,
+      expression,
+      arguments,
+      ..
+    } => {
+      // Add the return declarations as ancestors
+      for &ret_decl_id in referenced_return_declarations {
+        if !refs.contains(&ret_decl_id) {
+          refs.push(ret_decl_id);
+        }
+      }
+      // Recurse into expression and arguments
+      collect_variable_refs_recursive(expression, refs);
+      for arg in arguments {
+        collect_variable_refs_recursive(arg, refs);
+      }
+    }
+
+    // For other nodes, recurse into children
+    _ => {
+      for child in node.nodes() {
+        collect_variable_refs_recursive(child, refs);
+      }
+    }
+  }
+}
+
+/// Collects variable references from index expressions in the LHS of an assignment.
+/// For example, in `myMap[key1][key2] = val`, this collects key1 and key2.
+fn collect_index_refs_from_lhs(lhs: &ASTNode, refs: &mut Vec<i32>) {
+  match lhs {
+    ASTNode::IndexAccess {
+      base_expression,
+      index_expression,
+      ..
+    } => {
+      // Collect refs from the index expression
+      if let Some(index_expr) = index_expression {
+        let index_refs = collect_variable_refs_from_expression(index_expr);
+        for ref_id in index_refs {
+          if !refs.contains(&ref_id) {
+            refs.push(ref_id);
+          }
+        }
+      }
+      // Recurse into base expression for nested index access
+      collect_index_refs_from_lhs(base_expression, refs);
+    }
+    ASTNode::MemberAccess { expression, .. } => {
+      // For member access like `obj.field[key] = val`, recurse into expression
+      collect_index_refs_from_lhs(expression, refs);
+    }
+    _ => {}
+  }
+}
+
+/// Adds ancestor variable IDs to the ancestors map for a target variable.
+fn add_ancestors(
+  ancestors_map: &mut AncestorsMap,
+  target_id: i32,
+  ancestor_ids: &[i32],
+) {
+  if ancestor_ids.is_empty() {
+    return;
+  }
+
+  let entry = ancestors_map.entry(target_id).or_insert_with(Vec::new);
+  for &ancestor_id in ancestor_ids {
+    // Don't add self-references
+    if ancestor_id != target_id && !entry.contains(&ancestor_id) {
+      entry.push(ancestor_id);
+    }
+  }
+}
+
+/// Filters the ancestors map to only include in-scope variables and derives descendants.
+/// Returns both the filtered ancestors map and the derived descendants map.
+fn filter_and_derive_descendants(
+  ancestors_map: &AncestorsMap,
+  in_scope_declarations: &BTreeMap<i32, InScopeDeclaration>,
+) -> (AncestorsMap, DescendantsMap) {
+  let mut filtered_ancestors: AncestorsMap = BTreeMap::new();
+  let mut descendants: DescendantsMap = BTreeMap::new();
+
+  // Filter ancestors to only include in-scope variables
+  for (&var_id, ancestor_ids) in ancestors_map {
+    // Only include if the target variable is in scope
+    if !in_scope_declarations.contains_key(&var_id) {
+      continue;
+    }
+
+    // Filter ancestor IDs to only in-scope variables
+    let filtered_ancestor_ids: Vec<i32> = ancestor_ids
+      .iter()
+      .filter(|&&aid| in_scope_declarations.contains_key(&aid))
+      .copied()
+      .collect();
+
+    if !filtered_ancestor_ids.is_empty() {
+      filtered_ancestors.insert(var_id, filtered_ancestor_ids.clone());
+
+      // Build descendants: for each ancestor, this variable is a descendant
+      for ancestor_id in filtered_ancestor_ids {
+        descendants
+          .entry(ancestor_id)
+          .or_insert_with(Vec::new)
+          .push(var_id);
+      }
+    }
+  }
+
+  (filtered_ancestors, descendants)
 }
 
 #[cfg(test)]
