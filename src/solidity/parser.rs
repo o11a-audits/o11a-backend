@@ -829,6 +829,8 @@ pub enum ASTNode {
     state_mutability: FunctionStateMutability,
     virtual_: bool,
     visibility: FunctionVisibility,
+    /// For interface functions, points to the implementation's function/variable node ID
+    implementation_declaration: Option<i32>,
   },
   ModifierSignature {
     node_id: i32,
@@ -840,6 +842,8 @@ pub enum ASTNode {
     parameters: Box<ASTNode>,
     virtual_: bool,
     visibility: FunctionVisibility,
+    /// For interface modifiers, points to the implementation's modifier node ID
+    implementation_declaration: Option<i32>,
   },
 
   // Definition nodes
@@ -916,6 +920,9 @@ pub enum ASTNode {
     parameter_variable: Option<i32>,
     /// For interface parameters, points to the implementation's parameter node ID
     implementation_declaration: Option<i32>,
+    /// For public state variables that implement interface functions, the IDs of the
+    /// interface functions this variable's getter implements
+    base_functions: Vec<i32>,
   },
 
   // Directive nodes
@@ -2444,6 +2451,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       visibility,
       parameter_variable,
       implementation_declaration,
+      base_functions,
     } => ASTNode::VariableDeclaration {
       node_id: node_id,
       src_location: src_location,
@@ -2463,6 +2471,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       visibility: visibility,
       parameter_variable: parameter_variable,
       implementation_declaration: implementation_declaration,
+      base_functions: base_functions,
     },
     ASTNode::WhileStatement {
       node_id,
@@ -2525,6 +2534,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       state_mutability,
       virtual_,
       visibility,
+      implementation_declaration,
     } => ASTNode::FunctionSignature {
       node_id: node_id,
       src_location: src_location,
@@ -2543,6 +2553,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       state_mutability: state_mutability,
       virtual_: virtual_,
       visibility: visibility,
+      implementation_declaration,
     },
     ASTNode::FunctionDefinition {
       node_id,
@@ -2596,6 +2607,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       parameters,
       virtual_,
       visibility,
+      implementation_declaration,
     } => ASTNode::ModifierSignature {
       node_id: node_id,
       src_location: src_location,
@@ -2609,6 +2621,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       parameters: Box::new(node_to_stub(&parameters)),
       virtual_: virtual_,
       visibility: visibility,
+      implementation_declaration,
     },
     ASTNode::ModifierDefinition {
       node_id,
@@ -2894,6 +2907,29 @@ fn get_required_i32(
     })
 }
 
+fn get_optional_i32_vec(
+  val: &serde_json::Value,
+  field_name: &str,
+) -> Result<Vec<i32>, String> {
+  match val.get(field_name) {
+    Some(v) => {
+      if v.is_null() {
+        Ok(Vec::new())
+      } else {
+        v.as_array()
+          .ok_or_else(|| format!("Field '{}' is not an array", field_name))
+          .map(|arr| {
+            arr
+              .iter()
+              .filter_map(|item| item.as_i64().map(|n| n as i32))
+              .collect()
+          })
+      }
+    }
+    None => Ok(Vec::new()),
+  }
+}
+
 // Helper functions with node type context for better error messages
 fn get_required_i32_with_context(
   val: &serde_json::Value,
@@ -3051,6 +3087,7 @@ fn get_required_parameter_variable_declaration_vec_with_context(
         value,
         visibility,
         implementation_declaration,
+        base_functions,
         ..
       } => ASTNode::VariableDeclaration {
         node_id,
@@ -3068,6 +3105,7 @@ fn get_required_parameter_variable_declaration_vec_with_context(
         visibility,
         parameter_variable: context.signature_parent_node.get(),
         implementation_declaration,
+        base_functions,
       },
       _ => node,
     })
@@ -4343,6 +4381,8 @@ fn node_from_json(
         get_optional_node_with_context(val, "value", node_type_str, context)?;
       let visibility =
         get_required_enum_with_context(val, "visibility", node_type_str)?;
+      // baseFunctions contains IDs of interface functions this state variable implements
+      let base_functions = get_optional_i32_vec(val, "baseFunctions")?;
 
       Ok(ASTNode::VariableDeclaration {
         node_id,
@@ -4364,6 +4404,7 @@ fn node_from_json(
         parameter_variable: None,
         // Interface-to-implementation mapping is now applied during transform phase
         implementation_declaration: None,
+        base_functions,
       })
     }
     "WhileStatement" => {
@@ -4505,6 +4546,8 @@ fn node_from_json(
         state_mutability,
         virtual_,
         visibility,
+        // Set during transform phase for interface functions
+        implementation_declaration: None,
       };
 
       Ok(ASTNode::FunctionDefinition {
@@ -4597,6 +4640,8 @@ fn node_from_json(
         parameters,
         virtual_,
         visibility,
+        // Set during transform phase for interface modifiers
+        implementation_declaration: None,
       };
 
       Ok(ASTNode::ModifierDefinition {

@@ -64,6 +64,8 @@ pub struct FunctionSignatureInfo {
 pub struct StateVariableInfo {
   pub node_id: i32,
   pub name: String,
+  /// IDs of interface functions this state variable's getter implements
+  pub base_functions: Vec<i32>,
 }
 
 /// Context for the transform phase containing all collected definitions.
@@ -364,6 +366,7 @@ fn extract_contract_info(
         name,
         visibility,
         state_variable,
+        base_functions,
         ..
       } => {
         if *state_variable && *visibility == parser::VariableVisibility::Public
@@ -371,6 +374,7 @@ fn extract_contract_info(
           public_state_variables.push(StateVariableInfo {
             node_id: *var_id,
             name: name.clone(),
+            base_functions: base_functions.clone(),
           });
         }
       }
@@ -542,8 +546,16 @@ fn build_interface_member_map(
           member_map.insert(*iface_ret_id, *impl_ret_id);
         }
       }
-      // If no function match and the interface function has no parameters,
-      // try to match to a public state variable (getter)
+      // If no function match, try to match to a public state variable
+      // First check if any state variable's baseFunctions contains this interface function
+      else if let Some(state_var) = implementation
+        .public_state_variables
+        .iter()
+        .find(|sv| sv.base_functions.contains(&iface_func.node_id))
+      {
+        member_map.insert(iface_func.node_id, state_var.node_id);
+      }
+      // Fall back to name matching for state variables with no parameters
       else if iface_func.parameter_types.is_empty() {
         if let Some(state_var) = implementation
           .public_state_variables
@@ -609,6 +621,57 @@ fn transform_node(node: &mut ASTNode, context: &TransformContext) {
       }
     }
 
+    // Set implementation_declaration on interface FunctionSignatures
+    ASTNode::FunctionSignature {
+      referenced_id,
+      implementation_declaration,
+      parameters,
+      return_parameters,
+      modifiers,
+      documentation,
+      ..
+    } => {
+      // Check if this function has a mapping to an implementation
+      // Use referenced_id which points to the FunctionDefinition's node_id
+      if let Some(&impl_id) =
+        context.interface_to_implementation.get(referenced_id)
+      {
+        *implementation_declaration = Some(impl_id);
+      }
+
+      // Recurse into children
+      transform_node(parameters.as_mut(), context);
+      transform_node(return_parameters.as_mut(), context);
+      for modifier in modifiers.iter_mut() {
+        transform_node(modifier, context);
+      }
+      if let Some(doc) = documentation {
+        transform_node(doc.as_mut(), context);
+      }
+    }
+
+    // Set implementation_declaration on interface ModifierSignatures
+    ASTNode::ModifierSignature {
+      referenced_id,
+      implementation_declaration,
+      parameters,
+      documentation,
+      ..
+    } => {
+      // Check if this modifier has a mapping to an implementation
+      if let Some(&impl_id) =
+        context.interface_to_implementation.get(referenced_id)
+      {
+        *implementation_declaration = Some(impl_id);
+      }
+
+      // Recurse into children
+      transform_node(parameters.as_mut(), context);
+      if let Some(doc) = documentation {
+        transform_node(doc.as_mut(), context);
+      }
+    }
+
     // Set implementation_declaration on interface parameter VariableDeclarations
     ASTNode::VariableDeclaration {
       node_id,
@@ -629,6 +692,42 @@ fn transform_node(node: &mut ASTNode, context: &TransformContext) {
       if let Some(val) = value {
         transform_node(val.as_mut(), context);
       }
+    }
+
+    // Remap MemberAccess references from interface members to implementations
+    ASTNode::MemberAccess {
+      referenced_declaration,
+      expression,
+      ..
+    } => {
+      if let Some(ref_decl) = referenced_declaration {
+        if let Some(&impl_id) =
+          context.interface_to_implementation.get(ref_decl)
+        {
+          *referenced_declaration = Some(impl_id);
+        }
+      }
+
+      // Recurse into expression
+      transform_node(expression.as_mut(), context);
+    }
+
+    // Remap Identifier references from interface members to implementations
+    ASTNode::Identifier {
+      referenced_declaration,
+      ..
+    }
+    | ASTNode::IdentifierPath {
+      referenced_declaration,
+      ..
+    } => {
+      if let Some(&impl_id) = context
+        .interface_to_implementation
+        .get(referenced_declaration)
+      {
+        *referenced_declaration = impl_id;
+      }
+      // Identifier has no children to recurse into
     }
 
     // Recurse into all child nodes

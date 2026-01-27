@@ -1310,6 +1310,7 @@ fn do_node_to_source_text(
       visibility,
       state_mutability,
       virtual_,
+      implementation_declaration,
       ..
     } => {
       let virtual_str = if *virtual_ {
@@ -1333,6 +1334,11 @@ fn do_node_to_source_text(
           )
         )
       } else {
+        let referenced_id = if let Some(impl_id) = implementation_declaration {
+          impl_id
+        } else {
+          referenced_id
+        };
         format!(
           " {} {}",
           format_keyword(&function_kind_to_string(kind)),

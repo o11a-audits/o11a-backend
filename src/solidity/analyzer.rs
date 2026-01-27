@@ -1147,13 +1147,13 @@ fn process_second_pass_nodes(
     let child_nodes = node.nodes();
     if !child_nodes.is_empty() {
       let scope = match node {
+        // Do NOT add signature nodes to scope, it makes traversal annoying.
+        // Signature nodes can still be set to the containing statement
+        // of a reference, and can be rendered alongside the param definitions.
         ASTNode::SemanticBlock { node_id, .. }
         | ASTNode::ContractDefinition { node_id, .. }
-        | ASTNode::ContractSignature { node_id, .. }
         | ASTNode::FunctionDefinition { node_id, .. }
-        | ASTNode::FunctionSignature { node_id, .. }
         | ASTNode::ModifierDefinition { node_id, .. }
-        | ASTNode::ModifierSignature { node_id, .. }
         | ASTNode::StructDefinition { node_id, .. }
         | ASTNode::EnumDefinition { node_id, .. }
         | ASTNode::EventDefinition { node_id, .. }
