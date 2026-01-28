@@ -174,7 +174,7 @@ pub enum AST {
   Documentation(crate::documentation::parser::DocumentationAST),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Scope {
   Global,
   Container {
@@ -306,6 +306,68 @@ pub enum NamedTopicVisibility {
   External,
 }
 
+/// Groups references to a declaration by the contract where they occur.
+/// Contains both contract-level references (inheritance, using-for) and
+/// member-level references (inside functions/modifiers).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReferenceGroup {
+  /// The contract/interface/library where these references occur
+  contract: topic::Topic,
+  /// References at the contract scope level (inheritance, using-for directives, state variable types)
+  contract_references: Vec<topic::Topic>,
+  /// References within members of the contract (functions, modifiers)
+  member_references: Vec<MemberReferenceGroup>,
+}
+
+impl ReferenceGroup {
+  pub fn new(
+    contract: topic::Topic,
+    contract_references: Vec<topic::Topic>,
+    member_references: Vec<MemberReferenceGroup>,
+  ) -> Self {
+    Self {
+      contract,
+      contract_references,
+      member_references,
+    }
+  }
+
+  pub fn contract(&self) -> &topic::Topic {
+    &self.contract
+  }
+
+  pub fn contract_references(&self) -> &[topic::Topic] {
+    &self.contract_references
+  }
+
+  pub fn member_references(&self) -> &[MemberReferenceGroup] {
+    &self.member_references
+  }
+}
+
+/// Groups references within a single member (function/modifier) of a contract.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MemberReferenceGroup {
+  /// The function/modifier containing these references
+  member: topic::Topic,
+  /// References within this member
+  references: Vec<topic::Topic>,
+}
+
+impl MemberReferenceGroup {
+  pub fn new(member: topic::Topic, references: Vec<topic::Topic>) -> Self {
+    Self { member, references }
+  }
+
+  pub fn member(&self) -> &topic::Topic {
+    &self.member
+  }
+
+  pub fn references(&self) -> &[topic::Topic] {
+    &self.references
+  }
+}
+
 #[derive(Debug, Clone)]
 pub enum TopicMetadata {
   NamedTopic {
@@ -314,7 +376,7 @@ pub enum TopicMetadata {
     kind: NamedTopicKind,
     name: String,
     visibility: NamedTopicVisibility,
-    references: Vec<topic::Topic>,
+    references: Vec<ReferenceGroup>,
     /// Variables that contribute to this variable's value (e.g., RHS of assignments,
     /// function arguments that flow into parameters, return expression variables).
     /// Only populated for variable declarations.
@@ -329,7 +391,7 @@ pub enum TopicMetadata {
     kind: NamedMutableTopicKind,
     name: String,
     visibility: parser::VariableVisibility,
-    references: Vec<topic::Topic>,
+    references: Vec<ReferenceGroup>,
     /// The assignment or unary operation nodes that mutate this variable
     mutations: Vec<topic::Topic>,
     /// Variables that contribute to this variable's value (e.g., RHS of assignments,
@@ -370,7 +432,7 @@ impl TopicMetadata {
     }
   }
 
-  pub fn references(&self) -> &[topic::Topic] {
+  pub fn references(&self) -> &[ReferenceGroup] {
     match self {
       TopicMetadata::NamedTopic { references, .. }
       | TopicMetadata::NamedMutableTopic { references, .. } => references,

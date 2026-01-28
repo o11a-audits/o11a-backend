@@ -3,9 +3,9 @@ use foundry_compilers_artifacts::Visibility;
 use crate::core::topic;
 use crate::core::{self, UnnamedTopicKind};
 use crate::core::{
-  AST, DataContext, ElementaryType, FunctionModProperties, NamedTopicKind,
-  Node, RevertCondition, RevertConstraint, RevertConstraintKind, Scope,
-  SolidityType, TopicMetadata,
+  AST, DataContext, ElementaryType, FunctionModProperties,
+  MemberReferenceGroup, NamedTopicKind, Node, ReferenceGroup, RevertCondition,
+  RevertConstraint, RevertConstraintKind, Scope, SolidityType, TopicMetadata,
 };
 use crate::solidity::parser::{
   self, ASTNode, FunctionVisibility, SolidityAST, VariableVisibility,
@@ -50,6 +50,10 @@ pub fn analyze(
   // Filter ancestors to only in-scope variables and derive descendants
   let (ancestors_map, descendants_map) =
     filter_and_derive_descendants(&all_ancestors, &in_scope_source_topics);
+
+  // Populate nodes pass: Build the nodes map before second_pass
+  // This allows reference nodes to be looked up for sorting by source location
+  populate_nodes_pass(&ast_map, &in_scope_source_topics, &mut audit_data.nodes);
 
   // Second pass: Build final data structures for in-scope declarations
   // Pass mutable references to audit_data's maps directly
@@ -170,6 +174,20 @@ pub enum FirstPassDeclaration {
 pub struct ReferencedNode {
   statement_node: i32,
   referenced_node: i32,
+}
+
+/// A reference to a declaration with its scope context.
+/// Used to track where references occur for grouping and sorting.
+#[derive(Debug, Clone)]
+pub struct ScopedReference {
+  /// The node ID of the reference (statement/expression that references the declaration)
+  pub reference_node: i32,
+  /// The node ID of the containing component (contract/interface/library)
+  pub containing_component: i32,
+  /// The containing function/modifier, if the reference is within a member.
+  /// Some = reference is inside a function/modifier (member scope)
+  /// None = reference is at contract level (contract scope)
+  pub containing_member: Option<i32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -302,7 +320,7 @@ pub enum InScopeDeclaration {
     declaration_kind: NamedTopicKind,
     visibility: Visibility,
     name: String,
-    references: Vec<i32>,
+    references: Vec<ScopedReference>,
     revert_constraints: Vec<FirstPassRevertConstraint>,
     function_calls: Vec<i32>,
     variable_mutations: Vec<ReferencedNode>,
@@ -311,7 +329,7 @@ pub enum InScopeDeclaration {
     declaration_kind: NamedTopicKind,
     visibility: Visibility,
     name: String,
-    references: Vec<i32>,
+    references: Vec<ScopedReference>,
     base_contracts: Vec<ReferencedNode>,
     other_contracts: Vec<ReferencedNode>,
     public_members: Vec<i32>,
@@ -321,17 +339,20 @@ pub enum InScopeDeclaration {
     declaration_kind: NamedTopicKind,
     visibility: Visibility,
     name: String,
-    references: Vec<i32>,
+    references: Vec<ScopedReference>,
   },
 }
 
 impl InScopeDeclaration {
-  pub fn add_reference_if_not_present(&mut self, reference: i32) {
+  pub fn add_reference_if_not_present(&mut self, reference: ScopedReference) {
     match self {
       InScopeDeclaration::FunctionMod { references, .. }
       | InScopeDeclaration::Flat { references, .. }
       | InScopeDeclaration::Contract { references, .. } => {
-        if !references.contains(&reference) {
+        if !references
+          .iter()
+          .any(|r| r.reference_node == reference.reference_node)
+        {
           references.push(reference);
         }
       }
@@ -361,7 +382,7 @@ impl InScopeDeclaration {
   }
 
   /// Get the references for any declaration variant
-  pub fn references(&self) -> &[i32] {
+  pub fn references(&self) -> &[ScopedReference] {
     match self {
       InScopeDeclaration::FunctionMod { references, .. }
       | InScopeDeclaration::Contract { references, .. }
@@ -893,6 +914,177 @@ fn process_first_pass_ast_nodes(
   Ok(())
 }
 
+// ============================================================================
+// Populate Nodes Pass
+// ============================================================================
+
+/// Populates the nodes map by traversing all AST nodes that are in scope.
+/// This pass must run before second_pass so that reference nodes can be looked up
+/// for sorting by source location.
+fn populate_nodes_pass(
+  ast_map: &BTreeMap<core::ProjectPath, Vec<SolidityAST>>,
+  in_scope_source_topics: &BTreeMap<i32, InScopeDeclaration>,
+  nodes: &mut BTreeMap<topic::Topic, Node>,
+) {
+  for (_file_path, asts) in ast_map {
+    for ast in asts {
+      for node in &ast.nodes {
+        populate_nodes_recursive(node, false, in_scope_source_topics, nodes);
+      }
+    }
+  }
+}
+
+/// Recursively populates nodes for a subtree.
+/// If parent_in_scope is true, all nodes in the subtree are added.
+fn populate_nodes_recursive(
+  node: &ASTNode,
+  parent_in_scope: bool,
+  in_scope_source_topics: &BTreeMap<i32, InScopeDeclaration>,
+  nodes: &mut BTreeMap<topic::Topic, Node>,
+) {
+  let node_id = node.node_id();
+  let topic = topic::new_node_topic(&node_id);
+
+  // Check if this node is in scope
+  let is_declaration_in_scope = in_scope_source_topics.contains_key(&node_id);
+  let is_in_scope = parent_in_scope || is_declaration_in_scope;
+
+  if is_in_scope {
+    // Add the node with its children converted to stubs
+    let stubbed_node = Node::Solidity(parser::children_to_stubs(node.clone()));
+    nodes.insert(topic, stubbed_node);
+  }
+
+  // Recurse into children
+  for child in node.nodes() {
+    populate_nodes_recursive(child, is_in_scope, in_scope_source_topics, nodes);
+  }
+}
+
+/// Builds ReferenceGroup structs from ScopedReferences.
+/// Groups references by their scope, sorts references within groups by source location,
+/// and sorts groups by component name then member source location.
+///
+/// The scope for each reference is built from:
+/// Builds reference groups from scoped references.
+/// Groups references by:
+/// - containing_component (the contract where the reference occurs)
+/// - containing_member (Some = member scope, None = contract scope)
+///
+/// Returns a Vec<ReferenceGroup> where each group contains:
+/// - contract: the contract topic
+/// - contract_references: references at contract level (inheritance, using-for, etc.)
+/// - member_references: references within members, grouped by member
+fn build_reference_groups(
+  scoped_refs: &[ScopedReference],
+  nodes: &BTreeMap<topic::Topic, Node>,
+  in_scope_source_topics: &BTreeMap<i32, InScopeDeclaration>,
+) -> Vec<ReferenceGroup> {
+  // First, group by contract, then within each contract by member (or None for contract-level)
+  // contract_id -> (contract_refs, member_id -> refs)
+  let mut contract_groups: BTreeMap<
+    i32,
+    (Vec<topic::Topic>, BTreeMap<i32, Vec<topic::Topic>>),
+  > = BTreeMap::new();
+
+  for scoped_ref in scoped_refs {
+    let ref_topic = topic::new_node_topic(&scoped_ref.reference_node);
+    let contract_id = scoped_ref.containing_component;
+
+    let (contract_refs, member_groups) =
+      contract_groups.entry(contract_id).or_default();
+
+    match scoped_ref.containing_member {
+      Some(member_id) => {
+        // Member-level reference
+        member_groups.entry(member_id).or_default().push(ref_topic);
+      }
+      None => {
+        // Contract-level reference
+        contract_refs.push(ref_topic);
+      }
+    }
+  }
+
+  // Sort references within each group by source location
+  for (contract_refs, member_groups) in contract_groups.values_mut() {
+    // Sort contract-level references
+    contract_refs.sort_by(|a, b| {
+      let loc_a = get_source_location_start(a, nodes);
+      let loc_b = get_source_location_start(b, nodes);
+      loc_a.cmp(&loc_b)
+    });
+
+    // Sort references within each member group
+    for refs in member_groups.values_mut() {
+      refs.sort_by(|a, b| {
+        let loc_a = get_source_location_start(a, nodes);
+        let loc_b = get_source_location_start(b, nodes);
+        loc_a.cmp(&loc_b)
+      });
+    }
+  }
+
+  // Convert to Vec<ReferenceGroup>
+  let mut groups: Vec<ReferenceGroup> = contract_groups
+    .into_iter()
+    .map(|(contract_id, (contract_refs, member_groups))| {
+      let contract_topic = topic::new_node_topic(&contract_id);
+
+      // Build member reference groups, sorted by member source location
+      let mut member_references: Vec<MemberReferenceGroup> = member_groups
+        .into_iter()
+        .map(|(member_id, refs)| {
+          MemberReferenceGroup::new(topic::new_node_topic(&member_id), refs)
+        })
+        .collect();
+
+      // Sort member groups by member source location
+      member_references.sort_by(|a, b| {
+        let loc_a = get_source_location_start(a.member(), nodes);
+        let loc_b = get_source_location_start(b.member(), nodes);
+        loc_a.cmp(&loc_b)
+      });
+
+      ReferenceGroup::new(contract_topic, contract_refs, member_references)
+    })
+    .collect();
+
+  // Sort groups by contract name
+  groups.sort_by(|a, b| {
+    let name_a = get_contract_name(a.contract(), in_scope_source_topics);
+    let name_b = get_contract_name(b.contract(), in_scope_source_topics);
+    name_a.cmp(&name_b)
+  });
+
+  groups
+}
+
+/// Gets the source location start for a topic from the nodes map.
+fn get_source_location_start(
+  topic: &topic::Topic,
+  nodes: &BTreeMap<topic::Topic, Node>,
+) -> Option<usize> {
+  nodes.get(topic).and_then(|node| match node {
+    Node::Solidity(ast_node) => ast_node.src_location().start,
+    Node::Documentation(_) => None,
+  })
+}
+
+/// Gets the contract name from a topic for sorting.
+fn get_contract_name(
+  contract_topic: &topic::Topic,
+  in_scope_source_topics: &BTreeMap<i32, InScopeDeclaration>,
+) -> String {
+  if let Ok(node_id) = contract_topic.underlying_id() {
+    if let Some(decl) = in_scope_source_topics.get(&node_id) {
+      return decl.name().clone();
+    }
+  }
+  contract_topic.id().to_string()
+}
+
 /// Second pass: Parse each AST and build the final data structures for in-scope nodes
 /// This processes each AST one at a time, checking declarations for inclusion in the
 /// in-scope dictionary. When found, adds the node and all child nodes to the accumulating
@@ -968,12 +1160,12 @@ fn process_second_pass_nodes(
 
     // Process declarations only if they exist in in_scope_declarations
     if let Some(in_scope_topic_declaration) = in_scope_topic_declaration {
-      // Build references to this declaration
-      let ref_topics: Vec<topic::Topic> = in_scope_topic_declaration
-        .references()
-        .iter()
-        .map(|&id| topic::new_node_topic(&id))
-        .collect();
+      // Build reference groups for this declaration
+      let reference_groups = build_reference_groups(
+        in_scope_topic_declaration.references(),
+        nodes,
+        in_scope_source_topics,
+      );
 
       // Build ancestor and descendant topics for this declaration
       let ancestor_topics: Vec<topic::Topic> = ancestors_map
@@ -1016,7 +1208,7 @@ fn process_second_pass_nodes(
           ),
           name: in_scope_topic_declaration.name().clone(),
           scope: scope.clone(),
-          references: ref_topics,
+          references: reference_groups,
           mutations: mutation_topics,
           ancestors: ancestor_topics,
           descendants: descendant_topics,
@@ -1030,7 +1222,7 @@ fn process_second_pass_nodes(
           ),
           name: in_scope_topic_declaration.name().clone(),
           scope: scope.clone(),
-          references: ref_topics,
+          references: reference_groups,
           ancestors: ancestor_topics,
           descendants: descendant_topics,
         }
@@ -1780,6 +1972,7 @@ fn tree_shake(
       node_id,
       None, // No referencing node for root declarations
       ReferenceProcessingMethod::ProcessAllContractMembers, // Process all public members of in scope contracts
+      Some(node_id), // The contract itself is the current component
       first_pass_declarations,
       &mut in_scope_declarations,
       &mut mutations_map,
@@ -1793,8 +1986,9 @@ fn tree_shake(
 /// Recursively process a declaration and all its references
 fn process_tree_shake_declarations(
   node_id: i32,
-  referencing_node: Option<i32>, // The node that references this declaration
+  referencing_info: Option<ScopedReference>, // The reference with its scope context
   reference_processing_method: ReferenceProcessingMethod,
+  current_component: Option<i32>, // The component (contract/interface) we're processing from
   first_pass_declarations: &BTreeMap<i32, FirstPassDeclaration>,
   in_scope_declarations: &mut BTreeMap<i32, InScopeDeclaration>,
   mutations_map: &mut BTreeMap<i32, Vec<i32>>,
@@ -1809,8 +2003,8 @@ fn process_tree_shake_declarations(
 
   // If already processed, add this reference and return
   if let Some(in_scope_decl) = in_scope_declarations.get_mut(&node_id) {
-    if let Some(ref_node) = referencing_node {
-      in_scope_decl.add_reference_if_not_present(ref_node)
+    if let Some(ref_info) = referencing_info {
+      in_scope_decl.add_reference_if_not_present(ref_info)
     }
     return Ok(());
   }
@@ -1865,7 +2059,8 @@ fn process_tree_shake_declarations(
           .push(mutation.statement_node);
       }
 
-      let references = referencing_node.into_iter().collect();
+      let references: Vec<ScopedReference> =
+        referencing_info.into_iter().collect();
       InScopeDeclaration::FunctionMod {
         declaration_kind: declaration_kind.clone(),
         visibility: visibility.clone(),
@@ -1882,7 +2077,8 @@ fn process_tree_shake_declarations(
       name,
       ..
     } => {
-      let references = referencing_node.into_iter().collect();
+      let references: Vec<ScopedReference> =
+        referencing_info.into_iter().collect();
       InScopeDeclaration::Flat {
         declaration_kind: declaration_kind.clone(),
         visibility: visibility.clone(),
@@ -1899,7 +2095,8 @@ fn process_tree_shake_declarations(
       public_members,
       ..
     } => {
-      let references = referencing_node.into_iter().collect();
+      let references: Vec<ScopedReference> =
+        referencing_info.into_iter().collect();
       InScopeDeclaration::Contract {
         declaration_kind: declaration_kind.clone(),
         visibility: visibility.clone(),
@@ -1920,16 +2117,26 @@ fn process_tree_shake_declarations(
     FirstPassDeclaration::FunctionMod {
       referenced_nodes, ..
     } => {
-      for ref_node in referenced_nodes {
-        process_tree_shake_declarations(
-          ref_node.referenced_node,
-          Some(ref_node.statement_node), // Pass the semantic block that contains the reference
-          ReferenceProcessingMethod::Normal,
-          first_pass_declarations,
-          in_scope_declarations,
-          mutations_map,
-          visiting,
-        )?;
+      // References from within a function/modifier are at Member scope level
+      // The containing member is the current function/modifier (node_id)
+      // The containing component comes from current_component
+      if let Some(component_id) = current_component {
+        for ref_node in referenced_nodes {
+          process_tree_shake_declarations(
+            ref_node.referenced_node,
+            Some(ScopedReference {
+              reference_node: ref_node.statement_node,
+              containing_component: component_id,
+              containing_member: Some(node_id),
+            }),
+            ReferenceProcessingMethod::Normal,
+            current_component,
+            first_pass_declarations,
+            in_scope_declarations,
+            mutations_map,
+            visiting,
+          )?;
+        }
       }
     }
     FirstPassDeclaration::Contract {
@@ -1939,12 +2146,18 @@ fn process_tree_shake_declarations(
       referenced_nodes,
       ..
     } => {
-      // Process base contracts with BaseContract context
+      // For contracts, the current node_id IS the component
+      // Base contracts and other contract references are at contract scope level
       for base_contract_ref in base_contracts {
         process_tree_shake_declarations(
           base_contract_ref.referenced_node,
-          Some(base_contract_ref.statement_node), // This contract references the base contract
+          Some(ScopedReference {
+            reference_node: base_contract_ref.statement_node,
+            containing_component: node_id,
+            containing_member: None,
+          }),
           ReferenceProcessingMethod::ProcessAllContractMembers,
+          Some(base_contract_ref.referenced_node), // The base contract becomes the new component context
           first_pass_declarations,
           in_scope_declarations,
           mutations_map,
@@ -1952,12 +2165,17 @@ fn process_tree_shake_declarations(
         )?;
       }
 
-      // Process other contracts (using for, type references) with NoContext
+      // Process other contracts (using for, type references) at contract scope
       for other_contract_ref in other_contracts {
         process_tree_shake_declarations(
           other_contract_ref.referenced_node,
-          Some(other_contract_ref.statement_node), // This contract references the other contract
+          Some(ScopedReference {
+            reference_node: other_contract_ref.statement_node,
+            containing_component: node_id,
+            containing_member: None,
+          }),
           ReferenceProcessingMethod::Normal,
+          Some(node_id), // Stay in current component context
           first_pass_declarations,
           in_scope_declarations,
           mutations_map,
@@ -1965,12 +2183,17 @@ fn process_tree_shake_declarations(
         )?;
       }
 
-      // Process type references from state variable declarations
+      // Process type references from state variable declarations at contract scope
       for ref_node in referenced_nodes {
         process_tree_shake_declarations(
           ref_node.referenced_node,
-          Some(ref_node.statement_node), // The VariableDeclaration node references the type
+          Some(ScopedReference {
+            reference_node: ref_node.statement_node,
+            containing_component: node_id,
+            containing_member: None,
+          }),
           ReferenceProcessingMethod::Normal,
+          Some(node_id), // Stay in current component context
           first_pass_declarations,
           in_scope_declarations,
           mutations_map,
@@ -1978,7 +2201,8 @@ fn process_tree_shake_declarations(
         )?;
       }
 
-      // Process public members
+      // Process public members (no referencing info - these are root declarations)
+      // They belong to this contract (node_id)
       if reference_processing_method
         == ReferenceProcessingMethod::ProcessAllContractMembers
       {
@@ -1987,6 +2211,7 @@ fn process_tree_shake_declarations(
             public_member_id,
             None,
             ReferenceProcessingMethod::Normal,
+            Some(node_id), // The contract is the component context for its members
             first_pass_declarations,
             in_scope_declarations,
             mutations_map,

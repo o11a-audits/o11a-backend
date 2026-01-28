@@ -350,6 +350,19 @@ pub struct ScopeInfo {
 }
 
 #[derive(Debug, Serialize)]
+pub struct MemberReferenceGroupResponse {
+  pub member: String,
+  pub references: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ReferenceGroupResponse {
+  pub contract: String,
+  pub contract_references: Vec<String>,
+  pub member_references: Vec<MemberReferenceGroupResponse>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct TopicMetadataResponse {
   pub topic_id: String,
   #[serde(skip_serializing_if = "Option::is_none")]
@@ -360,20 +373,16 @@ pub struct TopicMetadataResponse {
   #[serde(skip_serializing_if = "Option::is_none")]
   pub visibility: Option<String>,
   pub scope: ScopeInfo,
-  pub references: Vec<String>,
+  pub references: Vec<ReferenceGroupResponse>,
   pub ancestors: Vec<String>,
   pub descendants: Vec<String>,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub mutations: Option<Vec<String>>,
 }
 
-// Helper function to convert TopicMetadata to TopicMetadataResponse
-fn topic_metadata_to_response(
-  topic: &crate::core::topic::Topic,
-  metadata: &crate::core::TopicMetadata,
-) -> TopicMetadataResponse {
-  // Extract scope information
-  let scope_info = match metadata.scope() {
+// Helper function to convert Scope to ScopeInfo
+fn scope_to_scope_info(scope: &crate::core::Scope) -> ScopeInfo {
+  match scope {
     crate::core::Scope::Global => ScopeInfo {
       scope_type: "Global".to_string(),
       container: None,
@@ -421,7 +430,16 @@ fn topic_metadata_to_response(
       member: Some(member.id.clone()),
       semantic_block: Some(semantic_block.id.clone()),
     },
-  };
+  }
+}
+
+// Helper function to convert TopicMetadata to TopicMetadataResponse
+fn topic_metadata_to_response(
+  topic: &crate::core::topic::Topic,
+  metadata: &crate::core::TopicMetadata,
+) -> TopicMetadataResponse {
+  // Extract scope information
+  let scope_info = scope_to_scope_info(metadata.scope());
 
   // Format the kind and sub_kind
   let (kind_str, sub_kind) = match metadata {
@@ -455,9 +473,31 @@ fn topic_metadata_to_response(
     crate::core::TopicMetadata::UnnamedTopic { .. } => None,
   };
 
-  // Extract references (only NamedTopics have references)
-  let references: Vec<String> =
-    metadata.references().iter().map(|t| t.id.clone()).collect();
+  // Extract references as ReferenceGroupResponse objects
+  let references: Vec<ReferenceGroupResponse> = metadata
+    .references()
+    .iter()
+    .map(|group| ReferenceGroupResponse {
+      contract: group.contract().id().to_string(),
+      contract_references: group
+        .contract_references()
+        .iter()
+        .map(|t| t.id().to_string())
+        .collect(),
+      member_references: group
+        .member_references()
+        .iter()
+        .map(|m| MemberReferenceGroupResponse {
+          member: m.member().id().to_string(),
+          references: m
+            .references()
+            .iter()
+            .map(|t| t.id().to_string())
+            .collect(),
+        })
+        .collect(),
+    })
+    .collect();
 
   // Extract ancestors and descendants
   let ancestors: Vec<String> =

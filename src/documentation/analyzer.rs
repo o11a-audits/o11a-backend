@@ -197,26 +197,15 @@ fn process_documentation_node(
       }
     }
 
-    DocumentationNode::InlineCode {
-      referenced_declaration,
-      ..
-    } => {
+    DocumentationNode::InlineCode { .. } => {
       // Add the inline code node
+      // Note: Documentation references are not tracked in ReferenceGroup since that
+      // structure is specifically for code references within contracts/members.
+      // Documentation links to code are tracked via the referenced_declaration field
+      // in the InlineCode node itself.
       audit_data
         .nodes
         .insert(topic.clone(), Node::Documentation(node.clone()));
-
-      // If there's a referenced declaration, add this as a reference to the NamedTopic
-      if let Some(solidity_topic) = referenced_declaration {
-        // Get the existing topic metadata and add this reference
-        if let Some(TopicMetadata::NamedTopic { references, .. }) =
-          audit_data.topic_metadata.get_mut(solidity_topic)
-        {
-          if !references.contains(&topic) {
-            references.push(topic.clone());
-          }
-        }
-      }
     }
 
     // For all other node types, just add them to the nodes map
