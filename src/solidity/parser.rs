@@ -934,6 +934,8 @@ pub enum ASTNode {
     /// For public state variables that implement interface functions, the IDs of the
     /// interface functions this variable's getter implements
     base_functions: Vec<i32>,
+    /// True if this variable is a struct field
+    struct_field: bool,
   },
 
   // Directive nodes
@@ -2465,6 +2467,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       parameter_variable,
       implementation_declaration,
       base_functions,
+      struct_field,
     } => ASTNode::VariableDeclaration {
       node_id: node_id,
       src_location: src_location,
@@ -2485,6 +2488,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       parameter_variable: parameter_variable,
       implementation_declaration: implementation_declaration,
       base_functions: base_functions,
+      struct_field: struct_field,
     },
     ASTNode::WhileStatement {
       node_id,
@@ -3119,6 +3123,64 @@ fn get_required_parameter_variable_declaration_vec_with_context(
         parameter_variable: context.signature_parent_node.get(),
         implementation_declaration,
         base_functions,
+        struct_field: false,
+      },
+      _ => node,
+    })
+    .collect();
+
+  Ok(updated_nodes)
+}
+
+fn get_required_struct_field_variable_declaration_vec_with_context(
+  val: &serde_json::Value,
+  field_name: &str,
+  node_type: &str,
+  context: &ParserContext,
+) -> Result<Vec<ASTNode>, String> {
+  let nodes = get_required_node_vec(val, field_name, context)
+    .map_err(|e| format!("Error parsing {} node: {}", node_type, e))?;
+
+  // Set struct_field to true for all VariableDeclaration nodes
+  let updated_nodes = nodes
+    .into_iter()
+    .map(|node| match node {
+      ASTNode::VariableDeclaration {
+        node_id,
+        src_location,
+        constant,
+        function_selector,
+        mutability,
+        name,
+        name_location,
+        scope,
+        state_variable,
+        storage_location,
+        type_name,
+        value,
+        visibility,
+        parameter_variable,
+        implementation_declaration,
+        base_functions,
+        ..
+      } => ASTNode::VariableDeclaration {
+        node_id,
+        src_location,
+        constant,
+        function_selector,
+        mutability,
+        name,
+        name_location,
+        scope,
+        state_variable,
+        storage_location,
+        type_name,
+        value,
+        visibility,
+        parameter_variable,
+        implementation_declaration,
+        base_functions,
+        struct_field: true,
       },
       _ => node,
     })
@@ -4428,6 +4490,8 @@ fn node_from_json(
         // Interface-to-implementation mapping is now applied during transform phase
         implementation_declaration: None,
         base_functions,
+        // This is set to true when parsed via get_required_struct_field_variable_declaration_vec_with_context
+        struct_field: false,
       })
     }
     "WhileStatement" => {
@@ -4675,12 +4739,13 @@ fn node_from_json(
       })
     }
     "StructDefinition" => {
-      let members = get_required_node_vec_with_context(
-        val,
-        "members",
-        node_type_str,
-        context,
-      )?;
+      let members =
+        get_required_struct_field_variable_declaration_vec_with_context(
+          val,
+          "members",
+          node_type_str,
+          context,
+        )?;
       let canonical_name =
         get_required_string_with_context(val, "canonicalName", node_type_str)?;
       let name = get_required_string_with_context(val, "name", node_type_str)?;

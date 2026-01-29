@@ -1027,6 +1027,7 @@ fn do_node_to_source_text(
       constant,
       parameter_variable,
       implementation_declaration,
+      struct_field,
       ..
     } => {
       // If this is a parameter variable and it's the target topic, format the
@@ -1095,6 +1096,8 @@ fn do_node_to_source_text(
         // Only render "let" for local variables that are not parameters or struct fields
         if *visibility == VariableVisibility::Internal
           && !ctx.omit_variable_declaration_let
+          && !struct_field
+          && parameter_variable.is_none()
         {
           parts.push(format_keyword("let"));
         }
