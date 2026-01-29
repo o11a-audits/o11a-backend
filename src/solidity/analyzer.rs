@@ -712,7 +712,7 @@ fn process_first_pass_ast_nodes(
         // Process entire function node to find references and revert constraints
         collect_references_and_statements(
           node,
-          None, // No semantic block context initially
+          None, // No containing block context initially
           &[],  // No enclosing if statements initially
           &mut referenced_nodes,
           &mut revert_constraints,
@@ -758,7 +758,7 @@ fn process_first_pass_ast_nodes(
         // Process entire modifier node to find references and revert constraints
         collect_references_and_statements(
           node,
-          None, // No semantic block context initially
+          None, // No containing block context initially
           &[],  // No enclosing if statements initially
           &mut referenced_nodes,
           &mut revert_constraints,
@@ -1605,18 +1605,25 @@ fn collect_potential_variable_refs_from_expression(
 
 fn collect_references_and_statements(
   node: &ASTNode,
-  current_semantic_block: Option<i32>,
+  current_containing_block: Option<i32>,
   enclosing_ifs: &[IfContext],
   referenced_nodes: &mut Vec<ReferencedNode>,
   revert_constraints: &mut Vec<FirstPassRevertConstraint>,
   function_calls: &mut Vec<i32>,
   variable_mutations: &mut Vec<ReferencedNode>,
 ) {
-  // Update current_semantic_block when entering a SemanticBlock
-  let semantic_block = match node {
+  // Update current_containing_block when entering a block-like node.
+  // This includes SemanticBlocks, FunctionSignatures, and VariableDeclarationStatements.
+  // For VariableDeclarationStatements, we use the first declaration's node_id so that
+  // references in the initial value share the same statement_node as the declaration itself.
+  let containing_block = match node {
     ASTNode::SemanticBlock { node_id, .. } => Some(*node_id),
     ASTNode::FunctionSignature { node_id, .. } => Some(*node_id),
-    _ => current_semantic_block,
+    ASTNode::VariableDeclarationStatement { declarations, .. } => {
+      // Use the first VariableDeclaration's node_id as the containing block
+      declarations.first().map(|decl| decl.node_id())
+    }
+    _ => current_containing_block,
   };
 
   match node {
@@ -1629,7 +1636,7 @@ fn collect_references_and_statements(
       referenced_declaration,
       ..
     } => {
-      if let Some(block_id) = semantic_block {
+      if let Some(block_id) = containing_block {
         referenced_nodes.push(ReferencedNode {
           statement_node: block_id,
           referenced_node: *referenced_declaration,
@@ -1642,7 +1649,7 @@ fn collect_references_and_statements(
       referenced_declaration: Some(referenced_declaration),
       ..
     } => {
-      if let Some(block_id) = semantic_block {
+      if let Some(block_id) = containing_block {
         referenced_nodes.push(ReferencedNode {
           statement_node: block_id,
           referenced_node: *referenced_declaration,
@@ -1661,7 +1668,7 @@ fn collect_references_and_statements(
       // Add references to the function's return parameter declarations
       // This links the function call to the return variable nodes, enabling
       // ancestry traversal through the return values
-      if let Some(block_id) = semantic_block {
+      if let Some(block_id) = containing_block {
         for &return_decl_id in referenced_return_declarations {
           referenced_nodes.push(ReferencedNode {
             statement_node: block_id,
@@ -1789,7 +1796,7 @@ fn collect_references_and_statements(
       // First, collect references from the condition itself
       collect_references_and_statements(
         condition,
-        semantic_block,
+        containing_block,
         enclosing_ifs,
         referenced_nodes,
         revert_constraints,
@@ -1813,7 +1820,7 @@ fn collect_references_and_statements(
       });
       collect_references_and_statements(
         true_body,
-        semantic_block,
+        containing_block,
         &true_branch_ifs,
         referenced_nodes,
         revert_constraints,
@@ -1831,7 +1838,7 @@ fn collect_references_and_statements(
         });
         collect_references_and_statements(
           false_branch,
-          semantic_block,
+          containing_block,
           &false_branch_ifs,
           referenced_nodes,
           revert_constraints,
@@ -1894,7 +1901,7 @@ fn collect_references_and_statements(
   for child in child_nodes {
     collect_references_and_statements(
       child,
-      semantic_block,
+      containing_block,
       enclosing_ifs,
       referenced_nodes,
       revert_constraints,
