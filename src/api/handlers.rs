@@ -374,6 +374,7 @@ pub struct TopicMetadataResponse {
   pub visibility: Option<String>,
   pub scope: ScopeInfo,
   pub references: Vec<ReferenceGroupResponse>,
+  pub expanded_references: Vec<ReferenceGroupResponse>,
   pub ancestors: Vec<String>,
   pub descendants: Vec<String>,
   pub relatives: Vec<String>,
@@ -474,31 +475,40 @@ fn topic_metadata_to_response(
     crate::core::TopicMetadata::UnnamedTopic { .. } => None,
   };
 
-  // Extract references as ReferenceGroupResponse objects
-  let references: Vec<ReferenceGroupResponse> = metadata
-    .references()
-    .iter()
-    .map(|group| ReferenceGroupResponse {
-      contract: group.contract().id().to_string(),
-      contract_references: group
-        .contract_references()
+  // Helper closure to convert ReferenceGroup to ReferenceGroupResponse
+  let convert_reference_groups =
+    |groups: &[crate::core::ReferenceGroup]| -> Vec<ReferenceGroupResponse> {
+      groups
         .iter()
-        .map(|t| t.id().to_string())
-        .collect(),
-      member_references: group
-        .member_references()
-        .iter()
-        .map(|m| MemberReferenceGroupResponse {
-          member: m.member().id().to_string(),
-          references: m
-            .references()
+        .map(|group| ReferenceGroupResponse {
+          contract: group.contract().id().to_string(),
+          contract_references: group
+            .contract_references()
             .iter()
             .map(|t| t.id().to_string())
             .collect(),
+          member_references: group
+            .member_references()
+            .iter()
+            .map(|m| MemberReferenceGroupResponse {
+              member: m.member().id().to_string(),
+              references: m
+                .references()
+                .iter()
+                .map(|t| t.id().to_string())
+                .collect(),
+            })
+            .collect(),
         })
-        .collect(),
-    })
-    .collect();
+        .collect()
+    };
+
+  // Extract references as ReferenceGroupResponse objects
+  let references = convert_reference_groups(metadata.references());
+
+  // Extract expanded_references as ReferenceGroupResponse objects
+  let expanded_references =
+    convert_reference_groups(metadata.expanded_references());
 
   // Extract ancestors, descendants, and relatives
   let ancestors: Vec<String> =
@@ -537,6 +547,7 @@ fn topic_metadata_to_response(
     visibility,
     scope: scope_info,
     references,
+    expanded_references,
     ancestors,
     descendants,
     relatives,

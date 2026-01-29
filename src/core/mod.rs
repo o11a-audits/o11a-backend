@@ -377,6 +377,10 @@ pub enum TopicMetadata {
     name: String,
     visibility: NamedTopicVisibility,
     references: Vec<ReferenceGroup>,
+    /// References derived from recursively traversing all ancestors and descendants.
+    /// Contains grouped references showing where all transitive ancestry-related
+    /// variables are declared/referenced.
+    expanded_references: Vec<ReferenceGroup>,
     /// Variables that contribute to this variable's value (e.g., RHS of assignments,
     /// function arguments that flow into parameters, return expression variables).
     /// Only populated for variable declarations.
@@ -396,6 +400,10 @@ pub enum TopicMetadata {
     name: String,
     visibility: parser::VariableVisibility,
     references: Vec<ReferenceGroup>,
+    /// References derived from recursively traversing all ancestors and descendants.
+    /// Contains grouped references showing where all transitive ancestry-related
+    /// variables are declared/referenced.
+    expanded_references: Vec<ReferenceGroup>,
     /// The assignment or unary operation nodes that mutate this variable
     mutations: Vec<topic::Topic>,
     /// Variables that contribute to this variable's value (e.g., RHS of assignments,
@@ -443,6 +451,20 @@ impl TopicMetadata {
     match self {
       TopicMetadata::NamedTopic { references, .. }
       | TopicMetadata::NamedMutableTopic { references, .. } => references,
+      TopicMetadata::UnnamedTopic { .. } => &[],
+    }
+  }
+
+  pub fn expanded_references(&self) -> &[ReferenceGroup] {
+    match self {
+      TopicMetadata::NamedTopic {
+        expanded_references,
+        ..
+      }
+      | TopicMetadata::NamedMutableTopic {
+        expanded_references,
+        ..
+      } => expanded_references,
       TopicMetadata::UnnamedTopic { .. } => &[],
     }
   }
@@ -700,6 +722,7 @@ pub fn new_audit_data(
       visibility: NamedTopicVisibility::Public,
       name: "keccak256".to_string(),
       references: Vec::new(),
+      expanded_references: Vec::new(),
       ancestors: Vec::new(),
       descendants: Vec::new(),
       relatives: Vec::new(),
@@ -717,6 +740,7 @@ pub fn new_audit_data(
       visibility: NamedTopicVisibility::Public,
       name: "type".to_string(),
       references: Vec::new(),
+      expanded_references: Vec::new(),
       ancestors: Vec::new(),
       descendants: Vec::new(),
       relatives: Vec::new(),
@@ -734,6 +758,7 @@ pub fn new_audit_data(
       visibility: NamedTopicVisibility::Public,
       name: "this".to_string(),
       references: Vec::new(),
+      expanded_references: Vec::new(),
       ancestors: Vec::new(),
       descendants: Vec::new(),
       relatives: Vec::new(),

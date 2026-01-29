@@ -977,11 +977,61 @@ fn populate_nodes_recursive(
 /// Groups references by their scope, sorts references within groups by source location,
 /// and sorts groups by component name then member source location.
 ///
-/// The scope for each reference is built from:
+/// Converts a Scope and node_id into a ScopedReference representing the declaration itself.
+/// Returns None for Global scope since it doesn't have a containing component.
+fn scope_to_self_reference(
+  scope: &Scope,
+  node_id: i32,
+) -> Option<ScopedReference> {
+  match scope {
+    Scope::Global => None,
+    Scope::Container { .. } => {
+      // Declaration is a contract/interface/library itself - it references itself
+      // with itself as the containing component
+      Some(ScopedReference {
+        reference_node: node_id,
+        containing_component: node_id,
+        containing_member: None,
+      })
+    }
+    Scope::Component { component, .. } => {
+      // Declaration is at contract level (e.g., state variable, function declaration)
+      Some(ScopedReference {
+        reference_node: node_id,
+        containing_component: component.underlying_id().ok()?,
+        containing_member: None,
+      })
+    }
+    Scope::Member {
+      component, member, ..
+    } => {
+      // Declaration is at member level (e.g., local variable, parameter)
+      Some(ScopedReference {
+        reference_node: node_id,
+        containing_component: component.underlying_id().ok()?,
+        containing_member: Some(member.underlying_id().ok()?),
+      })
+    }
+    Scope::SemanticBlock {
+      component, member, ..
+    } => {
+      // Declaration is within a semantic block, still scoped to the member
+      Some(ScopedReference {
+        reference_node: node_id,
+        containing_component: component.underlying_id().ok()?,
+        containing_member: Some(member.underlying_id().ok()?),
+      })
+    }
+  }
+}
+
 /// Builds reference groups from scoped references.
 /// Groups references by:
 /// - containing_component (the contract where the reference occurs)
 /// - containing_member (Some = member scope, None = contract scope)
+///
+/// If `self_reference` is provided, it is included in the appropriate group,
+/// representing the declaration itself as a reference.
 ///
 /// Returns a Vec<ReferenceGroup> where each group contains:
 /// - contract: the contract topic
@@ -989,6 +1039,7 @@ fn populate_nodes_recursive(
 /// - member_references: references within members, grouped by member
 fn build_reference_groups(
   scoped_refs: &[ScopedReference],
+  self_reference: Option<ScopedReference>,
   nodes: &BTreeMap<topic::Topic, Node>,
   in_scope_source_topics: &BTreeMap<i32, InScopeDeclaration>,
 ) -> Vec<ReferenceGroup> {
@@ -999,7 +1050,8 @@ fn build_reference_groups(
     (Vec<topic::Topic>, BTreeMap<i32, Vec<topic::Topic>>),
   > = BTreeMap::new();
 
-  for scoped_ref in scoped_refs {
+  // Helper to add a scoped reference to the groups
+  let mut add_to_groups = |scoped_ref: &ScopedReference| {
     let ref_topic = topic::new_node_topic(&scoped_ref.reference_node);
     let contract_id = scoped_ref.containing_component;
 
@@ -1016,6 +1068,16 @@ fn build_reference_groups(
         contract_refs.push(ref_topic);
       }
     }
+  };
+
+  // Add the self-reference first (if provided) so it appears at the declaration location
+  if let Some(ref self_ref) = self_reference {
+    add_to_groups(self_ref);
+  }
+
+  // Add all other references
+  for scoped_ref in scoped_refs {
+    add_to_groups(scoped_ref);
   }
 
   // Sort references within each group by source location
@@ -1136,6 +1198,16 @@ fn second_pass(
     }
   }
 
+  // Populate expanded_references after all topic_metadata entries exist
+  // (requires scopes from all ancestry-related topics)
+  populate_expanded_references(
+    topic_metadata,
+    ancestors_map,
+    descendants_map,
+    nodes,
+    in_scope_source_topics,
+  );
+
   Ok(())
 }
 
@@ -1174,9 +1246,11 @@ fn process_second_pass_nodes(
 
     // Process declarations only if they exist in in_scope_declarations
     if let Some(in_scope_topic_declaration) = in_scope_topic_declaration {
-      // Build reference groups for this declaration
+      // Build reference groups for this declaration, including the declaration itself
+      let self_reference = scope_to_self_reference(scope, node_id);
       let reference_groups = build_reference_groups(
         in_scope_topic_declaration.references(),
+        self_reference,
         nodes,
         in_scope_source_topics,
       );
@@ -1228,6 +1302,7 @@ fn process_second_pass_nodes(
           name: in_scope_topic_declaration.name().clone(),
           scope: scope.clone(),
           references: reference_groups,
+          expanded_references: vec![], // Populated after all metadata is built
           mutations: mutation_topics,
           ancestors: ancestor_topics,
           descendants: descendant_topics,
@@ -1243,6 +1318,7 @@ fn process_second_pass_nodes(
           name: in_scope_topic_declaration.name().clone(),
           scope: scope.clone(),
           references: reference_groups,
+          expanded_references: vec![], // Populated after all metadata is built
           ancestors: ancestor_topics,
           descendants: descendant_topics,
           relatives: relative_topics,
@@ -2641,7 +2717,40 @@ fn collect_variable_refs_from_expression(node: &ASTNode) -> Vec<i32> {
   refs
 }
 
-/// Recursive helper for collecting variable references
+/// Checks if a function call expression refers to a builtin function.
+/// Builtins have negative referenced_declaration values (e.g., keccak256 is -8).
+/// Also handles member access on builtins (e.g., abi.encode where abi is -1).
+fn is_builtin_function_call(expression: &ASTNode) -> bool {
+  match expression {
+    // Direct builtin call: keccak256(...)
+    ASTNode::Identifier {
+      referenced_declaration,
+      ..
+    } => *referenced_declaration < 0,
+
+    // Member access on builtin: abi.encode(...), abi.encodePacked(...)
+    ASTNode::MemberAccess { expression, .. } => {
+      // Check if the base expression is a builtin
+      match expression.as_ref() {
+        ASTNode::Identifier {
+          referenced_declaration,
+          ..
+        } => *referenced_declaration < 0,
+        _ => false,
+      }
+    }
+
+    _ => false,
+  }
+}
+
+/// Recursive helper for collecting variable references.
+///
+/// This function collects variables that directly contribute to a value, NOT variables
+/// that are used as function arguments or as the base of member access expressions.
+/// For example, in `x = Create2.computeAddress(salt, hash)`:
+/// - The ancestor of `x` is the return value of `computeAddress`, not `salt`, `hash`, or `Create2`
+/// - The arguments `salt` and `hash` flow into the function's parameters (handled separately)
 fn collect_variable_refs_recursive(node: &ASTNode, refs: &mut Vec<i32>) {
   match node {
     ASTNode::Identifier {
@@ -2657,45 +2766,57 @@ fn collect_variable_refs_recursive(node: &ASTNode, refs: &mut Vec<i32>) {
       }
     }
 
+    // MemberAccess: only capture the referenced member, don't recurse into base expression
+    // e.g., in `obj.field`, we want `field`, not `obj`
     ASTNode::MemberAccess {
       referenced_declaration: Some(ref_decl),
-      expression,
       ..
     } => {
       if !refs.contains(ref_decl) {
         refs.push(*ref_decl);
       }
-      // Also recurse into the expression (e.g., for chained access)
-      collect_variable_refs_recursive(expression, refs);
+      // Do NOT recurse into expression - the base object is not an ancestor of the member value
     }
 
     ASTNode::MemberAccess {
       referenced_declaration: None,
-      expression,
       ..
     } => {
-      // No direct reference, but recurse into expression
-      collect_variable_refs_recursive(expression, refs);
+      // No direct reference and no recursion needed
     }
 
-    // Function calls: include the return declaration references
+    // Function calls: for regular functions, only include the return declaration references
+    // and do NOT recurse into arguments - they flow into parameters, not the result.
+    // However, for builtin functions (negative referenced_declaration), we cannot trace
+    // through the function body, so we treat arguments as direct ancestors of the result.
     ASTNode::FunctionCall {
       referenced_return_declarations,
-      expression,
       arguments,
+      expression,
       ..
     } => {
-      // Add the return declarations as ancestors
-      for &ret_decl_id in referenced_return_declarations {
-        if !refs.contains(&ret_decl_id) {
-          refs.push(ret_decl_id);
+      // Check if this is a builtin function call
+      let is_builtin = is_builtin_function_call(expression);
+
+      if is_builtin {
+        // For builtins, recurse into arguments since we can't trace through the function body
+        for arg in arguments {
+          collect_variable_refs_recursive(arg, refs);
         }
+      } else {
+        // For regular functions, add the return declarations as ancestors
+        for &ret_decl_id in referenced_return_declarations {
+          if !refs.contains(&ret_decl_id) {
+            refs.push(ret_decl_id);
+          }
+        }
+        // Do NOT recurse into expression or arguments for regular functions
       }
-      // Recurse into expression and arguments
-      collect_variable_refs_recursive(expression, refs);
-      for arg in arguments {
-        collect_variable_refs_recursive(arg, refs);
-      }
+    }
+
+    // TypeConversion: recurse into the argument being converted
+    ASTNode::TypeConversion { argument, .. } => {
+      collect_variable_refs_recursive(argument, refs);
     }
 
     // For other nodes, recurse into children
@@ -2778,6 +2899,140 @@ fn add_relatives_bidirectional(
     for &left_id in left_ids {
       if left_id != right_id && !entry.contains(&left_id) {
         entry.push(left_id);
+      }
+    }
+  }
+}
+
+/// Recursively collects all ancestors and descendants for a given node.
+/// Returns a set of unique node IDs (excluding the starting node itself).
+/// Uses a visited set to avoid infinite recursion from circular dependencies.
+fn collect_recursive_ancestry(
+  start_node_id: i32,
+  ancestors_map: &AncestorsMap,
+  descendants_map: &DescendantsMap,
+) -> HashSet<i32> {
+  let mut result = HashSet::new();
+  let mut visited = HashSet::new();
+
+  // Collect recursive ancestors
+  collect_ancestry_in_direction(
+    start_node_id,
+    ancestors_map,
+    &mut result,
+    &mut visited,
+  );
+
+  // Reset visited for descendants traversal (but keep results)
+  visited.clear();
+
+  // Collect recursive descendants
+  collect_ancestry_in_direction(
+    start_node_id,
+    descendants_map,
+    &mut result,
+    &mut visited,
+  );
+
+  // Remove self if present
+  result.remove(&start_node_id);
+
+  result
+}
+
+/// Helper function to recursively collect related nodes in one direction
+/// (either ancestors or descendants).
+fn collect_ancestry_in_direction(
+  node_id: i32,
+  direction_map: &BTreeMap<i32, Vec<i32>>,
+  result: &mut HashSet<i32>,
+  visited: &mut HashSet<i32>,
+) {
+  // Avoid infinite recursion from cycles
+  if visited.contains(&node_id) {
+    return;
+  }
+  visited.insert(node_id);
+
+  if let Some(related_ids) = direction_map.get(&node_id) {
+    for &related_id in related_ids {
+      result.insert(related_id);
+      // Recurse to get transitive relationships
+      collect_ancestry_in_direction(related_id, direction_map, result, visited);
+    }
+  }
+}
+
+/// Populates the expanded_references field for all TopicMetadata entries.
+/// This must be called after all TopicMetadata entries have been created,
+/// as it needs access to the scopes of all ancestry-related topics.
+fn populate_expanded_references(
+  topic_metadata: &mut BTreeMap<topic::Topic, TopicMetadata>,
+  ancestors_map: &AncestorsMap,
+  descendants_map: &DescendantsMap,
+  nodes: &BTreeMap<topic::Topic, Node>,
+  in_scope_source_topics: &BTreeMap<i32, InScopeDeclaration>,
+) {
+  // First, collect all scopes from existing topic_metadata
+  let scope_map: BTreeMap<i32, Scope> = topic_metadata
+    .iter()
+    .filter_map(|(topic, metadata)| {
+      let node_id = topic.underlying_id().ok()?;
+      Some((node_id, metadata.scope().clone()))
+    })
+    .collect();
+
+  // Collect expanded references for each topic before mutating
+  let expanded_refs_map: BTreeMap<topic::Topic, Vec<ReferenceGroup>> =
+    topic_metadata
+      .iter()
+      .filter_map(|(topic, _metadata)| {
+        let node_id = topic.underlying_id().ok()?;
+
+        // Get recursive ancestry (all ancestors and descendants)
+        let recursive_ancestry =
+          collect_recursive_ancestry(node_id, ancestors_map, descendants_map);
+
+        // Build ScopedReferences from ancestry using scope_map
+        let scoped_refs: Vec<ScopedReference> = recursive_ancestry
+          .iter()
+          .filter_map(|&rel_id| {
+            let scope = scope_map.get(&rel_id)?;
+            scope_to_self_reference(scope, rel_id)
+          })
+          .collect();
+
+        // Build reference groups (no self-reference for expanded)
+        let expanded_refs = build_reference_groups(
+          &scoped_refs,
+          None,
+          nodes,
+          in_scope_source_topics,
+        );
+
+        Some((topic.clone(), expanded_refs))
+      })
+      .collect();
+
+  // Now update each metadata with expanded_references
+  for (topic, metadata) in topic_metadata.iter_mut() {
+    if let Some(expanded_refs) = expanded_refs_map.get(topic) {
+      match metadata {
+        TopicMetadata::NamedTopic {
+          expanded_references,
+          ..
+        } => {
+          *expanded_references = expanded_refs.clone();
+        }
+        TopicMetadata::NamedMutableTopic {
+          expanded_references,
+          ..
+        } => {
+          *expanded_references = expanded_refs.clone();
+        }
+        TopicMetadata::UnnamedTopic { .. } => {
+          // No expanded_references for unnamed topics
+        }
       }
     }
   }
