@@ -43,7 +43,7 @@ pub fn node_to_source_text(
   let ctx = Context {
     target_topic: new_node_topic(&node.node_id()),
     omit_variable_declaration_let: false,
-    format_parameter_variable_as_signature: true,
+    format_parameter_variable_as_signature: false,
   };
 
   format!(

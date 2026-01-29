@@ -2993,16 +2993,34 @@ fn populate_expanded_references(
         let recursive_ancestry =
           collect_recursive_ancestry(node_id, ancestors_map, descendants_map);
 
-        // Build ScopedReferences from ancestry using scope_map
-        let scoped_refs: Vec<ScopedReference> = recursive_ancestry
-          .iter()
-          .filter_map(|&rel_id| {
-            let scope = scope_map.get(&rel_id)?;
-            scope_to_self_reference(scope, rel_id)
-          })
-          .collect();
+        // Build ScopedReferences from ancestry:
+        // 1. The declaration itself (self-reference) for each ancestor/descendant
+        // 2. All references to each ancestor/descendant
+        // Use a set to track seen reference_node IDs for deduplication
+        let mut seen_refs: HashSet<i32> = HashSet::new();
+        let mut scoped_refs: Vec<ScopedReference> = Vec::new();
 
-        // Build reference groups (no self-reference for expanded)
+        for &rel_id in &recursive_ancestry {
+          // Add the declaration's self-reference (if not global)
+          if let Some(scope) = scope_map.get(&rel_id) {
+            if let Some(self_ref) = scope_to_self_reference(scope, rel_id) {
+              if seen_refs.insert(self_ref.reference_node) {
+                scoped_refs.push(self_ref);
+              }
+            }
+          }
+
+          // Add all references to this ancestor/descendant
+          if let Some(in_scope_decl) = in_scope_source_topics.get(&rel_id) {
+            for reference in in_scope_decl.references() {
+              if seen_refs.insert(reference.reference_node) {
+                scoped_refs.push(reference.clone());
+              }
+            }
+          }
+        }
+
+        // Build reference groups (no self-reference for the subject itself)
         let expanded_refs = build_reference_groups(
           &scoped_refs,
           None,
