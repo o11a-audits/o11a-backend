@@ -1124,11 +1124,174 @@ fn build_reference_groups(
     })
     .collect();
 
-  // Sort groups by contract name
+  // Sort groups: subject's contract first, then by contract name
+  let subject_contract_id = self_reference.map(|r| r.containing_component);
   groups.sort_by(|a, b| {
+    let id_a = a.contract().underlying_id().ok();
+    let id_b = b.contract().underlying_id().ok();
+
+    // Subject's contract comes first
+    let is_subject_a = subject_contract_id == id_a;
+    let is_subject_b = subject_contract_id == id_b;
+
+    if is_subject_a != is_subject_b {
+      return is_subject_b.cmp(&is_subject_a);
+    }
+
+    // Otherwise sort by contract name
     let name_a = get_contract_name(a.contract(), in_scope_source_topics);
     let name_b = get_contract_name(b.contract(), in_scope_source_topics);
     name_a.cmp(&name_b)
+  });
+
+  groups
+}
+
+/// Builds reference groups for expanded_references, sorted by ancestor/descendant counts.
+/// Contracts with only ancestors appear first (sorted by fewest ancestors),
+/// then contracts with both, then contracts with only descendants (sorted by most descendants).
+fn build_expanded_reference_groups(
+  scoped_refs: &[ScopedReference],
+  ancestors: &HashSet<i32>,
+  descendants: &HashSet<i32>,
+  declaration_scopes: &BTreeMap<i32, Scope>,
+  nodes: &BTreeMap<topic::Topic, Node>,
+) -> Vec<ReferenceGroup> {
+  // Track ancestor/descendant counts per contract
+  // contract_id -> (ancestor_count, descendant_count)
+  let mut contract_ancestry_counts: BTreeMap<i32, (usize, usize)> =
+    BTreeMap::new();
+
+  // Helper to extract component ID from a Scope
+  let get_component_id = |scope: &Scope| -> Option<i32> {
+    match scope {
+      Scope::Global | Scope::Container { .. } => None,
+      Scope::Component { component, .. }
+      | Scope::Member { component, .. }
+      | Scope::SemanticBlock { component, .. } => {
+        component.underlying_id().ok()
+      }
+    }
+  };
+
+  // First pass: count ancestors and descendants per contract
+  // We need to look at which variable declarations are in each contract
+  for &var_id in ancestors.iter().chain(descendants.iter()) {
+    if let Some(scope) = declaration_scopes.get(&var_id) {
+      if let Some(contract_id) = get_component_id(scope) {
+        let (ancestor_count, descendant_count) =
+          contract_ancestry_counts.entry(contract_id).or_default();
+        if ancestors.contains(&var_id) {
+          *ancestor_count += 1;
+        }
+        if descendants.contains(&var_id) {
+          *descendant_count += 1;
+        }
+      }
+    }
+  }
+
+  // Group references by contract, then by member
+  // contract_id -> (contract_refs, member_id -> refs)
+  let mut contract_groups: BTreeMap<
+    i32,
+    (Vec<topic::Topic>, BTreeMap<i32, Vec<topic::Topic>>),
+  > = BTreeMap::new();
+
+  // Helper to add a scoped reference to the groups
+  let mut add_to_groups = |scoped_ref: &ScopedReference| {
+    let ref_topic = topic::new_node_topic(&scoped_ref.reference_node);
+    let contract_id = scoped_ref.containing_component;
+
+    let (contract_refs, member_groups) =
+      contract_groups.entry(contract_id).or_default();
+
+    match scoped_ref.containing_member {
+      Some(member_id) => {
+        member_groups.entry(member_id).or_default().push(ref_topic);
+      }
+      None => {
+        contract_refs.push(ref_topic);
+      }
+    }
+  };
+
+  for scoped_ref in scoped_refs {
+    add_to_groups(scoped_ref);
+  }
+
+  // Sort references within each group by source location
+  for (contract_refs, member_groups) in contract_groups.values_mut() {
+    contract_refs.sort_by(|a, b| {
+      let loc_a = get_source_location_start(a, nodes);
+      let loc_b = get_source_location_start(b, nodes);
+      loc_a.cmp(&loc_b)
+    });
+
+    for refs in member_groups.values_mut() {
+      refs.sort_by(|a, b| {
+        let loc_a = get_source_location_start(a, nodes);
+        let loc_b = get_source_location_start(b, nodes);
+        loc_a.cmp(&loc_b)
+      });
+    }
+  }
+
+  // Convert to Vec<ReferenceGroup>
+  let mut groups: Vec<ReferenceGroup> = contract_groups
+    .into_iter()
+    .map(|(contract_id, (contract_refs, member_groups))| {
+      let contract_topic = topic::new_node_topic(&contract_id);
+
+      let mut member_references: Vec<MemberReferenceGroup> = member_groups
+        .into_iter()
+        .map(|(member_id, refs)| {
+          MemberReferenceGroup::new(topic::new_node_topic(&member_id), refs)
+        })
+        .collect();
+
+      member_references.sort_by(|a, b| {
+        let loc_a = get_source_location_start(a.member(), nodes);
+        let loc_b = get_source_location_start(b.member(), nodes);
+        loc_a.cmp(&loc_b)
+      });
+
+      ReferenceGroup::new(contract_topic, contract_refs, member_references)
+    })
+    .collect();
+
+  // Sort groups by ancestry:
+  // 1. Contracts with ancestors (sorted by fewest ancestors first)
+  // 2. Contracts with only descendants (sorted by most descendants first)
+  groups.sort_by(|a, b| {
+    let id_a = a.contract().underlying_id().unwrap_or(0);
+    let id_b = b.contract().underlying_id().unwrap_or(0);
+
+    let (ancestors_a, descendants_a) = contract_ancestry_counts
+      .get(&id_a)
+      .copied()
+      .unwrap_or((0, 0));
+    let (ancestors_b, descendants_b) = contract_ancestry_counts
+      .get(&id_b)
+      .copied()
+      .unwrap_or((0, 0));
+
+    // Primary sort: contracts with ancestors come before contracts without
+    let has_ancestors_a = ancestors_a > 0;
+    let has_ancestors_b = ancestors_b > 0;
+
+    if has_ancestors_a != has_ancestors_b {
+      // Contracts with ancestors come first
+      return has_ancestors_b.cmp(&has_ancestors_a);
+    }
+
+    if has_ancestors_a {
+      // Both have ancestors: sort by fewest ancestors first
+      ancestors_a.cmp(&ancestors_b)
+    } else {
+      // Neither has ancestors (only descendants): sort by most descendants first
+      descendants_b.cmp(&descendants_a)
+    }
   });
 
   groups
@@ -2914,37 +3077,48 @@ fn add_relatives_bidirectional(
 /// Recursively collects all ancestors and descendants for a given node.
 /// Returns a set of unique node IDs (excluding the starting node itself).
 /// Uses a visited set to avoid infinite recursion from circular dependencies.
+/// Result of collecting recursive ancestry, with ancestors and descendants tracked separately
+struct RecursiveAncestry {
+  ancestors: HashSet<i32>,
+  descendants: HashSet<i32>,
+}
+
 fn collect_recursive_ancestry(
   start_node_id: i32,
   ancestors_map: &AncestorsMap,
   descendants_map: &DescendantsMap,
-) -> HashSet<i32> {
-  let mut result = HashSet::new();
+) -> RecursiveAncestry {
+  let mut ancestors = HashSet::new();
+  let mut descendants = HashSet::new();
   let mut visited = HashSet::new();
 
   // Collect recursive ancestors
   collect_ancestry_in_direction(
     start_node_id,
     ancestors_map,
-    &mut result,
+    &mut ancestors,
     &mut visited,
   );
 
-  // Reset visited for descendants traversal (but keep results)
+  // Reset visited for descendants traversal
   visited.clear();
 
   // Collect recursive descendants
   collect_ancestry_in_direction(
     start_node_id,
     descendants_map,
-    &mut result,
+    &mut descendants,
     &mut visited,
   );
 
   // Remove self if present
-  result.remove(&start_node_id);
+  ancestors.remove(&start_node_id);
+  descendants.remove(&start_node_id);
 
-  result
+  RecursiveAncestry {
+    ancestors,
+    descendants,
+  }
 }
 
 /// Helper function to recursively collect related nodes in one direction
@@ -2996,8 +3170,8 @@ fn populate_expanded_references(
       .filter_map(|(topic, _metadata)| {
         let node_id = topic.underlying_id().ok()?;
 
-        // Get recursive ancestry (all ancestors and descendants)
-        let recursive_ancestry =
+        // Get recursive ancestry (ancestors and descendants tracked separately)
+        let ancestry =
           collect_recursive_ancestry(node_id, ancestors_map, descendants_map);
 
         // Build ScopedReferences from ancestry:
@@ -3007,7 +3181,15 @@ fn populate_expanded_references(
         let mut seen_refs: HashSet<i32> = HashSet::new();
         let mut scoped_refs: Vec<ScopedReference> = Vec::new();
 
-        for &rel_id in &recursive_ancestry {
+        // Process all ancestors and descendants
+        let all_related: HashSet<i32> = ancestry
+          .ancestors
+          .iter()
+          .chain(ancestry.descendants.iter())
+          .copied()
+          .collect();
+
+        for &rel_id in &all_related {
           // Add the declaration's self-reference (if not global)
           if let Some(scope) = scope_map.get(&rel_id) {
             if let Some(self_ref) = scope_to_self_reference(scope, rel_id) {
@@ -3027,12 +3209,13 @@ fn populate_expanded_references(
           }
         }
 
-        // Build reference groups (no self-reference for the subject itself)
-        let expanded_refs = build_reference_groups(
+        // Build reference groups with ancestry-aware sorting
+        let expanded_refs = build_expanded_reference_groups(
           &scoped_refs,
-          None,
+          &ancestry.ancestors,
+          &ancestry.descendants,
+          &scope_map,
           nodes,
-          in_scope_source_topics,
         );
 
         Some((topic.clone(), expanded_refs))
