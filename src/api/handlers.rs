@@ -376,6 +376,7 @@ pub struct TopicMetadataResponse {
   pub references: Vec<ReferenceGroupResponse>,
   pub ancestors: Vec<String>,
   pub descendants: Vec<String>,
+  pub relatives: Vec<String>,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub mutations: Option<Vec<String>>,
 }
@@ -499,7 +500,7 @@ fn topic_metadata_to_response(
     })
     .collect();
 
-  // Extract ancestors and descendants
+  // Extract ancestors, descendants, and relatives
   let ancestors: Vec<String> =
     metadata.ancestors().iter().map(|t| t.id.clone()).collect();
   let descendants: Vec<String> = metadata
@@ -507,6 +508,8 @@ fn topic_metadata_to_response(
     .iter()
     .map(|t| t.id.clone())
     .collect();
+  let relatives: Vec<String> =
+    metadata.relatives().iter().map(|t| t.id.clone()).collect();
 
   let mutations = match metadata {
     crate::core::TopicMetadata::NamedMutableTopic { mutations, .. } => {
@@ -536,6 +539,7 @@ fn topic_metadata_to_response(
     references,
     ancestors,
     descendants,
+    relatives,
     mutations,
   }
 }

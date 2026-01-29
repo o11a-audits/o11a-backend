@@ -37,8 +37,8 @@ pub fn analyze(
   let first_pass_source_topics =
     first_pass(&ast_map, &audit_data.in_scope_files)?;
 
-  // Ancestry pass: collect variable ancestry relationships
-  let all_ancestors = ancestry_pass(&ast_map);
+  // Ancestry pass: collect variable ancestry and relatives relationships
+  let (all_ancestors, all_relatives) = ancestry_pass(&ast_map);
 
   // Tree shaking: Build in-scope dictionary by following references from
   // publicly visible declarations. Also builds a map of variable mutations.
@@ -47,9 +47,13 @@ pub fn analyze(
   let (in_scope_source_topics, mutations_map) =
     tree_shake(&first_pass_source_topics)?;
 
-  // Filter ancestors to only in-scope variables and derive descendants
-  let (ancestors_map, descendants_map) =
-    filter_and_derive_descendants(&all_ancestors, &in_scope_source_topics);
+  // Filter ancestors/relatives to only in-scope variables and derive descendants
+  let (ancestors_map, descendants_map, relatives_map) =
+    filter_and_derive_descendants(
+      &all_ancestors,
+      &all_relatives,
+      &in_scope_source_topics,
+    );
 
   // Populate nodes pass: Build the nodes map before second_pass
   // This allows reference nodes to be looked up for sorting by source location
@@ -63,6 +67,7 @@ pub fn analyze(
     &mutations_map,
     &ancestors_map,
     &descendants_map,
+    &relatives_map,
     &mut audit_data.nodes,
     &mut audit_data.topic_metadata,
     &mut audit_data.function_properties,
@@ -425,18 +430,24 @@ fn first_pass(
 /// and return statements to determine which variables flow into which other variables.
 fn ancestry_pass(
   ast_map: &std::collections::BTreeMap<core::ProjectPath, Vec<SolidityAST>>,
-) -> AncestorsMap {
+) -> (AncestorsMap, RelativesMap) {
   let mut ancestors_map = AncestorsMap::new();
+  let mut relatives_map = RelativesMap::new();
 
   for (_path, asts) in ast_map {
     for ast in asts {
       for node in &ast.nodes {
-        collect_ancestry_from_node(node, None, &mut ancestors_map);
+        collect_ancestry_from_node(
+          node,
+          None,
+          &mut ancestors_map,
+          &mut relatives_map,
+        );
       }
     }
   }
 
-  ancestors_map
+  (ancestors_map, relatives_map)
 }
 
 fn process_first_pass_ast_nodes(
@@ -1095,6 +1106,7 @@ fn second_pass(
   mutations_map: &BTreeMap<i32, Vec<i32>>,
   ancestors_map: &AncestorsMap,
   descendants_map: &DescendantsMap,
+  relatives_map: &RelativesMap,
   nodes: &mut BTreeMap<topic::Topic, Node>,
   topic_metadata: &mut BTreeMap<topic::Topic, TopicMetadata>,
   function_properties: &mut BTreeMap<topic::Topic, FunctionModProperties>,
@@ -1111,6 +1123,7 @@ fn second_pass(
         mutations_map,
         ancestors_map,
         descendants_map,
+        relatives_map,
         nodes,
         &core::Scope::Container {
           container: file_path.clone(),
@@ -1135,6 +1148,7 @@ fn process_second_pass_nodes(
   mutations_map: &BTreeMap<i32, Vec<i32>>,
   ancestors_map: &AncestorsMap,
   descendants_map: &DescendantsMap,
+  relatives_map: &RelativesMap,
   nodes: &mut BTreeMap<topic::Topic, Node>,
   scope: &Scope,
   topic_metadata: &mut BTreeMap<topic::Topic, TopicMetadata>,
@@ -1167,13 +1181,18 @@ fn process_second_pass_nodes(
         in_scope_source_topics,
       );
 
-      // Build ancestor and descendant topics for this declaration
+      // Build ancestor, descendant, and relative topics for this declaration
       let ancestor_topics: Vec<topic::Topic> = ancestors_map
         .get(&node_id)
         .map(|ids| ids.iter().map(|&id| topic::new_node_topic(&id)).collect())
         .unwrap_or_default();
 
       let descendant_topics: Vec<topic::Topic> = descendants_map
+        .get(&node_id)
+        .map(|ids| ids.iter().map(|&id| topic::new_node_topic(&id)).collect())
+        .unwrap_or_default();
+
+      let relative_topics: Vec<topic::Topic> = relatives_map
         .get(&node_id)
         .map(|ids| ids.iter().map(|&id| topic::new_node_topic(&id)).collect())
         .unwrap_or_default();
@@ -1212,6 +1231,7 @@ fn process_second_pass_nodes(
           mutations: mutation_topics,
           ancestors: ancestor_topics,
           descendants: descendant_topics,
+          relatives: relative_topics,
         }
       } else {
         TopicMetadata::NamedTopic {
@@ -1225,6 +1245,7 @@ fn process_second_pass_nodes(
           references: reference_groups,
           ancestors: ancestor_topics,
           descendants: descendant_topics,
+          relatives: relative_topics,
         }
       };
 
@@ -1462,6 +1483,7 @@ fn process_second_pass_nodes(
         mutations_map,
         ancestors_map,
         descendants_map,
+        relatives_map,
         nodes,
         scope,
         topic_metadata,
@@ -2239,6 +2261,11 @@ pub type AncestorsMap = BTreeMap<i32, Vec<i32>>;
 /// Maps variable node_id -> Vec of descendant variable node_ids
 pub type DescendantsMap = BTreeMap<i32, Vec<i32>>;
 
+/// Maps variable node_id -> Vec of relative variable node_ids.
+/// Relatives are variables that appear together in comparison, arithmetic,
+/// or bitwise binary operations, or as alternatives in conditional (ternary) expressions.
+pub type RelativesMap = BTreeMap<i32, Vec<i32>>;
+
 /// Context for tracking function return parameters during ancestry collection.
 /// Used when processing Return statements to link expression variables to return parameters.
 struct AncestryContext {
@@ -2246,11 +2273,12 @@ struct AncestryContext {
   return_parameter_ids: Vec<i32>,
 }
 
-/// Recursively collects ancestry relationships from a node and its children.
+/// Recursively collects ancestry and relatives relationships from a node and its children.
 fn collect_ancestry_from_node(
   node: &ASTNode,
   context: Option<&AncestryContext>,
   ancestors_map: &mut AncestorsMap,
+  relatives_map: &mut RelativesMap,
 ) {
   match node {
     // Variable declaration with initializer (state variable or local)
@@ -2264,7 +2292,12 @@ fn collect_ancestry_from_node(
       add_ancestors(ancestors_map, *node_id, &ancestor_ids);
 
       // Recurse into the initial value
-      collect_ancestry_from_node(initial_value, context, ancestors_map);
+      collect_ancestry_from_node(
+        initial_value,
+        context,
+        ancestors_map,
+        relatives_map,
+      );
     }
 
     // Variable declaration statement (local variables with initializer)
@@ -2294,10 +2327,20 @@ fn collect_ancestry_from_node(
             }
           }
           // Also recurse into the function call to process its arguments
-          collect_ancestry_from_node(init_value, context, ancestors_map);
+          collect_ancestry_from_node(
+            init_value,
+            context,
+            ancestors_map,
+            relatives_map,
+          );
           // Recurse into declarations (they may have nested structures)
           for decl in declarations {
-            collect_ancestry_from_node(decl, context, ancestors_map);
+            collect_ancestry_from_node(
+              decl,
+              context,
+              ancestors_map,
+              relatives_map,
+            );
           }
           return;
         }
@@ -2315,9 +2358,14 @@ fn collect_ancestry_from_node(
       }
 
       // Recurse into initial value and declarations
-      collect_ancestry_from_node(init_value, context, ancestors_map);
+      collect_ancestry_from_node(
+        init_value,
+        context,
+        ancestors_map,
+        relatives_map,
+      );
       for decl in declarations {
-        collect_ancestry_from_node(decl, context, ancestors_map);
+        collect_ancestry_from_node(decl, context, ancestors_map, relatives_map);
       }
     }
 
@@ -2342,8 +2390,18 @@ fn collect_ancestry_from_node(
       }
 
       // Recurse into both sides
-      collect_ancestry_from_node(left_hand_side, context, ancestors_map);
-      collect_ancestry_from_node(right_hand_side, context, ancestors_map);
+      collect_ancestry_from_node(
+        left_hand_side,
+        context,
+        ancestors_map,
+        relatives_map,
+      );
+      collect_ancestry_from_node(
+        right_hand_side,
+        context,
+        ancestors_map,
+        relatives_map,
+      );
     }
 
     // Function call with Argument nodes: argument variables are ancestors of parameter variables
@@ -2370,11 +2428,16 @@ fn collect_ancestry_from_node(
           }
         }
         // Recurse into argument
-        collect_ancestry_from_node(arg, context, ancestors_map);
+        collect_ancestry_from_node(arg, context, ancestors_map, relatives_map);
       }
 
       // Recurse into expression
-      collect_ancestry_from_node(expression, context, ancestors_map);
+      collect_ancestry_from_node(
+        expression,
+        context,
+        ancestors_map,
+        relatives_map,
+      );
     }
 
     // Return statement: expression variables are ancestors of return parameter variables
@@ -2421,7 +2484,12 @@ fn collect_ancestry_from_node(
       // This is handled by building context when entering functions.
 
       // Still recurse into the return expression
-      collect_ancestry_from_node(return_expr, context, ancestors_map);
+      collect_ancestry_from_node(
+        return_expr,
+        context,
+        ancestors_map,
+        relatives_map,
+      );
     }
 
     // Function definition: build context with return parameters and recurse
@@ -2434,12 +2502,18 @@ fn collect_ancestry_from_node(
       };
 
       // Recurse into signature and body with the function context
-      collect_ancestry_from_node(signature, Some(&func_context), ancestors_map);
+      collect_ancestry_from_node(
+        signature,
+        Some(&func_context),
+        ancestors_map,
+        relatives_map,
+      );
       if let Some(body_node) = body {
         collect_ancestry_from_node(
           body_node,
           Some(&func_context),
           ancestors_map,
+          relatives_map,
         );
       }
     }
@@ -2449,14 +2523,87 @@ fn collect_ancestry_from_node(
       signature, body, ..
     } => {
       // Modifiers don't have return parameters, but we still recurse
-      collect_ancestry_from_node(signature, context, ancestors_map);
-      collect_ancestry_from_node(body, context, ancestors_map);
+      collect_ancestry_from_node(
+        signature,
+        context,
+        ancestors_map,
+        relatives_map,
+      );
+      collect_ancestry_from_node(body, context, ancestors_map, relatives_map);
+    }
+
+    // Binary operation: collect relatives for non-boolean operators
+    ASTNode::BinaryOperation {
+      operator,
+      left_expression,
+      right_expression,
+      ..
+    } => {
+      if operator.is_relative_operator() {
+        let left_refs = collect_variable_refs_from_expression(left_expression);
+        let right_refs =
+          collect_variable_refs_from_expression(right_expression);
+        add_relatives_bidirectional(relatives_map, &left_refs, &right_refs);
+      }
+
+      // Recurse into both sides
+      collect_ancestry_from_node(
+        left_expression,
+        context,
+        ancestors_map,
+        relatives_map,
+      );
+      collect_ancestry_from_node(
+        right_expression,
+        context,
+        ancestors_map,
+        relatives_map,
+      );
+    }
+
+    // Conditional (ternary): true and false branch variables are relatives
+    ASTNode::Conditional {
+      condition,
+      true_expression,
+      false_expression,
+      ..
+    } => {
+      let true_refs = collect_variable_refs_from_expression(true_expression);
+      if let Some(false_expr) = false_expression {
+        let false_refs = collect_variable_refs_from_expression(false_expr);
+        add_relatives_bidirectional(relatives_map, &true_refs, &false_refs);
+        collect_ancestry_from_node(
+          false_expr,
+          context,
+          ancestors_map,
+          relatives_map,
+        );
+      }
+
+      // Recurse into all parts
+      collect_ancestry_from_node(
+        condition,
+        context,
+        ancestors_map,
+        relatives_map,
+      );
+      collect_ancestry_from_node(
+        true_expression,
+        context,
+        ancestors_map,
+        relatives_map,
+      );
     }
 
     // For all other nodes, just recurse into children
     _ => {
       for child in node.nodes() {
-        collect_ancestry_from_node(child, context, ancestors_map);
+        collect_ancestry_from_node(
+          child,
+          context,
+          ancestors_map,
+          relatives_map,
+        );
       }
     }
   }
@@ -2608,14 +2755,44 @@ fn add_ancestors(
   }
 }
 
-/// Filters the ancestors map to only include in-scope variables and derives descendants.
-/// Returns both the filtered ancestors map and the derived descendants map.
+/// Adds relative relationships bidirectionally between two sets of variable IDs.
+/// Each variable in `left_ids` becomes a relative of each variable in `right_ids` and vice versa.
+fn add_relatives_bidirectional(
+  relatives_map: &mut RelativesMap,
+  left_ids: &[i32],
+  right_ids: &[i32],
+) {
+  // Add right IDs as relatives of each left ID
+  for &left_id in left_ids {
+    let entry = relatives_map.entry(left_id).or_insert_with(Vec::new);
+    for &right_id in right_ids {
+      if right_id != left_id && !entry.contains(&right_id) {
+        entry.push(right_id);
+      }
+    }
+  }
+
+  // Add left IDs as relatives of each right ID
+  for &right_id in right_ids {
+    let entry = relatives_map.entry(right_id).or_insert_with(Vec::new);
+    for &left_id in left_ids {
+      if left_id != right_id && !entry.contains(&left_id) {
+        entry.push(left_id);
+      }
+    }
+  }
+}
+
+/// Filters the ancestors and relatives maps to only include in-scope variables and derives descendants.
+/// Returns the filtered ancestors map, derived descendants map, and filtered relatives map.
 fn filter_and_derive_descendants(
   ancestors_map: &AncestorsMap,
+  relatives_map: &RelativesMap,
   in_scope_declarations: &BTreeMap<i32, InScopeDeclaration>,
-) -> (AncestorsMap, DescendantsMap) {
+) -> (AncestorsMap, DescendantsMap, RelativesMap) {
   let mut filtered_ancestors: AncestorsMap = BTreeMap::new();
   let mut descendants: DescendantsMap = BTreeMap::new();
+  let mut filtered_relatives: RelativesMap = BTreeMap::new();
 
   // Filter ancestors to only include in-scope variables
   for (&var_id, ancestor_ids) in ancestors_map {
@@ -2644,7 +2821,26 @@ fn filter_and_derive_descendants(
     }
   }
 
-  (filtered_ancestors, descendants)
+  // Filter relatives to only include in-scope variables
+  for (&var_id, relative_ids) in relatives_map {
+    // Only include if the target variable is in scope
+    if !in_scope_declarations.contains_key(&var_id) {
+      continue;
+    }
+
+    // Filter relative IDs to only in-scope variables
+    let filtered_relative_ids: Vec<i32> = relative_ids
+      .iter()
+      .filter(|&&rid| in_scope_declarations.contains_key(&rid))
+      .copied()
+      .collect();
+
+    if !filtered_relative_ids.is_empty() {
+      filtered_relatives.insert(var_id, filtered_relative_ids);
+    }
+  }
+
+  (filtered_ancestors, descendants, filtered_relatives)
 }
 
 #[cfg(test)]

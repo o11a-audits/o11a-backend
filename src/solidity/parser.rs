@@ -474,6 +474,14 @@ impl FromStr for BinaryOperator {
   }
 }
 
+impl BinaryOperator {
+  /// Returns true if this operator indicates a "relatives" relationship between operands.
+  /// This includes all operators except logical And (&&) and Or (||).
+  pub fn is_relative_operator(&self) -> bool {
+    !matches!(self, BinaryOperator::And | BinaryOperator::Or)
+  }
+}
+
 impl FromStr for AssignmentOperator {
   type Err = String;
 

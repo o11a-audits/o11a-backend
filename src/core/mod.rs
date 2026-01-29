@@ -384,6 +384,10 @@ pub enum TopicMetadata {
     /// Variables whose values are derived from this variable.
     /// Only populated for variable declarations.
     descendants: Vec<topic::Topic>,
+    /// Variables that appear together with this variable in comparison, arithmetic,
+    /// or bitwise binary operations, or as alternatives in conditional (ternary) expressions.
+    /// Only populated for variable declarations.
+    relatives: Vec<topic::Topic>,
   },
   NamedMutableTopic {
     topic: topic::Topic,
@@ -399,6 +403,9 @@ pub enum TopicMetadata {
     ancestors: Vec<topic::Topic>,
     /// Variables whose values are derived from this variable.
     descendants: Vec<topic::Topic>,
+    /// Variables that appear together with this variable in comparison, arithmetic,
+    /// or bitwise binary operations, or as alternatives in conditional (ternary) expressions.
+    relatives: Vec<topic::Topic>,
   },
   UnnamedTopic {
     topic: topic::Topic,
@@ -452,6 +459,14 @@ impl TopicMetadata {
     match self {
       TopicMetadata::NamedTopic { descendants, .. }
       | TopicMetadata::NamedMutableTopic { descendants, .. } => descendants,
+      TopicMetadata::UnnamedTopic { .. } => &[],
+    }
+  }
+
+  pub fn relatives(&self) -> &[topic::Topic] {
+    match self {
+      TopicMetadata::NamedTopic { relatives, .. }
+      | TopicMetadata::NamedMutableTopic { relatives, .. } => relatives,
       TopicMetadata::UnnamedTopic { .. } => &[],
     }
   }
@@ -687,6 +702,7 @@ pub fn new_audit_data(
       references: Vec::new(),
       ancestors: Vec::new(),
       descendants: Vec::new(),
+      relatives: Vec::new(),
     },
   );
 
@@ -703,6 +719,7 @@ pub fn new_audit_data(
       references: Vec::new(),
       ancestors: Vec::new(),
       descendants: Vec::new(),
+      relatives: Vec::new(),
     },
   );
 
@@ -719,6 +736,7 @@ pub fn new_audit_data(
       references: Vec::new(),
       ancestors: Vec::new(),
       descendants: Vec::new(),
+      relatives: Vec::new(),
     },
   );
 
