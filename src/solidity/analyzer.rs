@@ -150,6 +150,12 @@ pub struct FirstPassRevertConstraint {
 #[derive(Debug, Clone)]
 pub enum FirstPassDeclaration {
   FunctionMod {
+    /// The contract/library/interface that defines this function or modifier.
+    /// Used during tree shaking to correctly scope internal references to
+    /// their defining contract rather than the calling contract. For example,
+    /// when NudgeCampaign calls SafeERC20.safeTransfer, references inside
+    /// safeTransfer should be scoped to SafeERC20, not NudgeCampaign.
+    parent_contract: Option<i32>,
     declaration_kind: NamedTopicKind,
     visibility: Visibility,
     name: String,
@@ -169,6 +175,9 @@ pub enum FirstPassDeclaration {
     referenced_nodes: Vec<ReferencedNode>,
   },
   Flat {
+    /// The contract/library/interface that defines this declaration.
+    /// See FunctionMod::parent_contract for detailed explanation.
+    parent_contract: Option<i32>,
     declaration_kind: NamedTopicKind,
     visibility: Visibility,
     name: String,
@@ -417,6 +426,7 @@ fn first_pass(
       process_first_pass_ast_nodes(
         &ast.nodes.iter().collect(),
         is_file_in_scope,
+        None, // No parent contract at file level
         &mut first_pass_declarations,
       )?;
     }
@@ -453,6 +463,7 @@ fn ancestry_pass(
 fn process_first_pass_ast_nodes(
   nodes: &Vec<&ASTNode>,
   is_file_in_scope: bool,
+  parent_contract: Option<i32>,
   first_pass_declarations: &mut BTreeMap<i32, FirstPassDeclaration>,
 ) -> Result<(), String> {
   for node in nodes {
@@ -684,6 +695,7 @@ fn process_first_pass_ast_nodes(
         process_first_pass_ast_nodes(
           &child_nodes,
           is_file_in_scope,
+          Some(*node_id), // Contract members belong to this contract
           first_pass_declarations,
         )?;
       }
@@ -723,6 +735,7 @@ fn process_first_pass_ast_nodes(
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::FunctionMod {
+            parent_contract,
             declaration_kind: NamedTopicKind::Function(*kind),
             visibility: function_visibility_to_visibility(visibility),
             name: name.clone(),
@@ -738,6 +751,7 @@ fn process_first_pass_ast_nodes(
         process_first_pass_ast_nodes(
           &child_nodes,
           is_file_in_scope,
+          parent_contract,
           first_pass_declarations,
         )?;
       }
@@ -770,6 +784,7 @@ fn process_first_pass_ast_nodes(
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::FunctionMod {
+            parent_contract,
             declaration_kind: NamedTopicKind::Modifier,
             visibility: Visibility::Internal,
             name: name.clone(),
@@ -785,6 +800,7 @@ fn process_first_pass_ast_nodes(
         process_first_pass_ast_nodes(
           &child_nodes,
           is_file_in_scope,
+          parent_contract,
           first_pass_declarations,
         )?;
       }
@@ -806,6 +822,7 @@ fn process_first_pass_ast_nodes(
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::Flat {
+            parent_contract,
             declaration_kind,
             visibility: variable_visibility_to_visibility(visibility),
             name: name.clone(),
@@ -818,6 +835,7 @@ fn process_first_pass_ast_nodes(
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::Flat {
+            parent_contract,
             declaration_kind: NamedTopicKind::Event,
             visibility: Visibility::Public,
             name: name.clone(),
@@ -829,6 +847,7 @@ fn process_first_pass_ast_nodes(
         process_first_pass_ast_nodes(
           &child_nodes,
           is_file_in_scope,
+          parent_contract,
           first_pass_declarations,
         )?;
       }
@@ -838,6 +857,7 @@ fn process_first_pass_ast_nodes(
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::Flat {
+            parent_contract,
             declaration_kind: NamedTopicKind::Error,
             visibility: Visibility::Public,
             name: name.clone(),
@@ -849,6 +869,7 @@ fn process_first_pass_ast_nodes(
         process_first_pass_ast_nodes(
           &child_nodes,
           is_file_in_scope,
+          parent_contract,
           first_pass_declarations,
         )?;
       }
@@ -863,6 +884,7 @@ fn process_first_pass_ast_nodes(
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::Flat {
+            parent_contract,
             declaration_kind: NamedTopicKind::Struct,
             visibility: variable_visibility_to_visibility(visibility),
             name: name.clone(),
@@ -874,6 +896,7 @@ fn process_first_pass_ast_nodes(
         process_first_pass_ast_nodes(
           &member_nodes,
           is_file_in_scope,
+          parent_contract,
           first_pass_declarations,
         )?;
       }
@@ -883,6 +906,7 @@ fn process_first_pass_ast_nodes(
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::Flat {
+            parent_contract,
             declaration_kind: NamedTopicKind::Enum,
             visibility: Visibility::Public,
             name: name.clone(),
@@ -894,6 +918,7 @@ fn process_first_pass_ast_nodes(
         process_first_pass_ast_nodes(
           &member_nodes,
           is_file_in_scope,
+          parent_contract,
           first_pass_declarations,
         )?;
       }
@@ -903,6 +928,7 @@ fn process_first_pass_ast_nodes(
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::Flat {
+            parent_contract,
             declaration_kind: NamedTopicKind::EnumMember,
             visibility: Visibility::Public,
             name: name.clone(),
@@ -916,6 +942,7 @@ fn process_first_pass_ast_nodes(
         process_first_pass_ast_nodes(
           &child_nodes,
           is_file_in_scope,
+          parent_contract,
           first_pass_declarations,
         )?;
       }
@@ -2385,12 +2412,18 @@ fn process_tree_shake_declarations(
   // modifier, or contract
   match first_pass_decl {
     FirstPassDeclaration::FunctionMod {
-      referenced_nodes, ..
+      parent_contract,
+      referenced_nodes,
+      ..
     } => {
       // References from within a function/modifier are at Member scope level
       // The containing member is the current function/modifier (node_id)
-      // The containing component comes from current_component
-      if let Some(component_id) = current_component {
+      // The containing component should be the function's actual parent contract,
+      // not the contract that called it (current_component). This ensures that
+      // library functions have their internal references scoped correctly to the
+      // library, not to the calling contract.
+      let function_component = parent_contract.or(current_component);
+      if let Some(component_id) = function_component {
         for ref_node in referenced_nodes {
           process_tree_shake_declarations(
             ref_node.referenced_node,
@@ -2400,7 +2433,7 @@ fn process_tree_shake_declarations(
               containing_member: Some(node_id),
             }),
             ReferenceProcessingMethod::Normal,
-            current_component,
+            function_component,
             first_pass_declarations,
             in_scope_declarations,
             mutations_map,
