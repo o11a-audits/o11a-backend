@@ -313,6 +313,8 @@ pub enum NamedTopicVisibility {
 pub struct ReferenceGroup {
   /// The contract/interface/library where these references occur
   contract: topic::Topic,
+  /// Whether this contract is defined in one of the audit's in-scope files
+  is_in_scope: bool,
   /// References at the contract scope level (inheritance, using-for directives, state variable types)
   contract_references: Vec<topic::Topic>,
   /// References within members of the contract (functions, modifiers)
@@ -322,11 +324,13 @@ pub struct ReferenceGroup {
 impl ReferenceGroup {
   pub fn new(
     contract: topic::Topic,
+    is_in_scope: bool,
     contract_references: Vec<topic::Topic>,
     member_references: Vec<MemberReferenceGroup>,
   ) -> Self {
     Self {
       contract,
+      is_in_scope,
       contract_references,
       member_references,
     }
@@ -334,6 +338,10 @@ impl ReferenceGroup {
 
   pub fn contract(&self) -> &topic::Topic {
     &self.contract
+  }
+
+  pub fn is_in_scope(&self) -> bool {
+    self.is_in_scope
   }
 
   pub fn contract_references(&self) -> &[topic::Topic] {

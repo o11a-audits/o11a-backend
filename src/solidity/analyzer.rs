@@ -64,6 +64,7 @@ pub fn analyze(
   second_pass(
     &ast_map,
     &in_scope_source_topics,
+    &audit_data.in_scope_files,
     &mutations_map,
     &ancestors_map,
     &descendants_map,
@@ -165,6 +166,9 @@ pub enum FirstPassDeclaration {
     variable_mutations: Vec<ReferencedNode>,
   },
   Contract {
+    /// The file where this contract is defined. Used to determine if the
+    /// contract is in scope when building reference groups.
+    container_file: core::ProjectPath,
     is_publicly_in_scope: bool,
     declaration_kind: NamedTopicKind,
     visibility: Visibility,
@@ -340,6 +344,7 @@ pub enum InScopeDeclaration {
     variable_mutations: Vec<ReferencedNode>,
   },
   Contract {
+    container_file: core::ProjectPath,
     declaration_kind: NamedTopicKind,
     visibility: Visibility,
     name: String,
@@ -425,6 +430,7 @@ fn first_pass(
     for ast in asts {
       process_first_pass_ast_nodes(
         &ast.nodes.iter().collect(),
+        path,
         is_file_in_scope,
         None, // No parent contract at file level
         &mut first_pass_declarations,
@@ -462,6 +468,7 @@ fn ancestry_pass(
 
 fn process_first_pass_ast_nodes(
   nodes: &Vec<&ASTNode>,
+  file_path: &core::ProjectPath,
   is_file_in_scope: bool,
   parent_contract: Option<i32>,
   first_pass_declarations: &mut BTreeMap<i32, FirstPassDeclaration>,
@@ -680,6 +687,7 @@ fn process_first_pass_ast_nodes(
         first_pass_declarations.insert(
           *node_id,
           FirstPassDeclaration::Contract {
+            container_file: file_path.clone(),
             is_publicly_in_scope: is_file_in_scope, // All contracts are publicly visible
             name: name.clone(),
             declaration_kind,
@@ -694,6 +702,7 @@ fn process_first_pass_ast_nodes(
         let child_nodes = node.nodes();
         process_first_pass_ast_nodes(
           &child_nodes,
+          file_path,
           is_file_in_scope,
           Some(*node_id), // Contract members belong to this contract
           first_pass_declarations,
@@ -750,6 +759,7 @@ fn process_first_pass_ast_nodes(
         let child_nodes = node.nodes();
         process_first_pass_ast_nodes(
           &child_nodes,
+          file_path,
           is_file_in_scope,
           parent_contract,
           first_pass_declarations,
@@ -799,6 +809,7 @@ fn process_first_pass_ast_nodes(
         let child_nodes = node.nodes();
         process_first_pass_ast_nodes(
           &child_nodes,
+          file_path,
           is_file_in_scope,
           parent_contract,
           first_pass_declarations,
@@ -846,6 +857,7 @@ fn process_first_pass_ast_nodes(
         let child_nodes = node.nodes();
         process_first_pass_ast_nodes(
           &child_nodes,
+          file_path,
           is_file_in_scope,
           parent_contract,
           first_pass_declarations,
@@ -868,6 +880,7 @@ fn process_first_pass_ast_nodes(
         let child_nodes = node.nodes();
         process_first_pass_ast_nodes(
           &child_nodes,
+          file_path,
           is_file_in_scope,
           parent_contract,
           first_pass_declarations,
@@ -895,6 +908,7 @@ fn process_first_pass_ast_nodes(
         let member_nodes = node.nodes();
         process_first_pass_ast_nodes(
           &member_nodes,
+          file_path,
           is_file_in_scope,
           parent_contract,
           first_pass_declarations,
@@ -917,6 +931,7 @@ fn process_first_pass_ast_nodes(
         let member_nodes = node.nodes();
         process_first_pass_ast_nodes(
           &member_nodes,
+          file_path,
           is_file_in_scope,
           parent_contract,
           first_pass_declarations,
@@ -941,6 +956,7 @@ fn process_first_pass_ast_nodes(
         let child_nodes = node.nodes();
         process_first_pass_ast_nodes(
           &child_nodes,
+          file_path,
           is_file_in_scope,
           parent_contract,
           first_pass_declarations,
@@ -1069,6 +1085,7 @@ fn build_reference_groups(
   self_reference: Option<ScopedReference>,
   nodes: &BTreeMap<topic::Topic, Node>,
   in_scope_source_topics: &BTreeMap<i32, InScopeDeclaration>,
+  in_scope_files: &HashSet<core::ProjectPath>,
 ) -> Vec<ReferenceGroup> {
   // First, group by contract, then within each contract by member (or None for contract-level)
   // contract_id -> (contract_refs, member_id -> refs)
@@ -1126,11 +1143,25 @@ fn build_reference_groups(
     }
   }
 
+  // Helper to check if a contract is in scope
+  let is_contract_in_scope = |contract_id: i32| -> bool {
+    in_scope_source_topics
+      .get(&contract_id)
+      .and_then(|decl| match decl {
+        InScopeDeclaration::Contract { container_file, .. } => {
+          Some(in_scope_files.contains(container_file))
+        }
+        _ => None,
+      })
+      .unwrap_or(false)
+  };
+
   // Convert to Vec<ReferenceGroup>
   let mut groups: Vec<ReferenceGroup> = contract_groups
     .into_iter()
     .map(|(contract_id, (contract_refs, member_groups))| {
       let contract_topic = topic::new_node_topic(&contract_id);
+      let is_in_scope = is_contract_in_scope(contract_id);
 
       // Build member reference groups, sorted by member source location
       let mut member_references: Vec<MemberReferenceGroup> = member_groups
@@ -1147,7 +1178,12 @@ fn build_reference_groups(
         loc_a.cmp(&loc_b)
       });
 
-      ReferenceGroup::new(contract_topic, contract_refs, member_references)
+      ReferenceGroup::new(
+        contract_topic,
+        is_in_scope,
+        contract_refs,
+        member_references,
+      )
     })
     .collect();
 
@@ -1185,6 +1221,8 @@ fn build_expanded_reference_groups(
   descendants: &HashSet<i32>,
   declaration_scopes: &BTreeMap<i32, Scope>,
   nodes: &BTreeMap<topic::Topic, Node>,
+  in_scope_source_topics: &BTreeMap<i32, InScopeDeclaration>,
+  in_scope_files: &HashSet<core::ProjectPath>,
 ) -> Vec<ReferenceGroup> {
   // Track ancestor/descendant counts per contract
   // contract_id -> (ancestor_count, descendant_count)
@@ -1266,11 +1304,25 @@ fn build_expanded_reference_groups(
     }
   }
 
+  // Helper to check if a contract is in scope
+  let is_contract_in_scope = |contract_id: i32| -> bool {
+    in_scope_source_topics
+      .get(&contract_id)
+      .and_then(|decl| match decl {
+        InScopeDeclaration::Contract { container_file, .. } => {
+          Some(in_scope_files.contains(container_file))
+        }
+        _ => None,
+      })
+      .unwrap_or(false)
+  };
+
   // Convert to Vec<ReferenceGroup>
   let mut groups: Vec<ReferenceGroup> = contract_groups
     .into_iter()
     .map(|(contract_id, (contract_refs, member_groups))| {
       let contract_topic = topic::new_node_topic(&contract_id);
+      let is_in_scope = is_contract_in_scope(contract_id);
 
       let mut member_references: Vec<MemberReferenceGroup> = member_groups
         .into_iter()
@@ -1285,7 +1337,12 @@ fn build_expanded_reference_groups(
         loc_a.cmp(&loc_b)
       });
 
-      ReferenceGroup::new(contract_topic, contract_refs, member_references)
+      ReferenceGroup::new(
+        contract_topic,
+        is_in_scope,
+        contract_refs,
+        member_references,
+      )
     })
     .collect();
 
@@ -1357,6 +1414,7 @@ fn get_contract_name(
 fn second_pass(
   ast_map: &BTreeMap<core::ProjectPath, Vec<SolidityAST>>,
   in_scope_source_topics: &BTreeMap<i32, InScopeDeclaration>,
+  in_scope_files: &HashSet<core::ProjectPath>,
   mutations_map: &BTreeMap<i32, Vec<i32>>,
   ancestors_map: &AncestorsMap,
   descendants_map: &DescendantsMap,
@@ -1374,6 +1432,7 @@ fn second_pass(
         &ast.nodes.iter().collect(),
         false, // Parent is not in scope automatically - check each node
         in_scope_source_topics,
+        in_scope_files,
         mutations_map,
         ancestors_map,
         descendants_map,
@@ -1399,6 +1458,7 @@ fn second_pass(
     relatives_map,
     nodes,
     in_scope_source_topics,
+    in_scope_files,
   );
 
   Ok(())
@@ -1410,6 +1470,7 @@ fn process_second_pass_nodes(
   ast_nodes: &Vec<&ASTNode>,
   parent_in_scope: bool,
   in_scope_source_topics: &BTreeMap<i32, InScopeDeclaration>,
+  in_scope_files: &HashSet<core::ProjectPath>,
   mutations_map: &BTreeMap<i32, Vec<i32>>,
   ancestors_map: &AncestorsMap,
   descendants_map: &DescendantsMap,
@@ -1446,6 +1507,7 @@ fn process_second_pass_nodes(
         self_reference,
         nodes,
         in_scope_source_topics,
+        in_scope_files,
       );
 
       // Build ancestor, descendant, and relative topics for this declaration
@@ -1749,6 +1811,7 @@ fn process_second_pass_nodes(
         &child_nodes,
         is_in_scope, // Children inherit parent's in-scope status
         in_scope_source_topics,
+        in_scope_files,
         mutations_map,
         ancestors_map,
         descendants_map,
@@ -2385,6 +2448,7 @@ fn process_tree_shake_declarations(
       }
     }
     FirstPassDeclaration::Contract {
+      container_file,
       declaration_kind,
       visibility,
       name,
@@ -2396,6 +2460,7 @@ fn process_tree_shake_declarations(
       let references: Vec<ScopedReference> =
         referencing_info.into_iter().collect();
       InScopeDeclaration::Contract {
+        container_file: container_file.clone(),
         declaration_kind: declaration_kind.clone(),
         visibility: visibility.clone(),
         name: name.clone(),
@@ -3206,6 +3271,7 @@ fn populate_expanded_references(
   relatives_map: &RelativesMap,
   nodes: &BTreeMap<topic::Topic, Node>,
   in_scope_source_topics: &BTreeMap<i32, InScopeDeclaration>,
+  in_scope_files: &HashSet<core::ProjectPath>,
 ) {
   // First, collect all scopes from existing topic_metadata
   let scope_map: BTreeMap<i32, Scope> = topic_metadata
@@ -3274,6 +3340,8 @@ fn populate_expanded_references(
           &ancestry.descendants,
           &scope_map,
           nodes,
+          in_scope_source_topics,
+          in_scope_files,
         );
 
         Some((topic.clone(), expanded_refs))

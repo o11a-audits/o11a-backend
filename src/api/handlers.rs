@@ -358,6 +358,7 @@ pub struct MemberReferenceGroupResponse {
 #[derive(Debug, Serialize)]
 pub struct ReferenceGroupResponse {
   pub contract: String,
+  pub is_in_scope: bool,
   pub contract_references: Vec<String>,
   pub member_references: Vec<MemberReferenceGroupResponse>,
 }
@@ -482,6 +483,7 @@ fn topic_metadata_to_response(
         .iter()
         .map(|group| ReferenceGroupResponse {
           contract: group.contract().id().to_string(),
+          is_in_scope: group.is_in_scope(),
           contract_references: group
             .contract_references()
             .iter()
