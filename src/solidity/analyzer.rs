@@ -1396,6 +1396,7 @@ fn second_pass(
     topic_metadata,
     ancestors_map,
     descendants_map,
+    relatives_map,
     nodes,
     in_scope_source_topics,
   );
@@ -3112,19 +3113,22 @@ fn add_relatives_bidirectional(
 /// Recursively collects all ancestors and descendants for a given node.
 /// Returns a set of unique node IDs (excluding the starting node itself).
 /// Uses a visited set to avoid infinite recursion from circular dependencies.
-/// Result of collecting recursive ancestry, with ancestors and descendants tracked separately
+/// Result of collecting recursive ancestry, with ancestors, descendants, and relatives tracked separately
 struct RecursiveAncestry {
   ancestors: HashSet<i32>,
   descendants: HashSet<i32>,
+  relatives: HashSet<i32>,
 }
 
 fn collect_recursive_ancestry(
   start_node_id: i32,
   ancestors_map: &AncestorsMap,
   descendants_map: &DescendantsMap,
+  relatives_map: &RelativesMap,
 ) -> RecursiveAncestry {
   let mut ancestors = HashSet::new();
   let mut descendants = HashSet::new();
+  let mut relatives = HashSet::new();
   let mut visited = HashSet::new();
 
   // Collect recursive ancestors
@@ -3146,13 +3150,26 @@ fn collect_recursive_ancestry(
     &mut visited,
   );
 
+  // Reset visited for relatives traversal
+  visited.clear();
+
+  // Collect recursive relatives
+  collect_ancestry_in_direction(
+    start_node_id,
+    relatives_map,
+    &mut relatives,
+    &mut visited,
+  );
+
   // Remove self if present
   ancestors.remove(&start_node_id);
   descendants.remove(&start_node_id);
+  relatives.remove(&start_node_id);
 
   RecursiveAncestry {
     ancestors,
     descendants,
+    relatives,
   }
 }
 
@@ -3186,6 +3203,7 @@ fn populate_expanded_references(
   topic_metadata: &mut BTreeMap<topic::Topic, TopicMetadata>,
   ancestors_map: &AncestorsMap,
   descendants_map: &DescendantsMap,
+  relatives_map: &RelativesMap,
   nodes: &BTreeMap<topic::Topic, Node>,
   in_scope_source_topics: &BTreeMap<i32, InScopeDeclaration>,
 ) {
@@ -3205,22 +3223,27 @@ fn populate_expanded_references(
       .filter_map(|(topic, _metadata)| {
         let node_id = topic.underlying_id().ok()?;
 
-        // Get recursive ancestry (ancestors and descendants tracked separately)
-        let ancestry =
-          collect_recursive_ancestry(node_id, ancestors_map, descendants_map);
+        // Get recursive ancestry (ancestors, descendants, and relatives tracked separately)
+        let ancestry = collect_recursive_ancestry(
+          node_id,
+          ancestors_map,
+          descendants_map,
+          relatives_map,
+        );
 
         // Build ScopedReferences from ancestry:
-        // 1. The declaration itself (self-reference) for each ancestor/descendant
-        // 2. All references to each ancestor/descendant
+        // 1. The declaration itself (self-reference) for each ancestor/descendant/relative
+        // 2. All references to each ancestor/descendant/relative
         // Use a set to track seen reference_node IDs for deduplication
         let mut seen_refs: HashSet<i32> = HashSet::new();
         let mut scoped_refs: Vec<ScopedReference> = Vec::new();
 
-        // Process all ancestors and descendants
+        // Process all ancestors, descendants, and relatives
         let all_related: HashSet<i32> = ancestry
           .ancestors
           .iter()
           .chain(ancestry.descendants.iter())
+          .chain(ancestry.relatives.iter())
           .copied()
           .collect();
 
