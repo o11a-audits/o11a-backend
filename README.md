@@ -224,7 +224,15 @@ The functional failure points are a list of things that could invalidate the cur
 
 There needs to be a way to state the severity of a functional property not holding so that the auditor can prioritize the importance of the property. Maybe the functional property can be linked to an attack vector as a defense to it, so that the consequence of a statement can be understood.
 
-What is the difference in stating an invariant and an attack vector -- are the inverses? What is the relationship between an invariant/attack vector and a convergence. Does the convergence uphold an invariant, or defend against an attack vector?
+What is the difference in stating an invariant and an attack vector -- are they inverses? What is the relationship between an invariant/attack vector and a convergence. Does the convergence uphold an invariant, or defend against an attack vector?
+
+## Implementation Patterns
+
+Keeping note of implementation patterns (or similarly reused logic throughout the codebase) are a good way to determine when logic may be missing or misaligned, and helps show implementation assumptions that may not be in the documentation. It can show assumptions that are completely missing from the documentation, or may highlight the *how* for the documentation's *what*. For example, the documentation may state that each function should emit an event when state changes. If every function except one then keys the event by some ID, then when looking at that function individually, the auditor may not notice that it is missing the event key because it still adheres to the vauge documentation, yet if a pattern had been established that all events are keyed (then it may reveal that the developers knew event keying was important (and that is why they did it everywhere else)), then if the one function without it was checked for adherance to the implementation patterns, then it would have become clear that the event key was missing. Patterns give concise checks against the rest of the codebase without having to pull the rest of the codebase into the current context.
+
+For another example, maybe a codebase always submits some data to an integration, but forgets one place. It is hard to identify when logic is missing, but the identifying the pattern of consistently submitting the data in other places may help highlight where it is missing.
+
+When viewing the expanded context of a named topic is a good time to gather patterns, as you can see in one place how that variable effects the rest of the codebase and can identify any patterns with it. Each topic should have a prompt for checking for new patterns with the context of the subject topic, and for checking that the subjec topic adheres to the implementation patterns.
 
 ## Auditing Convergences
 
