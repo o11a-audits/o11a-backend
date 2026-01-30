@@ -1135,7 +1135,9 @@ fn build_reference_groups(
     let is_subject_b = subject_contract_id == id_b;
 
     if is_subject_a != is_subject_b {
-      return is_subject_b.cmp(&is_subject_a);
+      // If a is the subject, it should come first (Less)
+      // If b is the subject, a should come after (Greater)
+      return is_subject_a.cmp(&is_subject_b).reverse();
     }
 
     // Otherwise sort by contract name
