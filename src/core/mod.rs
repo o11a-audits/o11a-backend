@@ -293,8 +293,13 @@ pub enum UnnamedTopicKind {
   Reference,
   MutableReference,
   Signature,
+  DocumentationRoot,
   DocumentationSection,
   DocumentationParagraph,
+  DocumentationSentence,
+  DocumentationCodeBlock,
+  DocumentationList,
+  DocumentationBlockQuote,
   Other,
 }
 
@@ -514,9 +519,12 @@ impl TopicMetadata {
           .get(component)
           .map(|d| d.name())
           .unwrap_or_else(|| component.id());
-        format!("{}::{}", component_name, self.name())
+        format!("{}.{}", component_name, self.name())
       }
       Scope::Member {
+        component, member, ..
+      }
+      | Scope::SemanticBlock {
         component, member, ..
       } => {
         let component_name = audit_data
@@ -529,36 +537,7 @@ impl TopicMetadata {
           .get(member)
           .map(|d| d.name())
           .unwrap_or_else(|| member.id());
-        format!("{}::{}::{}", component_name, member_name, self.name())
-      }
-      Scope::SemanticBlock {
-        component,
-        member,
-        semantic_block: statement,
-        ..
-      } => {
-        let component_name = audit_data
-          .topic_metadata
-          .get(component)
-          .map(|d| d.name())
-          .unwrap_or_else(|| component.id());
-        let member_name = audit_data
-          .topic_metadata
-          .get(member)
-          .map(|d| d.name())
-          .unwrap_or_else(|| member.id());
-        let statement_name = audit_data
-          .topic_metadata
-          .get(statement)
-          .map(|d| d.name())
-          .unwrap_or_else(|| statement.id());
-        format!(
-          "{}::{}::{}::{}",
-          component_name,
-          member_name,
-          statement_name,
-          self.name()
-        )
+        format!("{}.{}.{}", component_name, member_name, self.name())
       }
     }
   }

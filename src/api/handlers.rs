@@ -242,6 +242,42 @@ pub struct ContractsResponse {
   pub contracts: Vec<TopicMetadataResponse>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct DocumentsResponse {
+  pub documents: Vec<TopicMetadataResponse>,
+}
+
+// Get all documents for an audit
+pub async fn get_documents(
+  State(state): State<AppState>,
+  Path(audit_id): Path<String>,
+) -> Result<Json<DocumentsResponse>, StatusCode> {
+  println!("GET /api/v1/audits/{}/documents", audit_id);
+
+  let ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in get_documents: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+
+  let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+
+  let mut documents = Vec::new();
+
+  // Iterate through all topic metadata and filter for documentation roots
+  for (topic, metadata) in &audit_data.topic_metadata {
+    match metadata {
+      crate::core::TopicMetadata::UnnamedTopic { kind, .. }
+        if *kind == crate::core::UnnamedTopicKind::DocumentationRoot =>
+      {
+        documents.push(topic_metadata_to_response(topic, metadata));
+      }
+      _ => (),
+    };
+  }
+
+  Ok(Json(DocumentsResponse { documents }))
+}
+
 // Get all contracts for an audit
 pub async fn get_contracts(
   State(state): State<AppState>,
@@ -328,7 +364,7 @@ pub async fn get_source_text(
       )
     }
     Node::Documentation(doc_node) => {
-      crate::documentation::formatter::node_to_html(doc_node)
+      crate::documentation::formatter::node_to_html(doc_node, &audit_data.nodes)
     }
   };
 

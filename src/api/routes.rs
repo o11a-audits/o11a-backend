@@ -38,6 +38,10 @@ pub fn create_router(state: AppState) -> Router {
       get(handlers::get_contracts),
     )
     .route(
+      "/api/v1/audits/:audit_id/documents",
+      get(handlers::get_documents),
+    )
+    .route(
       "/api/v1/audits/:audit_id/source_text/:topic_id",
       get(handlers::get_source_text),
     )

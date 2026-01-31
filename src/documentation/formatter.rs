@@ -1,16 +1,26 @@
+use crate::core;
+use crate::core::topic;
 use crate::documentation::parser::DocumentationNode;
+use std::collections::BTreeMap;
 
 /// Converts a documentation node to formatted HTML string
-pub fn node_to_html(node: &DocumentationNode) -> String {
-  do_node_to_html(node, 0)
+pub fn node_to_html(
+  node: &DocumentationNode,
+  nodes_map: &BTreeMap<topic::Topic, core::Node>,
+) -> String {
+  do_node_to_html(node, 0, nodes_map)
 }
 
-fn do_node_to_html(node: &DocumentationNode, indent_level: usize) -> String {
-  match node {
+fn do_node_to_html(
+  node: &DocumentationNode,
+  indent_level: usize,
+  nodes_map: &BTreeMap<topic::Topic, core::Node>,
+) -> String {
+  match node.resolve(nodes_map) {
     DocumentationNode::Root { children, .. } => {
       let content = children
         .iter()
-        .map(|child| do_node_to_html(child, indent_level))
+        .map(|child| do_node_to_html(child, indent_level, nodes_map))
         .collect::<Vec<_>>()
         .join("\n");
       format!("<div class=\"documentation-root\">{}</div>", content)
@@ -22,10 +32,10 @@ fn do_node_to_html(node: &DocumentationNode, indent_level: usize) -> String {
       node_id,
       ..
     } => {
-      let header_html = do_node_to_html(header, indent_level);
+      let header_html = do_node_to_html(header, indent_level, nodes_map);
       let content = children
         .iter()
-        .map(|child| do_node_to_html(child, indent_level))
+        .map(|child| do_node_to_html(child, indent_level, nodes_map))
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -43,7 +53,7 @@ fn do_node_to_html(node: &DocumentationNode, indent_level: usize) -> String {
     } => {
       let heading_content = children
         .iter()
-        .map(|child| do_node_to_html(child, indent_level))
+        .map(|child| do_node_to_html(child, indent_level, nodes_map))
         .collect::<Vec<_>>()
         .join("");
 
@@ -58,7 +68,7 @@ fn do_node_to_html(node: &DocumentationNode, indent_level: usize) -> String {
     } => {
       let content = children
         .iter()
-        .map(|child| do_node_to_html(child, indent_level))
+        .map(|child| do_node_to_html(child, indent_level, nodes_map))
         .collect::<Vec<_>>()
         .join("");
 
@@ -73,7 +83,7 @@ fn do_node_to_html(node: &DocumentationNode, indent_level: usize) -> String {
     } => {
       let content = children
         .iter()
-        .map(|child| do_node_to_html(child, indent_level))
+        .map(|child| do_node_to_html(child, indent_level, nodes_map))
         .collect::<Vec<_>>()
         .join("");
 
@@ -135,7 +145,7 @@ fn do_node_to_html(node: &DocumentationNode, indent_level: usize) -> String {
     } => {
       let list_items = children
         .iter()
-        .map(|child| do_node_to_html(child, indent_level + 1))
+        .map(|child| do_node_to_html(child, indent_level + 1, nodes_map))
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -157,7 +167,7 @@ fn do_node_to_html(node: &DocumentationNode, indent_level: usize) -> String {
     } => {
       let content = children
         .iter()
-        .map(|child| do_node_to_html(child, indent_level))
+        .map(|child| do_node_to_html(child, indent_level, nodes_map))
         .collect::<Vec<_>>()
         .join("");
 
@@ -172,7 +182,7 @@ fn do_node_to_html(node: &DocumentationNode, indent_level: usize) -> String {
     } => {
       let content = children
         .iter()
-        .map(|child| do_node_to_html(child, indent_level))
+        .map(|child| do_node_to_html(child, indent_level, nodes_map))
         .collect::<Vec<_>>()
         .join("");
 
@@ -187,7 +197,7 @@ fn do_node_to_html(node: &DocumentationNode, indent_level: usize) -> String {
     } => {
       let content = children
         .iter()
-        .map(|child| do_node_to_html(child, indent_level))
+        .map(|child| do_node_to_html(child, indent_level, nodes_map))
         .collect::<Vec<_>>()
         .join("");
 
@@ -206,7 +216,7 @@ fn do_node_to_html(node: &DocumentationNode, indent_level: usize) -> String {
     } => {
       let content = children
         .iter()
-        .map(|child| do_node_to_html(child, indent_level))
+        .map(|child| do_node_to_html(child, indent_level, nodes_map))
         .collect::<Vec<_>>()
         .join("");
 
@@ -230,7 +240,7 @@ fn do_node_to_html(node: &DocumentationNode, indent_level: usize) -> String {
     } => {
       let content = children
         .iter()
-        .map(|child| do_node_to_html(child, indent_level + 1))
+        .map(|child| do_node_to_html(child, indent_level + 1, nodes_map))
         .collect::<Vec<_>>()
         .join("\n");
 

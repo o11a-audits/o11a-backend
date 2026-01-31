@@ -242,6 +242,28 @@ impl DocumentationNode {
       _ => vec![],
     }
   }
+
+  /// Resolves a node, looking up Stub nodes from the nodes_map
+  pub fn resolve<'a>(
+    &'a self,
+    nodes_map: &'a std::collections::BTreeMap<
+      crate::core::topic::Topic,
+      crate::core::Node,
+    >,
+  ) -> &'a DocumentationNode {
+    match self {
+      DocumentationNode::Stub { topic, .. } => {
+        if let Some(crate::core::Node::Documentation(doc_node)) =
+          nodes_map.get(topic)
+        {
+          doc_node
+        } else {
+          self
+        }
+      }
+      _ => self,
+    }
+  }
 }
 
 /// Splits paragraph children into sentence nodes based on periods
