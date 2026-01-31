@@ -1,6 +1,7 @@
 use crate::core::topic::{self, new_node_topic};
 use crate::core::{self, TopicMetadata};
 use crate::core::{ContractKind, FunctionKind, VariableMutability};
+use crate::formatting;
 use crate::solidity::parser::{
   ASTNode, AssignmentOperator, BinaryOperator, FunctionStateMutability,
   FunctionVisibility, LiteralKind, StorageLocation, UnaryOperator,
@@ -1937,7 +1938,7 @@ fn format_identifier(
 }
 
 fn format_token(token: &str, class: &str) -> String {
-  format!("<span class=\"{}\">{}</span>", class, token)
+  formatting::format_token(token, class)
 }
 
 fn format_topic_token(
@@ -1946,13 +1947,7 @@ fn format_topic_token(
   class: &str,
   topic: &topic::Topic,
 ) -> String {
-  format!(
-    "<span id=\"{}\" class=\"{}\" data-topic=\"{}\" tabindex=\"0\">{}</span>",
-    new_node_topic(node_id).id(),
-    class,
-    topic.id(),
-    token
-  )
+  formatting::format_topic_token(&new_node_topic(node_id), token, class, topic)
 }
 
 fn format_node(node_str: &str, node_id: i32, class: &str) -> String {
@@ -2041,13 +2036,7 @@ fn format_semantic_block(
   class: &str,
   topic: &topic::Topic,
 ) -> String {
-  format!(
-    "<div id=\"{}\" class=\"{}\" data-topic=\"{}\" tabindex=\"0\">{}</div>",
-    new_node_topic(node_id).id(),
-    class,
-    topic.id(),
-    token
-  )
+  formatting::format_topic_block(&new_node_topic(node_id), token, class, topic)
 }
 
 /// Creates an indentation wrapper with padding
@@ -2069,13 +2058,8 @@ fn inline_indent(content: &str, indent_level: usize) -> String {
   )
 }
 
-/// Escapes HTML special characters
 fn html_escape(s: &str) -> String {
-  s.replace('&', "&amp;")
-    .replace('<', "&lt;")
-    .replace('>', "&gt;")
-    .replace('"', "&quot;")
-    .replace('\'', "&#39;")
+  formatting::html_escape(s)
 }
 
 fn binary_operator_to_string(op: &BinaryOperator) -> String {

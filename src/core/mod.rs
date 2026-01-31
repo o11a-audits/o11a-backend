@@ -294,6 +294,7 @@ pub enum UnnamedTopicKind {
   MutableReference,
   Signature,
   DocumentationRoot,
+  DocumentationHeading,
   DocumentationSection,
   DocumentationParagraph,
   DocumentationSentence,

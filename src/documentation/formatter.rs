@@ -1,6 +1,7 @@
 use crate::core;
 use crate::core::topic;
 use crate::documentation::parser::DocumentationNode;
+use crate::formatting;
 use std::collections::BTreeMap;
 
 /// Converts a documentation node to formatted HTML string
@@ -23,14 +24,11 @@ fn do_node_to_html(
         .map(|child| do_node_to_html(child, indent_level, nodes_map))
         .collect::<Vec<_>>()
         .join("\n");
-      format!("<div class=\"documentation-root\">{}</div>", content)
+      formatting::format_block(&content, "documentation-root")
     }
 
     DocumentationNode::Section {
-      header,
-      children,
-      node_id,
-      ..
+      header, children, ..
     } => {
       let header_html = do_node_to_html(header, indent_level, nodes_map);
       let content = children
@@ -39,10 +37,9 @@ fn do_node_to_html(
         .collect::<Vec<_>>()
         .join("\n");
 
-      format!(
-        "<section class=\"section node-{}\" id=\"node-{}\">\n{}\n{}\n</section>",
-        node_id, node_id, header_html, content
-      )
+      let section_str = format!("\n{}\n{}\n", header_html, content);
+
+      formatting::format_block(&section_str, "section")
     }
 
     DocumentationNode::Heading {
@@ -51,6 +48,7 @@ fn do_node_to_html(
       node_id,
       ..
     } => {
+      let topic_id = topic::new_documentation_topic(*node_id);
       let heading_content = children
         .iter()
         .map(|child| do_node_to_html(child, indent_level, nodes_map))
@@ -58,46 +56,53 @@ fn do_node_to_html(
         .join("");
 
       format!(
-        "<h{} class=\"heading node-{}\" id=\"node-{}\">{}</h{}>",
-        level, node_id, node_id, heading_content, level
+        "<h{}>{}</h{}>",
+        level,
+        formatting::format_topic_token(
+          &topic_id,
+          &heading_content,
+          "heading",
+          &topic_id
+        ),
+        level
       )
     }
 
     DocumentationNode::Paragraph {
       children, node_id, ..
     } => {
+      let topic_id = topic::new_documentation_topic(*node_id);
       let content = children
         .iter()
         .map(|child| do_node_to_html(child, indent_level, nodes_map))
         .collect::<Vec<_>>()
         .join("");
 
-      format!(
-        "<p class=\"paragraph node-{}\" id=\"node-{}\">{}</p>",
-        node_id, node_id, content
+      formatting::format_topic_block(
+        &topic_id,
+        &content,
+        "paragraph",
+        &topic_id,
       )
     }
 
     DocumentationNode::Sentence {
       children, node_id, ..
     } => {
+      let topic_id = topic::new_documentation_topic(*node_id);
       let content = children
         .iter()
         .map(|child| do_node_to_html(child, indent_level, nodes_map))
         .collect::<Vec<_>>()
         .join("");
 
-      format!(
-        "<span class=\"sentence node-{}\" id=\"node-{}\">{}</span>",
-        node_id, node_id, content
-      )
+      formatting::format_topic_token(&topic_id, &content, "sentence", &topic_id)
     }
 
-    DocumentationNode::Text { value, .. } => html_escape(value),
+    DocumentationNode::Text { value, .. } => formatting::html_escape(value),
 
     DocumentationNode::InlineCode {
       value,
-      node_id,
       referenced_declaration,
       ..
     } => {
@@ -109,11 +114,9 @@ fn do_node_to_html(
       };
 
       format!(
-        "<code class=\"inline-code node-{} reference\" id=\"node-{}\"{}>{}</code>",
-        node_id,
-        node_id,
+        "<code class=\"inline-code reference\"{}>{}</code>",
         reference_attrs,
-        html_escape(value)
+        formatting::html_escape(value)
       )
     }
 
@@ -123,25 +126,23 @@ fn do_node_to_html(
       node_id,
       ..
     } => {
+      let topic_id = topic::new_documentation_topic(*node_id);
       let lang_class = lang
         .as_ref()
         .map(|l| format!(" language-{}", l))
         .unwrap_or_default();
 
       format!(
-        "<pre class=\"code-block node-{}\" id=\"node-{}\"><code class=\"{}\">{}</code></pre>",
-        node_id,
-        node_id,
+        "<pre id=\"{}\" class=\"topic-token code-block\" data-topic=\"{}\" tabindex=\"0\"><code class=\"{}\">{}</code></pre>",
+        topic_id.id,
+        topic_id.id,
         lang_class,
-        html_escape(value)
+        formatting::html_escape(value)
       )
     }
 
     DocumentationNode::List {
-      ordered,
-      children,
-      node_id,
-      ..
+      ordered, children, ..
     } => {
       let list_items = children
         .iter()
@@ -151,67 +152,51 @@ fn do_node_to_html(
 
       if *ordered {
         format!(
-          "<ol class=\"list ordered node-{}\" id=\"node-{}\">\n{}\n</ol>",
-          node_id, node_id, list_items
+          "<ol class=\"topic-token list ordered\" tabindex=\"0\">\n{}\n</ol>",
+          list_items
         )
       } else {
         format!(
-          "<ul class=\"list unordered node-{}\" id=\"node-{}\">\n{}\n</ul>",
-          node_id, node_id, list_items
+          "<ul class=\"topic-token list unordered\" tabindex=\"0\">\n{}\n</ul>",
+          list_items
         )
       }
     }
 
-    DocumentationNode::ListItem {
-      children, node_id, ..
-    } => {
+    DocumentationNode::ListItem { children, .. } => {
       let content = children
         .iter()
         .map(|child| do_node_to_html(child, indent_level, nodes_map))
         .collect::<Vec<_>>()
         .join("");
 
-      format!(
-        "<li class=\"list-item node-{}\" id=\"node-{}\">{}</li>",
-        node_id, node_id, content
-      )
+      format!("<li class=\"list-item\">{}</li>", content)
     }
 
-    DocumentationNode::Emphasis {
-      children, node_id, ..
-    } => {
+    DocumentationNode::Emphasis { children, .. } => {
       let content = children
         .iter()
         .map(|child| do_node_to_html(child, indent_level, nodes_map))
         .collect::<Vec<_>>()
         .join("");
 
-      format!(
-        "<em class=\"emphasis node-{}\" id=\"node-{}\">{}</em>",
-        node_id, node_id, content
-      )
+      format!("<em class=\"emphasis\">{}</em>", content)
     }
 
-    DocumentationNode::Strong {
-      children, node_id, ..
-    } => {
+    DocumentationNode::Strong { children, .. } => {
       let content = children
         .iter()
         .map(|child| do_node_to_html(child, indent_level, nodes_map))
         .collect::<Vec<_>>()
         .join("");
 
-      format!(
-        "<strong class=\"strong node-{}\" id=\"node-{}\">{}</strong>",
-        node_id, node_id, content
-      )
+      format!("<strong class=\"strong\">{}</strong>", content)
     }
 
     DocumentationNode::Link {
       url,
       title,
       children,
-      node_id,
       ..
     } => {
       let content = children
@@ -222,14 +207,12 @@ fn do_node_to_html(
 
       let title_attr = title
         .as_ref()
-        .map(|t| format!(" title=\"{}\"", html_escape(t)))
+        .map(|t| format!(" title=\"{}\"", formatting::html_escape(t)))
         .unwrap_or_default();
 
       format!(
-        "<a href=\"{}\" class=\"link node-{}\" id=\"node-{}\"{}>{}</a>",
-        html_escape(url),
-        node_id,
-        node_id,
+        "<a href=\"{}\" class=\"link\"{}>{}</a>",
+        formatting::html_escape(url),
         title_attr,
         content
       )
@@ -238,39 +221,30 @@ fn do_node_to_html(
     DocumentationNode::BlockQuote {
       children, node_id, ..
     } => {
+      let topic_id = topic::new_documentation_topic(*node_id);
       let content = children
         .iter()
         .map(|child| do_node_to_html(child, indent_level + 1, nodes_map))
         .collect::<Vec<_>>()
         .join("\n");
 
-      format!(
-        "<blockquote class=\"blockquote node-{}\" id=\"node-{}\">\n{}\n</blockquote>",
-        node_id, node_id, content
+      formatting::format_topic_block(
+        &topic_id,
+        &content,
+        "blockquote",
+        &topic_id,
       )
     }
 
-    DocumentationNode::ThematicBreak { node_id, .. } => {
-      format!(
-        "<hr class=\"thematic-break node-{}\" id=\"node-{}\">",
-        node_id, node_id
-      )
+    DocumentationNode::ThematicBreak { .. } => {
+      "<hr class=\"thematic-break\">".to_string()
     }
 
     DocumentationNode::Stub { topic, .. } => {
       format!(
-        "<span class=\"stub\" data-topic-id=\"{}\">Stub</span>",
+        "<span class=\"stub\" data-topic=\"{}\">Stub</span>",
         topic.id
       )
     }
   }
-}
-
-/// Escapes HTML special characters
-fn html_escape(s: &str) -> String {
-  s.replace('&', "&amp;")
-    .replace('<', "&lt;")
-    .replace('>', "&gt;")
-    .replace('"', "&quot;")
-    .replace('\'', "&#39;")
 }

@@ -350,38 +350,104 @@ fn split_into_sentences(
   sentences
 }
 
-/// Groups nodes into sections based on headings
-/// Each heading and all content until the next heading (or end) becomes a Section
+/// Groups nodes into sections based on headings with proper nesting
+/// Each heading creates a section that contains all content until the next heading
+/// of the same or higher level (lower number). Deeper headings become nested sections.
 fn group_into_sections(
   nodes: Vec<DocumentationNode>,
 ) -> Vec<DocumentationNode> {
-  let mut sections = Vec::new();
+  // Find the minimum heading level in the nodes to start grouping from there
+  let min_level = nodes
+    .iter()
+    .filter_map(|n| match n {
+      DocumentationNode::Heading { level, .. } => Some(*level),
+      _ => None,
+    })
+    .min()
+    .unwrap_or(1);
+
+  group_into_sections_at_level(nodes, min_level)
+}
+
+/// Recursively groups nodes into sections at the specified heading level
+/// Headings at exactly `level` create sections at this depth
+/// Deeper headings (higher numbers) become nested sections within the content
+fn group_into_sections_at_level(
+  nodes: Vec<DocumentationNode>,
+  level: u8,
+) -> Vec<DocumentationNode> {
+  // Find the minimum heading level in these nodes
+  let min_level = nodes
+    .iter()
+    .filter_map(|n| match n {
+      DocumentationNode::Heading { level, .. } => Some(*level),
+      _ => None,
+    })
+    .min();
+
+  // If no headings or min level is deeper than current level, process at min level
+  let effective_level = match min_level {
+    Some(min) if min > level => min,
+    Some(_) => level,
+    None => return nodes, // No headings, return as-is
+  };
+
+  let mut result = Vec::new();
   let mut current_heading: Option<DocumentationNode> = None;
   let mut current_content = Vec::new();
 
   for node in nodes {
     match &node {
-      DocumentationNode::Heading { .. } => {
-        // If we have a previous heading, create a section for it
-        if let Some(heading) = current_heading.take() {
-          let section_node_id = next_node_id();
-          sections.push(DocumentationNode::Section {
-            node_id: section_node_id,
-            header: Box::new(heading),
-            children: current_content.drain(..).collect(),
-          });
+      DocumentationNode::Heading { level: h_level, .. } => {
+        if *h_level == effective_level {
+          // Same level heading - finalize previous section if any
+          if let Some(heading) = current_heading.take() {
+            // Recursively group the content at deeper levels
+            let nested_children = group_into_sections_at_level(
+              current_content.drain(..).collect(),
+              effective_level + 1,
+            );
+            let section_node_id = next_node_id();
+            result.push(DocumentationNode::Section {
+              node_id: section_node_id,
+              header: Box::new(heading),
+              children: nested_children,
+            });
+          }
+          // Start a new section at this level
+          current_heading = Some(node);
+        } else if *h_level > effective_level {
+          // Deeper heading - add to current content (will be nested later)
+          if current_heading.is_some() {
+            current_content.push(node);
+          } else {
+            // No section started yet, add directly to result
+            result.push(node);
+          }
+        } else {
+          // Shallower heading (h_level < effective_level) - shouldn't happen
+          // but handle gracefully by finalizing current and adding to result
+          if let Some(heading) = current_heading.take() {
+            let nested_children = group_into_sections_at_level(
+              current_content.drain(..).collect(),
+              effective_level + 1,
+            );
+            let section_node_id = next_node_id();
+            result.push(DocumentationNode::Section {
+              node_id: section_node_id,
+              header: Box::new(heading),
+              children: nested_children,
+            });
+          }
+          result.push(node);
         }
-        // Store this heading for the next section
-        current_heading = Some(node);
       }
       _ => {
         // Non-heading content
         if current_heading.is_some() {
-          // We're inside a section, add to current content
           current_content.push(node);
         } else {
-          // No heading yet, add node directly to sections
-          sections.push(node);
+          result.push(node);
         }
       }
     }
@@ -389,15 +455,17 @@ fn group_into_sections(
 
   // Handle the last section if there is one
   if let Some(heading) = current_heading {
+    let nested_children =
+      group_into_sections_at_level(current_content, effective_level + 1);
     let section_node_id = next_node_id();
-    sections.push(DocumentationNode::Section {
+    result.push(DocumentationNode::Section {
       node_id: section_node_id,
       header: Box::new(heading),
-      children: current_content,
+      children: nested_children,
     });
   }
 
-  sections
+  result
 }
 
 fn convert_mdast_node(
@@ -448,10 +516,16 @@ fn convert_mdast_node(
       // Split the paragraph's children into sentences
       let sentences = split_into_sentences(children);
 
-      Ok(DocumentationNode::Paragraph {
-        node_id,
-        children: sentences,
-      })
+      if sentences.len() == 1 {
+        // If there is only one sentence, return it directly as a sentence
+        // node without a containing paragraph node
+        Ok(sentences.get(0).unwrap().clone())
+      } else {
+        Ok(DocumentationNode::Paragraph {
+          node_id,
+          children: sentences,
+        })
+      }
     }
 
     MdNode::Text(text) => Ok(DocumentationNode::Text {
