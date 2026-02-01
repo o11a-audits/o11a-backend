@@ -259,12 +259,6 @@ pub enum NamedTopicKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum NamedMutableTopicKind {
-  StateVariable,
-  LocalVariable,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UnnamedTopicKind {
   VariableMutation,
   Arithmetic,
@@ -395,38 +389,21 @@ pub enum TopicMetadata {
     /// Contains grouped references showing where all transitive ancestry-related
     /// variables are declared/referenced.
     expanded_references: Vec<ReferenceGroup>,
-    /// Variables that contribute to this variable's value (e.g., RHS of assignments,
-    /// function arguments that flow into parameters, return expression variables).
-    /// Only populated for variable declarations.
-    ancestors: Vec<topic::Topic>,
-    /// Variables whose values are derived from this variable.
-    /// Only populated for variable declarations.
-    descendants: Vec<topic::Topic>,
-    /// Variables that appear together with this variable in comparison, arithmetic,
-    /// or bitwise binary operations, or as alternatives in conditional (ternary) expressions.
-    /// Only populated for variable declarations.
-    relatives: Vec<topic::Topic>,
-  },
-  NamedMutableTopic {
-    topic: topic::Topic,
-    scope: Scope,
-    kind: NamedMutableTopicKind,
-    name: String,
-    visibility: parser::VariableVisibility,
-    references: Vec<ReferenceGroup>,
-    /// References derived from recursively traversing all ancestors and descendants.
-    /// Contains grouped references showing where all transitive ancestry-related
-    /// variables are declared/referenced.
-    expanded_references: Vec<ReferenceGroup>,
-    /// The assignment or unary operation nodes that mutate this variable
+    /// Whether this topic has mutations (was previously NamedMutableTopic)
+    is_mutable: bool,
+    /// The assignment or unary operation nodes that mutate this variable.
+    /// Empty for non-mutable topics.
     mutations: Vec<topic::Topic>,
     /// Variables that contribute to this variable's value (e.g., RHS of assignments,
     /// function arguments that flow into parameters, return expression variables).
+    /// Only populated for variable declarations.
     ancestors: Vec<topic::Topic>,
     /// Variables whose values are derived from this variable.
+    /// Only populated for variable declarations.
     descendants: Vec<topic::Topic>,
     /// Variables that appear together with this variable in comparison, arithmetic,
     /// or bitwise binary operations, or as alternatives in conditional (ternary) expressions.
+    /// Only populated for variable declarations.
     relatives: Vec<topic::Topic>,
   },
   UnnamedTopic {
@@ -440,15 +417,13 @@ impl TopicMetadata {
   pub fn scope(&self) -> &Scope {
     match self {
       TopicMetadata::NamedTopic { scope, .. }
-      | TopicMetadata::NamedMutableTopic { scope, .. }
       | TopicMetadata::UnnamedTopic { scope, .. } => scope,
     }
   }
 
   pub fn name(&self) -> &str {
     match self {
-      TopicMetadata::NamedTopic { name, .. }
-      | TopicMetadata::NamedMutableTopic { name, .. } => name,
+      TopicMetadata::NamedTopic { name, .. } => name,
       TopicMetadata::UnnamedTopic { topic, .. } => topic.id(),
     }
   }
@@ -456,15 +431,13 @@ impl TopicMetadata {
   pub fn topic(&self) -> &topic::Topic {
     match self {
       TopicMetadata::NamedTopic { topic, .. }
-      | TopicMetadata::NamedMutableTopic { topic, .. }
       | TopicMetadata::UnnamedTopic { topic, .. } => topic,
     }
   }
 
   pub fn references(&self) -> &[ReferenceGroup] {
     match self {
-      TopicMetadata::NamedTopic { references, .. }
-      | TopicMetadata::NamedMutableTopic { references, .. } => references,
+      TopicMetadata::NamedTopic { references, .. } => references,
       TopicMetadata::UnnamedTopic { .. } => &[],
     }
   }
@@ -474,10 +447,6 @@ impl TopicMetadata {
       TopicMetadata::NamedTopic {
         expanded_references,
         ..
-      }
-      | TopicMetadata::NamedMutableTopic {
-        expanded_references,
-        ..
       } => expanded_references,
       TopicMetadata::UnnamedTopic { .. } => &[],
     }
@@ -485,25 +454,36 @@ impl TopicMetadata {
 
   pub fn ancestors(&self) -> &[topic::Topic] {
     match self {
-      TopicMetadata::NamedTopic { ancestors, .. }
-      | TopicMetadata::NamedMutableTopic { ancestors, .. } => ancestors,
+      TopicMetadata::NamedTopic { ancestors, .. } => ancestors,
       TopicMetadata::UnnamedTopic { .. } => &[],
     }
   }
 
   pub fn descendants(&self) -> &[topic::Topic] {
     match self {
-      TopicMetadata::NamedTopic { descendants, .. }
-      | TopicMetadata::NamedMutableTopic { descendants, .. } => descendants,
+      TopicMetadata::NamedTopic { descendants, .. } => descendants,
       TopicMetadata::UnnamedTopic { .. } => &[],
     }
   }
 
   pub fn relatives(&self) -> &[topic::Topic] {
     match self {
-      TopicMetadata::NamedTopic { relatives, .. }
-      | TopicMetadata::NamedMutableTopic { relatives, .. } => relatives,
+      TopicMetadata::NamedTopic { relatives, .. } => relatives,
       TopicMetadata::UnnamedTopic { .. } => &[],
+    }
+  }
+
+  pub fn mutations(&self) -> &[topic::Topic] {
+    match self {
+      TopicMetadata::NamedTopic { mutations, .. } => mutations,
+      TopicMetadata::UnnamedTopic { .. } => &[],
+    }
+  }
+
+  pub fn is_mutable(&self) -> bool {
+    match self {
+      TopicMetadata::NamedTopic { is_mutable, .. } => *is_mutable,
+      TopicMetadata::UnnamedTopic { .. } => false,
     }
   }
 

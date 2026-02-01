@@ -1,4 +1,4 @@
-use crate::core::{NamedMutableTopicKind, NamedTopicKind, topic};
+use crate::core::{NamedTopicKind, topic};
 
 /// Formats a simple token with a class
 pub fn format_token(token: &str, class: &str) -> String {
@@ -69,19 +69,6 @@ pub fn format_named_identifier(
     core::NamedTopicKind::Function(_) => "function",
     core::NamedTopicKind::Modifier => "modifier",
     core::NamedTopicKind::Builtin => "global",
-  };
-  format_topic_token(&topic, name, css_class, ref_topic)
-}
-
-pub fn format_named_mutable_identifier(
-  topic: &topic::Topic,
-  name: &String,
-  ref_topic: &topic::Topic,
-  kind: &NamedMutableTopicKind,
-) -> String {
-  let css_class = match kind {
-    core::NamedMutableTopicKind::StateVariable => "mutable-state-variable",
-    core::NamedMutableTopicKind::LocalVariable => "mutable-local-variable",
   };
   format_topic_token(&topic, name, css_class, ref_topic)
 }

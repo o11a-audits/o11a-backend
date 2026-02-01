@@ -1079,10 +1079,10 @@ fn do_node_to_source_text(
         // If there are no mutations for the variable, set the mutability
         // to "immutable", otherwise set it to "mutable"
         let mutability = if *visibility == VariableVisibility::Internal {
-          // Check if this variable has mutations by looking for NamedMutableTopic
+          // Check if this variable has mutations
           let has_mutations = topic_metadata
             .get(&new_node_topic(node_id))
-            .map(|meta| matches!(meta, TopicMetadata::NamedMutableTopic { .. }))
+            .map(|meta| meta.is_mutable())
             .unwrap_or(false);
           if has_mutations {
             &VariableMutability::Mutable
@@ -1914,17 +1914,9 @@ fn format_identifier(
 ) -> String {
   let node_topic = new_node_topic(node_id);
   match topic_metadata.get(topic) {
-    Some(TopicMetadata::NamedTopic { kind, .. }) => {
-      formatting::format_named_identifier(&node_topic, name, topic, kind)
-    }
-    Some(TopicMetadata::NamedMutableTopic { kind, .. }) => {
-      formatting::format_named_mutable_identifier(
-        &node_topic,
-        name,
-        topic,
-        kind,
-      )
-    }
+    Some(TopicMetadata::NamedTopic {
+      kind, is_mutable, ..
+    }) => formatting::format_named_identifier(&node_topic, name, topic, kind),
     _ => formatting::format_topic_token(&node_topic, name, "unknown", topic),
   }
 }

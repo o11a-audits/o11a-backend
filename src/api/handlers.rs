@@ -301,7 +301,6 @@ pub async fn get_contracts(
         matches!(kind, crate::core::NamedTopicKind::Contract(_))
       }
       crate::core::TopicMetadata::UnnamedTopic { .. } => false,
-      crate::core::TopicMetadata::NamedMutableTopic { .. } => false,
     };
 
     if is_contract {
@@ -495,20 +494,14 @@ fn topic_metadata_to_response(
       ),
       kind => (format!("{:?}", kind), None),
     },
-    crate::core::TopicMetadata::NamedMutableTopic { kind, .. } => {
-      (format!("{:?}", kind), None)
-    }
     crate::core::TopicMetadata::UnnamedTopic { kind, .. } => {
       (format!("{:?}", kind), None)
     }
   };
 
-  // Only include name for NamedTopic and NamedMutableTopic
+  // Only include name for NamedTopic
   let name = match metadata {
-    crate::core::TopicMetadata::NamedTopic { name, .. }
-    | crate::core::TopicMetadata::NamedMutableTopic { name, .. } => {
-      Some(name.clone())
-    }
+    crate::core::TopicMetadata::NamedTopic { name, .. } => Some(name.clone()),
     crate::core::TopicMetadata::UnnamedTopic { .. } => None,
   };
 
@@ -560,18 +553,16 @@ fn topic_metadata_to_response(
     metadata.relatives().iter().map(|t| t.id.clone()).collect();
 
   let mutations = match metadata {
-    crate::core::TopicMetadata::NamedMutableTopic { mutations, .. } => {
-      Some(mutations.iter().map(|t| t.id.clone()).collect())
-    }
-    crate::core::TopicMetadata::NamedTopic { .. }
-    | crate::core::TopicMetadata::UnnamedTopic { .. } => None,
+    crate::core::TopicMetadata::NamedTopic {
+      mutations,
+      is_mutable: true,
+      ..
+    } => Some(mutations.iter().map(|t| t.id.clone()).collect()),
+    _ => None,
   };
 
   let visibility = match metadata {
     crate::core::TopicMetadata::NamedTopic { visibility, .. } => {
-      Some(format!("{:?}", visibility))
-    }
-    crate::core::TopicMetadata::NamedMutableTopic { visibility, .. } => {
       Some(format!("{:?}", visibility))
     }
     crate::core::TopicMetadata::UnnamedTopic { .. } => None,

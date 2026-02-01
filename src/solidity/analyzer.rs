@@ -1526,58 +1526,42 @@ fn process_second_pass_nodes(
         .map(|ids| ids.iter().map(|&id| topic::new_node_topic(&id)).collect())
         .unwrap_or_default();
 
-      // Check if this declaration has mutations (making it a NamedMutableTopic)
-      let topic_metadata_entry = if let Some(mutation_node_ids) =
+      // Check if this declaration has mutations
+      let is_mutable_variable = *in_scope_topic_declaration.declaration_kind()
+        == NamedTopicKind::StateVariable(core::VariableMutability::Mutable)
+        || *in_scope_topic_declaration.declaration_kind()
+          == NamedTopicKind::LocalVariable;
+
+      let (is_mutable, mutation_topics) = if let Some(mutation_node_ids) =
         mutations_map.get(&node_id)
-        && (*in_scope_topic_declaration.declaration_kind()
-          == NamedTopicKind::StateVariable(core::VariableMutability::Mutable)
-          || *in_scope_topic_declaration.declaration_kind()
-            == NamedTopicKind::LocalVariable)
+        && is_mutable_variable
       {
-        let mutation_topics: Vec<topic::Topic> = mutation_node_ids
-          .iter()
-          .map(|&id| topic::new_node_topic(&id))
-          .collect();
-        TopicMetadata::NamedMutableTopic {
-          topic: topic.clone(),
-          kind: match in_scope_topic_declaration.declaration_kind() {
-            NamedTopicKind::StateVariable(..) => {
-              core::NamedMutableTopicKind::StateVariable
-            }
-            NamedTopicKind::LocalVariable => {
-              core::NamedMutableTopicKind::LocalVariable
-            }
-            _ => unreachable!(
-              "A declaration with mutations can only be a variable"
-            ),
-          },
-          visibility: visibility_to_variable_visibility(
-            in_scope_topic_declaration.visibility(),
-          ),
-          name: in_scope_topic_declaration.name().clone(),
-          scope: scope.clone(),
-          references: reference_groups,
-          expanded_references: vec![], // Populated after all metadata is built
-          mutations: mutation_topics,
-          ancestors: ancestor_topics,
-          descendants: descendant_topics,
-          relatives: relative_topics,
-        }
+        (
+          true,
+          mutation_node_ids
+            .iter()
+            .map(|&id| topic::new_node_topic(&id))
+            .collect(),
+        )
       } else {
-        TopicMetadata::NamedTopic {
-          topic: topic.clone(),
-          kind: in_scope_topic_declaration.declaration_kind().clone(),
-          visibility: visibility_to_named_topic_visibility(
-            in_scope_topic_declaration.visibility(),
-          ),
-          name: in_scope_topic_declaration.name().clone(),
-          scope: scope.clone(),
-          references: reference_groups,
-          expanded_references: vec![], // Populated after all metadata is built
-          ancestors: ancestor_topics,
-          descendants: descendant_topics,
-          relatives: relative_topics,
-        }
+        (false, vec![])
+      };
+
+      let topic_metadata_entry = TopicMetadata::NamedTopic {
+        topic: topic.clone(),
+        kind: in_scope_topic_declaration.declaration_kind().clone(),
+        visibility: visibility_to_named_topic_visibility(
+          in_scope_topic_declaration.visibility(),
+        ),
+        name: in_scope_topic_declaration.name().clone(),
+        scope: scope.clone(),
+        references: reference_groups,
+        expanded_references: vec![], // Populated after all metadata is built
+        is_mutable,
+        mutations: mutation_topics,
+        ancestors: ancestor_topics,
+        descendants: descendant_topics,
+        relatives: relative_topics,
       };
 
       topic_metadata.insert(topic.clone(), topic_metadata_entry);
@@ -2287,19 +2271,6 @@ fn visibility_to_named_topic_visibility(
     Visibility::Private => core::NamedTopicVisibility::Private,
     Visibility::Internal => core::NamedTopicVisibility::Internal,
     Visibility::External => core::NamedTopicVisibility::External,
-  }
-}
-
-/// Convert foundry_compilers_artifacts::Visibility to parser::VariableVisibility
-fn visibility_to_variable_visibility(
-  vis: &Visibility,
-) -> parser::VariableVisibility {
-  match vis {
-    Visibility::Public => parser::VariableVisibility::Public,
-    Visibility::Private => parser::VariableVisibility::Private,
-    Visibility::Internal => parser::VariableVisibility::Internal,
-    // External is not valid for variables, treat as internal
-    Visibility::External => parser::VariableVisibility::Internal,
   }
 }
 
@@ -3353,12 +3324,6 @@ fn populate_expanded_references(
     if let Some(expanded_refs) = expanded_refs_map.get(topic) {
       match metadata {
         TopicMetadata::NamedTopic {
-          expanded_references,
-          ..
-        } => {
-          *expanded_references = expanded_refs.clone();
-        }
-        TopicMetadata::NamedMutableTopic {
           expanded_references,
           ..
         } => {

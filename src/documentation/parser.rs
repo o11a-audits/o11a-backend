@@ -142,15 +142,6 @@ fn get_named_topic_kind(
 ) -> Option<core::NamedTopicKind> {
   match metadata {
     core::TopicMetadata::NamedTopic { kind, .. } => Some(kind.clone()),
-    // For mutable topics, convert to equivalent NamedTopicKind
-    core::TopicMetadata::NamedMutableTopic { kind, .. } => match kind {
-      core::NamedMutableTopicKind::StateVariable => Some(
-        core::NamedTopicKind::StateVariable(core::VariableMutability::Mutable),
-      ),
-      core::NamedMutableTopicKind::LocalVariable => {
-        Some(core::NamedTopicKind::LocalVariable)
-      }
-    },
     core::TopicMetadata::UnnamedTopic { .. } => None,
   }
 }
