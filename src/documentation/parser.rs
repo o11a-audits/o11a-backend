@@ -14,6 +14,262 @@ pub fn next_node_id() -> i32 {
   NEXT_DOC_NODE_ID.fetch_add(1, Ordering::SeqCst)
 }
 
+/// Solidity keywords for syntax highlighting
+const SOLIDITY_KEYWORDS: &[&str] = &[
+  // Control flow
+  "if",
+  "else",
+  "for",
+  "while",
+  "do",
+  "break",
+  "continue",
+  "return",
+  "try",
+  "catch",
+  "revert",
+  "throw",
+  // Function/modifier
+  "function",
+  "modifier",
+  "constructor",
+  "fallback",
+  "receive",
+  "returns",
+  // Visibility
+  "public",
+  "private",
+  "internal",
+  "external",
+  // Mutability
+  "pure",
+  "view",
+  "payable",
+  "constant",
+  "immutable",
+  // Storage
+  "memory",
+  "storage",
+  "calldata",
+  // Contract structure
+  "contract",
+  "interface",
+  "library",
+  "abstract",
+  "is",
+  "using",
+  "import",
+  "pragma",
+  // Types
+  "mapping",
+  "struct",
+  "enum",
+  "event",
+  "error",
+  "type",
+  // Literals/values
+  "true",
+  "false",
+  // Other
+  "new",
+  "delete",
+  "emit",
+  "indexed",
+  "anonymous",
+  "virtual",
+  "override",
+  "assembly",
+];
+
+/// Rust keywords for syntax highlighting
+const RUST_KEYWORDS: &[&str] = &[
+  // Control flow
+  "if",
+  "else",
+  "for",
+  "while",
+  "loop",
+  "break",
+  "continue",
+  "return",
+  "match",
+  // Function/module
+  "fn",
+  "mod",
+  "use",
+  "pub",
+  "crate",
+  "self",
+  "super",
+  "impl",
+  "trait",
+  "where",
+  // Types
+  "struct",
+  "enum",
+  "type",
+  "const",
+  "static",
+  "let",
+  "mut",
+  "ref",
+  "move",
+  // Async
+  "async",
+  "await",
+  // Other
+  "as",
+  "dyn",
+  "extern",
+  "in",
+  "unsafe",
+  "macro_rules",
+];
+
+/// Operators for syntax highlighting (multi-character first, then single-character)
+const OPERATORS: &[&str] = &[
+  // Multi-character (longest first)
+  "<<=", ">>=", "..=", "...", "==", "!=", "<=", ">=", "&&", "||", "<<", ">>",
+  "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "++", "--", "**", "=>", "::",
+  "->", "..", // Single-character
+  "+", "-", "*", "/", "%", "=", "<", ">", "&", "|", "^", "!", "~", "?", ":",
+  ";", ".", ",",
+];
+
+/// Extracts the NamedTopicKind from topic metadata if it's a named topic
+fn get_named_topic_kind(
+  metadata: &core::TopicMetadata,
+) -> Option<core::NamedTopicKind> {
+  match metadata {
+    core::TopicMetadata::NamedTopic { kind, .. } => Some(kind.clone()),
+    // For mutable topics, convert to equivalent NamedTopicKind
+    core::TopicMetadata::NamedMutableTopic { kind, .. } => match kind {
+      core::NamedMutableTopicKind::StateVariable => Some(
+        core::NamedTopicKind::StateVariable(core::VariableMutability::Mutable),
+      ),
+      core::NamedMutableTopicKind::LocalVariable => {
+        Some(core::NamedTopicKind::LocalVariable)
+      }
+    },
+    core::TopicMetadata::UnnamedTopic { .. } => None,
+  }
+}
+
+/// Checks if a string is a keyword (Solidity or Rust)
+fn is_keyword(s: &str) -> bool {
+  SOLIDITY_KEYWORDS.contains(&s) || RUST_KEYWORDS.contains(&s)
+}
+
+/// Tries to match an operator at the current position
+fn match_operator(s: &str) -> Option<&'static str> {
+  for op in OPERATORS {
+    if s.starts_with(op) {
+      return Some(op);
+    }
+  }
+  None
+}
+
+/// Tokenizes code into CodeKeyword, CodeOperator, CodeIdentifier, and CodeText nodes
+fn tokenize_code(
+  code: &str,
+  audit_data: &core::AuditData,
+) -> Vec<DocumentationNode> {
+  let mut tokens = Vec::new();
+  let mut chars = code.char_indices().peekable();
+  let mut text_buffer = String::new();
+
+  while let Some((idx, c)) = chars.next() {
+    // Check for operator
+    let remaining = &code[idx..];
+    if let Some(op) = match_operator(remaining) {
+      // Flush text buffer
+      if !text_buffer.is_empty() {
+        tokens.push(DocumentationNode::CodeText {
+          node_id: next_node_id(),
+          value: text_buffer.clone(),
+        });
+        text_buffer.clear();
+      }
+
+      tokens.push(DocumentationNode::CodeOperator {
+        node_id: next_node_id(),
+        value: op.to_string(),
+      });
+
+      // Skip the operator characters
+      for _ in 1..op.len() {
+        chars.next();
+      }
+      continue;
+    }
+
+    // Check for identifier start
+    if c.is_ascii_alphabetic() || c == '_' {
+      // Flush text buffer
+      if !text_buffer.is_empty() {
+        tokens.push(DocumentationNode::CodeText {
+          node_id: next_node_id(),
+          value: text_buffer.clone(),
+        });
+        text_buffer.clear();
+      }
+
+      // Collect the full identifier
+      let mut ident = String::new();
+      ident.push(c);
+      while let Some(&(_, next_c)) = chars.peek() {
+        if next_c.is_ascii_alphanumeric() || next_c == '_' {
+          ident.push(next_c);
+          chars.next();
+        } else {
+          break;
+        }
+      }
+
+      if is_keyword(&ident) {
+        tokens.push(DocumentationNode::CodeKeyword {
+          node_id: next_node_id(),
+          value: ident,
+        });
+      } else {
+        // Try to find a matching declaration
+        let (referenced_topic, kind) = if let Some(metadata) =
+          find_declaration_by_name(audit_data, &ident)
+        {
+          (
+            Some(metadata.topic().clone()),
+            get_named_topic_kind(metadata),
+          )
+        } else {
+          (None, None)
+        };
+
+        tokens.push(DocumentationNode::CodeIdentifier {
+          node_id: next_node_id(),
+          value: ident,
+          referenced_topic,
+          kind,
+        });
+      }
+      continue;
+    }
+
+    // Everything else goes to text buffer
+    text_buffer.push(c);
+  }
+
+  // Flush remaining text buffer
+  if !text_buffer.is_empty() {
+    tokens.push(DocumentationNode::CodeText {
+      node_id: next_node_id(),
+      value: text_buffer,
+    });
+  }
+
+  tokens
+}
+
 /// Processes markdown files from src/ and docs/ directories
 pub fn process(
   project_path: &Path,
@@ -149,12 +405,36 @@ pub enum DocumentationNode {
   InlineCode {
     node_id: i32,
     value: String,
-    referenced_declaration: Option<topic::Topic>, // Solidity topic ID if found
+    children: Vec<DocumentationNode>,
   },
 
   CodeBlock {
     node_id: i32,
     lang: Option<String>,
+    value: String,
+    children: Vec<DocumentationNode>,
+  },
+
+  // Code token types for syntax highlighting and reference resolution
+  CodeKeyword {
+    node_id: i32,
+    value: String,
+  },
+
+  CodeOperator {
+    node_id: i32,
+    value: String,
+  },
+
+  CodeIdentifier {
+    node_id: i32,
+    value: String,
+    referenced_topic: Option<topic::Topic>,
+    kind: Option<core::NamedTopicKind>,
+  },
+
+  CodeText {
+    node_id: i32,
     value: String,
   },
 
@@ -213,6 +493,10 @@ impl DocumentationNode {
       DocumentationNode::Text { node_id, .. } => *node_id,
       DocumentationNode::InlineCode { node_id, .. } => *node_id,
       DocumentationNode::CodeBlock { node_id, .. } => *node_id,
+      DocumentationNode::CodeKeyword { node_id, .. } => *node_id,
+      DocumentationNode::CodeOperator { node_id, .. } => *node_id,
+      DocumentationNode::CodeIdentifier { node_id, .. } => *node_id,
+      DocumentationNode::CodeText { node_id, .. } => *node_id,
       DocumentationNode::List { node_id, .. } => *node_id,
       DocumentationNode::ListItem { node_id, .. } => *node_id,
       DocumentationNode::Emphasis { node_id, .. } => *node_id,
@@ -231,6 +515,8 @@ impl DocumentationNode {
       | DocumentationNode::Heading { children, .. }
       | DocumentationNode::Paragraph { children, .. }
       | DocumentationNode::Sentence { children, .. }
+      | DocumentationNode::InlineCode { children, .. }
+      | DocumentationNode::CodeBlock { children, .. }
       | DocumentationNode::List { children, .. }
       | DocumentationNode::ListItem { children, .. }
       | DocumentationNode::Emphasis { children, .. }
@@ -534,23 +820,25 @@ fn convert_mdast_node(
     }),
 
     MdNode::InlineCode(code) => {
-      // Try to find a matching declaration in the solidity context
-      let referenced_declaration =
-        find_declaration_by_name(audit_data, &code.value)
-          .map(|decl| decl.topic().clone());
+      let children = tokenize_code(&code.value, audit_data);
 
       Ok(DocumentationNode::InlineCode {
         node_id,
         value: code.value.clone(),
-        referenced_declaration,
+        children,
       })
     }
 
-    MdNode::Code(code) => Ok(DocumentationNode::CodeBlock {
-      node_id,
-      lang: code.lang.clone(),
-      value: code.value.clone(),
-    }),
+    MdNode::Code(code) => {
+      let children = tokenize_code(&code.value, audit_data);
+
+      Ok(DocumentationNode::CodeBlock {
+        node_id,
+        lang: code.lang.clone(),
+        value: code.value.clone(),
+        children,
+      })
+    }
 
     MdNode::List(list) => {
       let children = list
@@ -741,7 +1029,27 @@ pub fn children_to_stubs(node: DocumentationNode) -> DocumentationNode {
         children: children.into_iter().map(node_to_stub).collect(),
       }
     }
-    // Leaf nodes remain unchanged
+    DocumentationNode::InlineCode {
+      node_id,
+      value,
+      children,
+    } => DocumentationNode::InlineCode {
+      node_id,
+      value,
+      children: children.into_iter().map(node_to_stub).collect(),
+    },
+    DocumentationNode::CodeBlock {
+      node_id,
+      lang,
+      value,
+      children,
+    } => DocumentationNode::CodeBlock {
+      node_id,
+      lang,
+      value,
+      children: children.into_iter().map(node_to_stub).collect(),
+    },
+    // Leaf nodes remain unchanged (Text, CodeKeyword, CodeOperator, CodeIdentifier, CodeText, ThematicBreak, Stub)
     other => other,
   }
 }

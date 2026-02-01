@@ -87,7 +87,7 @@ fn do_node_to_source_text(
       );
       format!(
         "{} {} {}{}",
-        format_keyword("mut"),
+        formatting::format_keyword("mut"),
         lhs,
         format_topic_operator(&node_id, &op, &new_node_topic(node_id)),
         indent(&rhs, indent_level)
@@ -601,13 +601,19 @@ fn do_node_to_source_text(
         ctx,
       );
       let keyword = match operator {
-        UnaryOperator::Increment => format!("{} ", format_keyword("mut")),
-        UnaryOperator::Decrement => format!("{} ", format_keyword("mut")),
+        UnaryOperator::Increment => {
+          format!("{} ", formatting::format_keyword("mut"))
+        }
+        UnaryOperator::Decrement => {
+          format!("{} ", formatting::format_keyword("mut"))
+        }
         UnaryOperator::Plus => String::new(),
         UnaryOperator::Minus => String::new(),
         UnaryOperator::BitwiseNot => String::new(),
         UnaryOperator::Not => String::new(),
-        UnaryOperator::Delete => format!("{} ", format_keyword("mut")),
+        UnaryOperator::Delete => {
+          format!("{} ", formatting::format_keyword("mut"))
+        }
       };
 
       if *prefix {
@@ -694,9 +700,9 @@ fn do_node_to_source_text(
       }
     }
 
-    ASTNode::Break { .. } => format_keyword("break"),
+    ASTNode::Break { .. } => formatting::format_keyword("break"),
 
-    ASTNode::Continue { .. } => format_keyword("continue"),
+    ASTNode::Continue { .. } => formatting::format_keyword("continue"),
 
     ASTNode::DoWhileStatement {
       node_id,
@@ -724,7 +730,7 @@ fn do_node_to_source_text(
         "{} {} {} ({})",
         format_topic_keyword(&node_id, "do", &new_node_topic(node_id)),
         body_str,
-        format_keyword("while"),
+        formatting::format_keyword("while"),
         condition
       )
     }
@@ -834,7 +840,7 @@ fn do_node_to_source_text(
       let false_part = if let Some(false_b) = false_body {
         format!(
           " {} {}",
-          format_keyword("else"),
+          formatting::format_keyword("else"),
           do_node_to_source_text(
             false_b,
             indent_level,
@@ -855,7 +861,7 @@ fn do_node_to_source_text(
       )
     }
 
-    ASTNode::InlineAssembly { .. } => format_keyword("assembly"),
+    ASTNode::InlineAssembly { .. } => formatting::format_keyword("assembly"),
 
     ASTNode::PlaceholderStatement { node_id, .. } => {
       format_topic_keyword(&node_id, "placeholder", &new_node_topic(node_id))
@@ -922,7 +928,7 @@ fn do_node_to_source_text(
       let trailing_newline = if !stmts.is_empty() { "\n" } else { "" };
       format!(
         "{} {}{}{}{}",
-        format_keyword("unchecked"),
+        formatting::format_keyword("unchecked"),
         format_brace("{", indent_level),
         indent(&stmts, indent_level),
         trailing_newline,
@@ -994,7 +1000,7 @@ fn do_node_to_source_text(
 
           format!(
             "{} ({}\n) {} {}",
-            format_keyword("let"),
+            formatting::format_keyword("let"),
             indent(&declarations_str, indent_level + 1),
             format_operator("="),
             &initial_val_str
@@ -1092,7 +1098,7 @@ fn do_node_to_source_text(
         // Do not render a visibility modifier for internal variables (they are
         // assumed to be internal)
         if *visibility != VariableVisibility::Internal {
-          parts.push(format_keyword(&visibility_str));
+          parts.push(formatting::format_keyword(&visibility_str));
         }
         // Only render "let" for local variables that are not parameters or struct fields
         if *visibility == VariableVisibility::Internal
@@ -1100,17 +1106,17 @@ fn do_node_to_source_text(
           && !struct_field
           && parameter_variable.is_none()
         {
-          parts.push(format_keyword("let"));
+          parts.push(formatting::format_keyword("let"));
         }
         // Do not render an immutable modifier for internal variables (they are
         // assumed to be immutable unless mutated)
         if !(*visibility == VariableVisibility::Internal
           && *mutability == VariableMutability::Immutable)
         {
-          parts.push(format_keyword(&mutability_str));
+          parts.push(formatting::format_keyword(&mutability_str));
         }
         if !storage.is_empty() {
-          parts.push(format_keyword(&storage));
+          parts.push(formatting::format_keyword(&storage));
         }
         let type_str = do_node_to_source_text(
           type_name,
@@ -1199,7 +1205,7 @@ fn do_node_to_source_text(
     } => {
       let kind = contract_kind_to_string(contract_kind);
       let abstract_str = if *abstract_ {
-        format!("{} ", format_keyword("abstract"))
+        format!("{} ", formatting::format_keyword("abstract"))
       } else {
         String::new()
       };
@@ -1232,7 +1238,7 @@ fn do_node_to_source_text(
         };
         format!(
           "{} {}{}",
-          indent(&format_keyword("is"), base_indent_level),
+          indent(&formatting::format_keyword("is"), base_indent_level),
           first_base,
           remaining_bases
         )
@@ -1262,7 +1268,7 @@ fn do_node_to_source_text(
       format!(
         "{}{} {}{}{}",
         abstract_str,
-        format_keyword(&kind),
+        formatting::format_keyword(&kind),
         format_identifier(
           &node_id,
           &name,
@@ -1328,15 +1334,17 @@ fn do_node_to_source_text(
       ..
     } => {
       let virtual_str = if *virtual_ {
-        format!("{} ", format_keyword("virtual"))
+        format!("{} ", formatting::format_keyword("virtual"))
       } else {
         String::new()
       };
       let visibility_str =
-        format_keyword(&function_visibility_to_string(visibility));
+        formatting::format_keyword(&function_visibility_to_string(visibility));
       let mutability = format!(
         " {}",
-        format_keyword(&function_mutability_to_string(state_mutability))
+        formatting::format_keyword(&function_mutability_to_string(
+          state_mutability
+        ))
       );
       let kind_name_str = if name.is_empty() {
         format!(
@@ -1355,7 +1363,7 @@ fn do_node_to_source_text(
         };
         format!(
           " {} {}",
-          format_keyword(&function_kind_to_string(kind)),
+          formatting::format_keyword(&function_kind_to_string(kind)),
           format_function_name(&node_id, name, &new_node_topic(referenced_id))
         )
       };
@@ -1392,7 +1400,7 @@ fn do_node_to_source_text(
       };
       let returns = format!(
         "{} {} ",
-        format_keyword("returns"),
+        formatting::format_keyword("returns"),
         do_node_to_source_text(
           return_parameters,
           indent_level,
@@ -1449,7 +1457,7 @@ fn do_node_to_source_text(
       );
       format!(
         "{} {}{}",
-        format_keyword("event"),
+        formatting::format_keyword("event"),
         format_identifier(
           &node_id,
           name,
@@ -1475,7 +1483,7 @@ fn do_node_to_source_text(
       );
       format!(
         "{} {}{}",
-        format_keyword("error"),
+        formatting::format_keyword("error"),
         format_identifier(
           &node_id,
           name,
@@ -1503,18 +1511,18 @@ fn do_node_to_source_text(
         ctx,
       );
       let virtual_str = if *virtual_ {
-        format!("{} ", format_keyword("virtual"))
+        format!("{} ", formatting::format_keyword("virtual"))
       } else {
         String::new()
       };
       let visibility_str =
-        format_keyword(&function_visibility_to_string(&visibility));
+        formatting::format_keyword(&function_visibility_to_string(&visibility));
 
       format!(
         "{}{} {} {}{}",
         virtual_str,
         visibility_str,
-        format_keyword("mod"),
+        formatting::format_keyword("mod"),
         format_function_name(&node_id, name, &new_node_topic(referenced_id)),
         params,
       )
@@ -1550,7 +1558,7 @@ fn do_node_to_source_text(
       ..
     } => {
       let visibility_str =
-        format_keyword(&variable_visibility_to_string(&visibility));
+        formatting::format_keyword(&variable_visibility_to_string(&visibility));
       let indent_level = indent_level + 1;
       let member_ctx = Context {
         target_topic: ctx.target_topic.clone(),
@@ -1575,7 +1583,7 @@ fn do_node_to_source_text(
       format!(
         "{} {} {} {{{}{}}}",
         visibility_str,
-        format_keyword("struct"),
+        formatting::format_keyword("struct"),
         format_identifier(
           &node_id,
           name,
@@ -1611,7 +1619,7 @@ fn do_node_to_source_text(
       let trailing_newline = if !members_str.is_empty() { "\n" } else { "" };
       format!(
         "{} {} {{{}{}}}",
-        format_keyword("enum"),
+        formatting::format_keyword("enum"),
         format_identifier(
           &node_id,
           name,
@@ -1650,13 +1658,17 @@ fn do_node_to_source_text(
     ASTNode::PragmaDirective { literals, .. } => {
       format!(
         "{} {}",
-        format_keyword("pragma"),
+        formatting::format_keyword("pragma"),
         format_number(&literals.join("."))
       )
     }
 
     ASTNode::ImportDirective { file, .. } => {
-      format!("{} {}", format_keyword("import"), format_string(&file))
+      format!(
+        "{} {}",
+        formatting::format_keyword("import"),
+        format_string(&file)
+      )
     }
 
     ASTNode::UsingForDirective {
@@ -1679,7 +1691,7 @@ fn do_node_to_source_text(
         let for_indent_level = indent_level + 1;
         format!(
           "{} {}",
-          indent(&format_keyword("for"), for_indent_level),
+          indent(&formatting::format_keyword("for"), for_indent_level),
           do_node_to_source_text(
             type_node,
             for_indent_level,
@@ -1691,7 +1703,12 @@ fn do_node_to_source_text(
       } else {
         String::new()
       };
-      format!("{} {}{}", format_keyword("using"), lib, type_str)
+      format!(
+        "{} {}{}",
+        formatting::format_keyword("using"),
+        lib,
+        type_str
+      )
     }
 
     ASTNode::SourceUnit { nodes, .. } => nodes
@@ -1730,7 +1747,7 @@ fn do_node_to_source_text(
       let mutability_str = function_mutability_to_string(state_mutability);
       let returns_str = format!(
         "{} {}",
-        format_keyword("returns"),
+        formatting::format_keyword("returns"),
         do_node_to_source_text(
           return_parameter_types,
           indent_level,
@@ -1742,10 +1759,10 @@ fn do_node_to_source_text(
 
       format!(
         "{}{}{}{}{}",
-        format_keyword("fn"),
+        formatting::format_keyword("fn"),
         params,
-        format_keyword(&visibility_str),
-        format_keyword(&mutability_str),
+        formatting::format_keyword(&visibility_str),
+        formatting::format_keyword(&mutability_str),
         returns_str
       )
     }
@@ -1867,7 +1884,7 @@ fn do_node_to_source_text(
       }
       format!(
         "{} ({}\n)",
-        format_keyword("map"),
+        formatting::format_keyword("map"),
         indent(
           &format!("{} {} {}", key, format_operator("=>"), value),
           indent_level + 1
@@ -1895,50 +1912,21 @@ fn format_identifier(
   topic: &topic::Topic,
   topic_metadata: &BTreeMap<topic::Topic, core::TopicMetadata>,
 ) -> String {
-  // Prefer metadata-based classification (single source of truth)
+  let node_topic = new_node_topic(node_id);
   match topic_metadata.get(topic) {
-    Some(core::TopicMetadata::NamedTopic { kind, .. }) => {
-      let css_class = match kind {
-        core::NamedTopicKind::Contract(_) => "contract",
-        core::NamedTopicKind::Struct => "struct",
-        core::NamedTopicKind::Enum => "enum",
-        core::NamedTopicKind::EnumMember => "enum-value",
-        core::NamedTopicKind::Error => "error",
-        core::NamedTopicKind::Event => "event",
-        core::NamedTopicKind::StateVariable(
-          core::VariableMutability::Constant,
-        ) => "constant",
-        core::NamedTopicKind::StateVariable(
-          core::VariableMutability::Mutable,
-        ) => "mutable-state-variable",
-        core::NamedTopicKind::StateVariable(
-          core::VariableMutability::Immutable,
-        ) => "immutable-state-variable",
-        core::NamedTopicKind::LocalVariable => "local-variable",
-        core::NamedTopicKind::Function(_) => "function",
-        core::NamedTopicKind::Modifier => "modifier",
-        core::NamedTopicKind::Builtin => "global",
-      };
-      format_topic_token(&node_id, name, css_class, topic)
+    Some(TopicMetadata::NamedTopic { kind, .. }) => {
+      formatting::format_named_identifier(&node_topic, name, topic, kind)
     }
-    Some(core::TopicMetadata::NamedMutableTopic { kind, .. }) => {
-      let css_class = match kind {
-        core::NamedMutableTopicKind::StateVariable => "mutable-state-variable",
-        core::NamedMutableTopicKind::LocalVariable => "mutable-local-variable",
-      };
-      format_topic_token(&node_id, name, css_class, topic)
+    Some(TopicMetadata::NamedMutableTopic { kind, .. }) => {
+      formatting::format_named_mutable_identifier(
+        &node_topic,
+        name,
+        topic,
+        kind,
+      )
     }
-    _ => format!(
-      "<span id=\"{}\" class=\"unknown {}\">{}</span>",
-      new_node_topic(node_id).id(),
-      topic.id(),
-      name,
-    ),
+    _ => formatting::format_topic_token(&node_topic, name, "unknown", topic),
   }
-}
-
-fn format_token(token: &str, class: &str) -> String {
-  formatting::format_token(token, class)
 }
 
 fn format_topic_token(
@@ -1957,10 +1945,6 @@ fn format_node(node_str: &str, node_id: i32, class: &str) -> String {
     class,
     node_str
   )
-}
-
-fn format_keyword(keyword: &str) -> String {
-  format_token(keyword, "keyword")
 }
 
 fn format_topic_keyword(
@@ -1988,31 +1972,31 @@ fn format_enum_value(
 }
 
 fn format_type(type_name: &String) -> String {
-  format_token(type_name, "type")
+  formatting::format_token(type_name, "type")
 }
 
 fn format_member(name: &str) -> String {
-  format_token(name, "member")
+  formatting::format_token(name, "member")
 }
 
 fn format_global(name: &str) -> String {
-  format_token(name, "global")
+  formatting::format_token(name, "global")
 }
 
 fn format_comment(text: &str) -> String {
-  format_token(text, "comment")
+  formatting::format_token(text, "comment")
 }
 
 fn format_number(val: &str) -> String {
-  format_token(val, "number")
+  formatting::format_token(val, "number")
 }
 
 fn format_string(val: &str) -> String {
-  format_token(val, "string")
+  formatting::format_token(val, "string")
 }
 
 fn format_operator(op: &str) -> String {
-  format_token(&html_escape(&op), "operator")
+  formatting::format_token(&html_escape(&op), "operator")
 }
 
 fn format_topic_operator(

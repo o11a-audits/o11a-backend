@@ -201,7 +201,7 @@ fn process_documentation_node(
       }
     }
 
-    DocumentationNode::CodeBlock { .. } => {
+    DocumentationNode::CodeBlock { children, .. } => {
       audit_data.topic_metadata.insert(
         topic.clone(),
         TopicMetadata::UnnamedTopic {
@@ -211,9 +211,16 @@ fn process_documentation_node(
         },
       );
 
-      audit_data
-        .nodes
-        .insert(topic, Node::Documentation(node.clone()));
+      // Add the node with children converted to stubs
+      audit_data.nodes.insert(
+        topic.clone(),
+        Node::Documentation(parser::children_to_stubs(node.clone())),
+      );
+
+      // Process children (code tokens) with the same scope
+      for child in children {
+        process_documentation_node(child, scope, audit_data)?;
+      }
     }
 
     DocumentationNode::List { children, .. } => {
@@ -260,17 +267,26 @@ fn process_documentation_node(
       }
     }
 
-    DocumentationNode::InlineCode { .. } => {
-      // Add the inline code node (no topic_metadata, just the node)
-      // Documentation references are tracked via the referenced_declaration field
-      audit_data
-        .nodes
-        .insert(topic.clone(), Node::Documentation(node.clone()));
+    DocumentationNode::InlineCode { children, .. } => {
+      // Add the inline code node with children converted to stubs
+      audit_data.nodes.insert(
+        topic.clone(),
+        Node::Documentation(parser::children_to_stubs(node.clone())),
+      );
+
+      // Process children (code tokens) with the same scope
+      for child in children {
+        process_documentation_node(child, scope, audit_data)?;
+      }
     }
 
-    // For all other node types, just add them to the nodes map
+    // For all other node types, just add them to the nodes map (no topic_metadata)
     DocumentationNode::Text { .. }
-    | DocumentationNode::ThematicBreak { .. } => {
+    | DocumentationNode::ThematicBreak { .. }
+    | DocumentationNode::CodeKeyword { .. }
+    | DocumentationNode::CodeOperator { .. }
+    | DocumentationNode::CodeIdentifier { .. }
+    | DocumentationNode::CodeText { .. } => {
       audit_data
         .nodes
         .insert(topic, Node::Documentation(node.clone()));

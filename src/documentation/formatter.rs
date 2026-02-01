@@ -1,8 +1,32 @@
 use crate::core;
 use crate::core::topic;
+use crate::core::{NamedTopicKind, VariableMutability};
 use crate::documentation::parser::DocumentationNode;
 use crate::formatting;
 use std::collections::BTreeMap;
+
+/// Converts a NamedTopicKind to a CSS class for syntax highlighting
+fn named_topic_kind_to_class(kind: &NamedTopicKind) -> &'static str {
+  match kind {
+    NamedTopicKind::Contract(_) => "contract",
+    NamedTopicKind::Function(_) => "function",
+    NamedTopicKind::Modifier => "modifier",
+    NamedTopicKind::Event => "event",
+    NamedTopicKind::Error => "error",
+    NamedTopicKind::Struct => "struct",
+    NamedTopicKind::Enum => "enum",
+    NamedTopicKind::EnumMember => "enum-member",
+    NamedTopicKind::StateVariable(VariableMutability::Mutable) => {
+      "mutable-state-variable"
+    }
+    NamedTopicKind::StateVariable(VariableMutability::Immutable) => {
+      "immutable-state-variable"
+    }
+    NamedTopicKind::StateVariable(VariableMutability::Constant) => "constant",
+    NamedTopicKind::LocalVariable => "local-variable",
+    NamedTopicKind::Builtin => "builtin",
+  }
+}
 
 /// Converts a documentation node to formatted HTML string
 pub fn node_to_html(
@@ -101,28 +125,17 @@ fn do_node_to_html(
 
     DocumentationNode::Text { value, .. } => formatting::html_escape(value),
 
-    DocumentationNode::InlineCode {
-      value,
-      referenced_declaration,
-      ..
-    } => {
-      // Add reference class and data attribute if this links to a declaration
-      let reference_attrs = if let Some(ref_topic) = referenced_declaration {
-        format!(" data-ref-topic=\"{}\"", ref_topic.id)
-      } else {
-        String::new()
-      };
-
-      format!(
-        "<code class=\"inline-code reference\"{}>{}</code>",
-        reference_attrs,
-        formatting::html_escape(value)
-      )
+    DocumentationNode::InlineCode { children, .. } => {
+      let inner: String = children
+        .iter()
+        .map(|c| do_node_to_html(c, indent_level, nodes_map))
+        .collect();
+      format!("<code class=\"inline-code\">{}</code>", inner)
     }
 
     DocumentationNode::CodeBlock {
       lang,
-      value,
+      children,
       node_id,
       ..
     } => {
@@ -131,15 +144,53 @@ fn do_node_to_html(
         .as_ref()
         .map(|l| format!(" language-{}", l))
         .unwrap_or_default();
+      let inner: String = children
+        .iter()
+        .map(|c| do_node_to_html(c, indent_level, nodes_map))
+        .collect();
 
       format!(
-        "<pre id=\"{}\" class=\"topic-token code-block\" data-topic=\"{}\" tabindex=\"0\"><code class=\"{}\">{}</code></pre>",
-        topic_id.id,
-        topic_id.id,
-        lang_class,
-        formatting::html_escape(value)
+        "<pre id=\"{}\" class=\"topic-token code-block{}\" data-topic=\"{}\" tabindex=\"0\"><code>{}</code></pre>",
+        topic_id.id, lang_class, topic_id.id, inner
       )
     }
+
+    DocumentationNode::CodeKeyword { value, .. } => {
+      formatting::format_token(&formatting::html_escape(value), "keyword")
+    }
+
+    DocumentationNode::CodeOperator { value, .. } => {
+      formatting::format_token(&formatting::html_escape(value), "operator")
+    }
+
+    DocumentationNode::CodeIdentifier {
+      node_id,
+      value,
+      referenced_topic,
+      kind,
+      ..
+    } => {
+      let class = kind
+        .as_ref()
+        .map(named_topic_kind_to_class)
+        .unwrap_or("identifier");
+      match referenced_topic {
+        Some(ref_topic) => {
+          let node_topic = topic::new_documentation_topic(*node_id);
+          formatting::format_topic_token(
+            &node_topic,
+            &formatting::html_escape(value),
+            class,
+            ref_topic,
+          )
+        }
+        None => {
+          formatting::format_token(&formatting::html_escape(value), class)
+        }
+      }
+    }
+
+    DocumentationNode::CodeText { value, .. } => formatting::html_escape(value),
 
     DocumentationNode::List {
       ordered, children, ..
