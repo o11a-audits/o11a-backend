@@ -5,8 +5,6 @@ pub mod topic;
 
 use std::collections::{BTreeMap, HashSet};
 
-use crate::solidity::parser;
-
 // ============================================================================
 // Solidity Type System (for checker module)
 // ============================================================================
@@ -691,6 +689,8 @@ pub fn new_audit_data(
       name: "keccak256".to_string(),
       references: Vec::new(),
       expanded_references: Vec::new(),
+      is_mutable: false,
+      mutations: Vec::new(),
       ancestors: Vec::new(),
       descendants: Vec::new(),
       relatives: Vec::new(),
@@ -709,6 +709,8 @@ pub fn new_audit_data(
       name: "type".to_string(),
       references: Vec::new(),
       expanded_references: Vec::new(),
+      is_mutable: false,
+      mutations: Vec::new(),
       ancestors: Vec::new(),
       descendants: Vec::new(),
       relatives: Vec::new(),
@@ -727,6 +729,8 @@ pub fn new_audit_data(
       name: "this".to_string(),
       references: Vec::new(),
       expanded_references: Vec::new(),
+      is_mutable: false,
+      mutations: Vec::new(),
       ancestors: Vec::new(),
       descendants: Vec::new(),
       relatives: Vec::new(),

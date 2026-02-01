@@ -1,32 +1,8 @@
 use crate::core;
 use crate::core::topic;
-use crate::core::{NamedTopicKind, VariableMutability};
 use crate::documentation::parser::DocumentationNode;
 use crate::formatting;
 use std::collections::BTreeMap;
-
-/// Converts a NamedTopicKind to a CSS class for syntax highlighting
-fn named_topic_kind_to_class(kind: &NamedTopicKind) -> &'static str {
-  match kind {
-    NamedTopicKind::Contract(_) => "contract",
-    NamedTopicKind::Function(_) => "function",
-    NamedTopicKind::Modifier => "modifier",
-    NamedTopicKind::Event => "event",
-    NamedTopicKind::Error => "error",
-    NamedTopicKind::Struct => "struct",
-    NamedTopicKind::Enum => "enum",
-    NamedTopicKind::EnumMember => "enum-member",
-    NamedTopicKind::StateVariable(VariableMutability::Mutable) => {
-      "mutable-state-variable"
-    }
-    NamedTopicKind::StateVariable(VariableMutability::Immutable) => {
-      "immutable-state-variable"
-    }
-    NamedTopicKind::StateVariable(VariableMutability::Constant) => "constant",
-    NamedTopicKind::LocalVariable => "local-variable",
-    NamedTopicKind::Builtin => "builtin",
-  }
-}
 
 /// Converts a documentation node to formatted HTML string
 pub fn node_to_html(
@@ -79,17 +55,7 @@ fn do_node_to_html(
         .collect::<Vec<_>>()
         .join("");
 
-      format!(
-        "<h{}>{}</h{}>",
-        level,
-        formatting::format_topic_token(
-          &topic_id,
-          &heading_content,
-          "heading",
-          &topic_id
-        ),
-        level
-      )
+      formatting::format_heading(*level, &topic_id, &heading_content)
     }
 
     DocumentationNode::Paragraph {
@@ -130,7 +96,7 @@ fn do_node_to_html(
         .iter()
         .map(|c| do_node_to_html(c, indent_level, nodes_map))
         .collect();
-      format!("<code class=\"inline-code\">{}</code>", inner)
+      formatting::format_inline_code(&inner)
     }
 
     DocumentationNode::CodeBlock {
@@ -140,27 +106,20 @@ fn do_node_to_html(
       ..
     } => {
       let topic_id = topic::new_documentation_topic(*node_id);
-      let lang_class = lang
-        .as_ref()
-        .map(|l| format!(" language-{}", l))
-        .unwrap_or_default();
       let inner: String = children
         .iter()
         .map(|c| do_node_to_html(c, indent_level, nodes_map))
         .collect();
 
-      format!(
-        "<pre id=\"{}\" class=\"topic-token code-block{}\" data-topic=\"{}\" tabindex=\"0\"><code>{}</code></pre>",
-        topic_id.id, lang_class, topic_id.id, inner
-      )
+      formatting::format_code_block(&topic_id, lang.as_deref(), &inner)
     }
 
     DocumentationNode::CodeKeyword { value, .. } => {
-      formatting::format_token(&formatting::html_escape(value), "keyword")
+      formatting::format_keyword(&formatting::html_escape(value))
     }
 
     DocumentationNode::CodeOperator { value, .. } => {
-      formatting::format_token(&formatting::html_escape(value), "operator")
+      formatting::format_operator(&formatting::html_escape(value))
     }
 
     DocumentationNode::CodeIdentifier {
@@ -172,8 +131,9 @@ fn do_node_to_html(
     } => {
       let class = kind
         .as_ref()
-        .map(named_topic_kind_to_class)
+        .map(formatting::named_topic_kind_to_class)
         .unwrap_or("identifier");
+
       match referenced_topic {
         Some(ref_topic) => {
           let node_topic = topic::new_documentation_topic(*node_id);
@@ -193,25 +153,20 @@ fn do_node_to_html(
     DocumentationNode::CodeText { value, .. } => formatting::html_escape(value),
 
     DocumentationNode::List {
-      ordered, children, ..
+      node_id,
+      ordered,
+      children,
+      ..
     } => {
+      let topic = topic::new_documentation_topic(*node_id);
+
       let list_items = children
         .iter()
         .map(|child| do_node_to_html(child, indent_level + 1, nodes_map))
         .collect::<Vec<_>>()
         .join("\n");
 
-      if *ordered {
-        format!(
-          "<ol class=\"topic-token list ordered\" tabindex=\"0\">\n{}\n</ol>",
-          list_items
-        )
-      } else {
-        format!(
-          "<ul class=\"topic-token list unordered\" tabindex=\"0\">\n{}\n</ul>",
-          list_items
-        )
-      }
+      formatting::format_list(&topic, *ordered, &list_items)
     }
 
     DocumentationNode::ListItem { children, .. } => {
@@ -221,7 +176,7 @@ fn do_node_to_html(
         .collect::<Vec<_>>()
         .join("");
 
-      format!("<li class=\"list-item\">{}</li>", content)
+      formatting::format_list_item(&content)
     }
 
     DocumentationNode::Emphasis { children, .. } => {
@@ -231,7 +186,7 @@ fn do_node_to_html(
         .collect::<Vec<_>>()
         .join("");
 
-      format!("<em class=\"emphasis\">{}</em>", content)
+      formatting::format_emphasis(&content)
     }
 
     DocumentationNode::Strong { children, .. } => {
@@ -241,7 +196,7 @@ fn do_node_to_html(
         .collect::<Vec<_>>()
         .join("");
 
-      format!("<strong class=\"strong\">{}</strong>", content)
+      formatting::format_strong(&content)
     }
 
     DocumentationNode::Link {
@@ -256,17 +211,7 @@ fn do_node_to_html(
         .collect::<Vec<_>>()
         .join("");
 
-      let title_attr = title
-        .as_ref()
-        .map(|t| format!(" title=\"{}\"", formatting::html_escape(t)))
-        .unwrap_or_default();
-
-      format!(
-        "<a href=\"{}\" class=\"link\"{}>{}</a>",
-        formatting::html_escape(url),
-        title_attr,
-        content
-      )
+      formatting::format_link(url, title.as_deref(), &content)
     }
 
     DocumentationNode::BlockQuote {
@@ -288,14 +233,9 @@ fn do_node_to_html(
     }
 
     DocumentationNode::ThematicBreak { .. } => {
-      "<hr class=\"thematic-break\">".to_string()
+      formatting::format_thematic_break()
     }
 
-    DocumentationNode::Stub { topic, .. } => {
-      format!(
-        "<span class=\"stub\" data-topic=\"{}\">Stub</span>",
-        topic.id
-      )
-    }
+    DocumentationNode::Stub { topic, .. } => formatting::format_stub(topic),
   }
 }
