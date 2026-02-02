@@ -1346,10 +1346,20 @@ fn build_expanded_reference_groups(
     })
     .collect();
 
-  // Sort groups by ancestry:
-  // 1. Contracts with ancestors (sorted by fewest ancestors first)
-  // 2. Contracts with only descendants (sorted by most descendants first)
+  // Sort groups by:
+  // 1. In-scope contracts first, out-of-scope contracts last
+  // 2. Within in-scope: contracts with ancestors (sorted by fewest ancestors first)
+  // 3. Within in-scope: contracts with only descendants (sorted by most descendants first)
   groups.sort_by(|a, b| {
+    // Primary sort: in-scope contracts come before out-of-scope contracts
+    let in_scope_a = a.is_in_scope();
+    let in_scope_b = b.is_in_scope();
+
+    if in_scope_a != in_scope_b {
+      // In-scope contracts come first (true > false, so reverse comparison)
+      return in_scope_b.cmp(&in_scope_a);
+    }
+
     let id_a = a.scope().underlying_id().unwrap_or(0);
     let id_b = b.scope().underlying_id().unwrap_or(0);
 
@@ -1362,7 +1372,7 @@ fn build_expanded_reference_groups(
       .copied()
       .unwrap_or((0, 0));
 
-    // Primary sort: contracts with ancestors come before contracts without
+    // Secondary sort: contracts with ancestors come before contracts without
     let has_ancestors_a = ancestors_a > 0;
     let has_ancestors_b = ancestors_b > 0;
 
