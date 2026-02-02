@@ -142,7 +142,8 @@ fn get_named_topic_kind(
 ) -> Option<core::NamedTopicKind> {
   match metadata {
     core::TopicMetadata::NamedTopic { kind, .. } => Some(kind.clone()),
-    core::TopicMetadata::UnnamedTopic { .. } => None,
+    core::TopicMetadata::UnnamedTopic { .. }
+    | core::TopicMetadata::TitledTopic { .. } => None,
   }
 }
 
@@ -359,29 +360,35 @@ pub struct DocumentationAST {
 pub enum DocumentationNode {
   Root {
     node_id: i32,
+    position: Option<usize>,
     children: Vec<DocumentationNode>,
   },
 
-  // Section: groups a heading with all content until the next heading
-  // This node is created by the parser, not present in markdown AST
-  Section {
-    node_id: i32,
-    header: Box<DocumentationNode>, // The heading node
-    children: Vec<DocumentationNode>, // Content until next heading
-  },
-
+  // Heading: contains its text content and a section child with content until the next heading
   Heading {
     node_id: i32,
+    position: Option<usize>,
     level: u8,
-    children: Vec<DocumentationNode>,
+    children: Vec<DocumentationNode>, // Text content of the heading
+    section: Option<Box<DocumentationNode>>, // Section containing content until next heading
+  },
+
+  // Section: groups all content under a heading until the next heading
+  // This node is created by the parser, not present in markdown AST
+  // The section is a child of the Heading, sharing its title
+  Section {
+    node_id: i32,
+    title: String, // Text content of the heading (copied from parent)
+    children: Vec<DocumentationNode>, // Content until next heading
   },
 
   Paragraph {
     node_id: i32,
+    position: Option<usize>,
     children: Vec<DocumentationNode>,
   },
 
-  // Sentence
+  // Sentence: created by parser from paragraph content
   Sentence {
     node_id: i32,
     children: Vec<DocumentationNode>,
@@ -389,24 +396,28 @@ pub enum DocumentationNode {
 
   Text {
     node_id: i32,
+    position: Option<usize>,
     value: String,
   },
 
   // Inline code (potential references to source code declarations)
   InlineCode {
     node_id: i32,
+    position: Option<usize>,
     value: String,
     children: Vec<DocumentationNode>,
   },
 
   CodeBlock {
     node_id: i32,
+    position: Option<usize>,
     lang: Option<String>,
     value: String,
     children: Vec<DocumentationNode>,
   },
 
   // Code token types for syntax highlighting and reference resolution
+  // Created by parser during tokenization, not from mdast
   CodeKeyword {
     node_id: i32,
     value: String,
@@ -431,27 +442,32 @@ pub enum DocumentationNode {
 
   List {
     node_id: i32,
+    position: Option<usize>,
     ordered: bool,
     children: Vec<DocumentationNode>,
   },
 
   ListItem {
     node_id: i32,
+    position: Option<usize>,
     children: Vec<DocumentationNode>,
   },
 
   Emphasis {
     node_id: i32,
+    position: Option<usize>,
     children: Vec<DocumentationNode>,
   },
 
   Strong {
     node_id: i32,
+    position: Option<usize>,
     children: Vec<DocumentationNode>,
   },
 
   Link {
     node_id: i32,
+    position: Option<usize>,
     url: String,
     title: Option<String>,
     children: Vec<DocumentationNode>,
@@ -459,11 +475,13 @@ pub enum DocumentationNode {
 
   BlockQuote {
     node_id: i32,
+    position: Option<usize>,
     children: Vec<DocumentationNode>,
   },
 
   ThematicBreak {
     node_id: i32,
+    position: Option<usize>,
   },
 
   // Placeholder for a node (similar to Solidity's Stub)
@@ -499,11 +517,38 @@ impl DocumentationNode {
     }
   }
 
+  /// Returns the source position (start offset) for nodes that have one.
+  /// Returns None for nodes created by the parser (Section, Sentence, Code tokens, Stub).
+  pub fn position(&self) -> Option<usize> {
+    match self {
+      DocumentationNode::Root { position, .. }
+      | DocumentationNode::Heading { position, .. }
+      | DocumentationNode::Paragraph { position, .. }
+      | DocumentationNode::Text { position, .. }
+      | DocumentationNode::InlineCode { position, .. }
+      | DocumentationNode::CodeBlock { position, .. }
+      | DocumentationNode::List { position, .. }
+      | DocumentationNode::ListItem { position, .. }
+      | DocumentationNode::Emphasis { position, .. }
+      | DocumentationNode::Strong { position, .. }
+      | DocumentationNode::Link { position, .. }
+      | DocumentationNode::BlockQuote { position, .. }
+      | DocumentationNode::ThematicBreak { position, .. } => *position,
+      // Nodes created by parser don't have position
+      DocumentationNode::Section { .. }
+      | DocumentationNode::Sentence { .. }
+      | DocumentationNode::CodeKeyword { .. }
+      | DocumentationNode::CodeOperator { .. }
+      | DocumentationNode::CodeIdentifier { .. }
+      | DocumentationNode::CodeText { .. }
+      | DocumentationNode::Stub { .. } => None,
+    }
+  }
+
   pub fn children(&self) -> Vec<&DocumentationNode> {
     match self {
       DocumentationNode::Root { children, .. }
       | DocumentationNode::Section { children, .. }
-      | DocumentationNode::Heading { children, .. }
       | DocumentationNode::Paragraph { children, .. }
       | DocumentationNode::Sentence { children, .. }
       | DocumentationNode::InlineCode { children, .. }
@@ -516,7 +561,39 @@ impl DocumentationNode {
       | DocumentationNode::BlockQuote { children, .. } => {
         children.iter().collect()
       }
+      // Heading has text children and optionally a section child
+      DocumentationNode::Heading {
+        children, section, ..
+      } => {
+        let mut result: Vec<&DocumentationNode> = children.iter().collect();
+        if let Some(sec) = section {
+          result.push(sec.as_ref());
+        }
+        result
+      }
       _ => vec![],
+    }
+  }
+
+  /// Extracts the text content from a node by recursively collecting Text node values.
+  /// Useful for getting the plain text of a heading.
+  pub fn extract_text(&self) -> String {
+    match self {
+      DocumentationNode::Text { value, .. } => value.clone(),
+      DocumentationNode::CodeText { value, .. } => value.clone(),
+      DocumentationNode::CodeKeyword { value, .. } => value.clone(),
+      DocumentationNode::CodeOperator { value, .. } => value.clone(),
+      DocumentationNode::CodeIdentifier { value, .. } => value.clone(),
+      DocumentationNode::InlineCode { value, .. } => value.clone(),
+      _ => {
+        // Recursively collect text from children
+        self
+          .children()
+          .into_iter()
+          .map(|child| child.extract_text())
+          .collect::<Vec<_>>()
+          .join("")
+      }
     }
   }
 
@@ -566,6 +643,7 @@ fn split_into_sentences(
               // Add text up to and including the period
               current_sentence_nodes.push(DocumentationNode::Text {
                 node_id: next_node_id(),
+                position: None, // Created by parser, no mdast position
                 value: before_period.to_string(),
               });
 
@@ -585,6 +663,7 @@ fn split_into_sentences(
             if !remaining_text.trim().is_empty() {
               current_sentence_nodes.push(DocumentationNode::Text {
                 node_id: next_node_id(),
+                position: None, // Created by parser, no mdast position
                 value: remaining_text.to_string(),
               });
             }
@@ -684,12 +763,8 @@ fn group_into_sections_at_level(
               current_content.drain(..).collect(),
               effective_level + 1,
             );
-            let section_node_id = next_node_id();
-            result.push(DocumentationNode::Section {
-              node_id: section_node_id,
-              header: Box::new(heading),
-              children: nested_children,
-            });
+            // Create heading with section as child
+            result.push(create_heading_with_section(heading, nested_children));
           }
           // Start a new section at this level
           current_heading = Some(node);
@@ -709,12 +784,8 @@ fn group_into_sections_at_level(
               current_content.drain(..).collect(),
               effective_level + 1,
             );
-            let section_node_id = next_node_id();
-            result.push(DocumentationNode::Section {
-              node_id: section_node_id,
-              header: Box::new(heading),
-              children: nested_children,
-            });
+            // Create heading with section as child
+            result.push(create_heading_with_section(heading, nested_children));
           }
           result.push(node);
         }
@@ -734,15 +805,55 @@ fn group_into_sections_at_level(
   if let Some(heading) = current_heading {
     let nested_children =
       group_into_sections_at_level(current_content, effective_level + 1);
-    let section_node_id = next_node_id();
-    result.push(DocumentationNode::Section {
-      node_id: section_node_id,
-      header: Box::new(heading),
-      children: nested_children,
-    });
+    // Create heading with section as child
+    result.push(create_heading_with_section(heading, nested_children));
   }
 
   result
+}
+
+/// Creates a Heading node with a Section child containing the given content.
+/// The heading's existing data is preserved, and a new Section node is created
+/// with the heading's title and the provided children.
+fn create_heading_with_section(
+  heading: DocumentationNode,
+  section_children: Vec<DocumentationNode>,
+) -> DocumentationNode {
+  match heading {
+    DocumentationNode::Heading {
+      node_id,
+      position,
+      level,
+      children,
+      section: _, // Ignore any existing section
+    } => {
+      let section_title = children
+        .iter()
+        .map(|c| c.extract_text())
+        .collect::<Vec<_>>()
+        .join("");
+      let section_node_id = next_node_id();
+      let section = DocumentationNode::Section {
+        node_id: section_node_id,
+        title: section_title,
+        children: section_children,
+      };
+      DocumentationNode::Heading {
+        node_id,
+        position,
+        level,
+        children,
+        section: Some(Box::new(section)),
+      }
+    }
+    // If not a heading, just return as-is (shouldn't happen)
+    other => other,
+  }
+}
+
+/// Extracts the start offset from an mdast node's position
+fn get_mdast_position(node: &MdNode) -> Option<usize> {
+  node.position().map(|p| p.start.offset)
 }
 
 fn convert_mdast_node(
@@ -750,6 +861,7 @@ fn convert_mdast_node(
   audit_data: &core::AuditData,
 ) -> Result<DocumentationNode, String> {
   let node_id = next_node_id();
+  let position = get_mdast_position(node);
 
   match node {
     MdNode::Root(root) => {
@@ -765,6 +877,7 @@ fn convert_mdast_node(
 
       Ok(DocumentationNode::Root {
         node_id,
+        position,
         children: sections,
       })
     }
@@ -778,8 +891,10 @@ fn convert_mdast_node(
 
       Ok(DocumentationNode::Heading {
         node_id,
+        position,
         level: heading.depth,
         children,
+        section: None, // Section is added later by group_into_sections
       })
     }
 
@@ -800,6 +915,7 @@ fn convert_mdast_node(
       } else {
         Ok(DocumentationNode::Paragraph {
           node_id,
+          position,
           children: sentences,
         })
       }
@@ -807,6 +923,7 @@ fn convert_mdast_node(
 
     MdNode::Text(text) => Ok(DocumentationNode::Text {
       node_id,
+      position,
       value: text.value.clone(),
     }),
 
@@ -815,6 +932,7 @@ fn convert_mdast_node(
 
       Ok(DocumentationNode::InlineCode {
         node_id,
+        position,
         value: code.value.clone(),
         children,
       })
@@ -825,6 +943,7 @@ fn convert_mdast_node(
 
       Ok(DocumentationNode::CodeBlock {
         node_id,
+        position,
         lang: code.lang.clone(),
         value: code.value.clone(),
         children,
@@ -840,6 +959,7 @@ fn convert_mdast_node(
 
       Ok(DocumentationNode::List {
         node_id,
+        position,
         ordered: list.ordered,
         children,
       })
@@ -852,7 +972,11 @@ fn convert_mdast_node(
         .map(|child| convert_mdast_node(child, audit_data))
         .collect::<Result<Vec<_>, _>>()?;
 
-      Ok(DocumentationNode::ListItem { node_id, children })
+      Ok(DocumentationNode::ListItem {
+        node_id,
+        position,
+        children,
+      })
     }
 
     MdNode::Emphasis(emphasis) => {
@@ -862,7 +986,11 @@ fn convert_mdast_node(
         .map(|child| convert_mdast_node(child, audit_data))
         .collect::<Result<Vec<_>, _>>()?;
 
-      Ok(DocumentationNode::Emphasis { node_id, children })
+      Ok(DocumentationNode::Emphasis {
+        node_id,
+        position,
+        children,
+      })
     }
 
     MdNode::Strong(strong) => {
@@ -872,7 +1000,11 @@ fn convert_mdast_node(
         .map(|child| convert_mdast_node(child, audit_data))
         .collect::<Result<Vec<_>, _>>()?;
 
-      Ok(DocumentationNode::Strong { node_id, children })
+      Ok(DocumentationNode::Strong {
+        node_id,
+        position,
+        children,
+      })
     }
 
     MdNode::Link(link) => {
@@ -884,6 +1016,7 @@ fn convert_mdast_node(
 
       Ok(DocumentationNode::Link {
         node_id,
+        position,
         url: link.url.clone(),
         title: link.title.clone(),
         children,
@@ -897,16 +1030,21 @@ fn convert_mdast_node(
         .map(|child| convert_mdast_node(child, audit_data))
         .collect::<Result<Vec<_>, _>>()?;
 
-      Ok(DocumentationNode::BlockQuote { node_id, children })
+      Ok(DocumentationNode::BlockQuote {
+        node_id,
+        position,
+        children,
+      })
     }
 
     MdNode::ThematicBreak(_) => {
-      Ok(DocumentationNode::ThematicBreak { node_id })
+      Ok(DocumentationNode::ThematicBreak { node_id, position })
     }
 
     // For unsupported node types, we'll create a text node with a placeholder
     _ => Ok(DocumentationNode::Text {
       node_id,
+      position,
       value: format!("[UNSUPPORTED {:?}]", node),
     }),
   }
@@ -942,34 +1080,46 @@ fn find_declaration_by_name<'a>(
 /// Converts children nodes to stubs for storage optimization
 pub fn children_to_stubs(node: DocumentationNode) -> DocumentationNode {
   match node {
-    DocumentationNode::Root { node_id, children } => DocumentationNode::Root {
+    DocumentationNode::Root {
       node_id,
+      position,
+      children,
+    } => DocumentationNode::Root {
+      node_id,
+      position,
       children: children.into_iter().map(node_to_stub).collect(),
     },
     DocumentationNode::Section {
       node_id,
-      header,
+      title,
       children,
     } => DocumentationNode::Section {
       node_id,
-      header: Box::new(node_to_stub(*header)),
+      title,
       children: children.into_iter().map(node_to_stub).collect(),
     },
     DocumentationNode::Heading {
       node_id,
+      position,
       level,
       children,
+      section,
     } => DocumentationNode::Heading {
       node_id,
+      position,
       level,
       children: children.into_iter().map(node_to_stub).collect(),
+      section: section.map(|s| Box::new(node_to_stub(*s))),
     },
-    DocumentationNode::Paragraph { node_id, children } => {
-      DocumentationNode::Paragraph {
-        node_id,
-        children: children.into_iter().map(node_to_stub).collect(),
-      }
-    }
+    DocumentationNode::Paragraph {
+      node_id,
+      position,
+      children,
+    } => DocumentationNode::Paragraph {
+      node_id,
+      position,
+      children: children.into_iter().map(node_to_stub).collect(),
+    },
     DocumentationNode::Sentence { node_id, children } => {
       DocumentationNode::Sentence {
         node_id,
@@ -978,64 +1128,84 @@ pub fn children_to_stubs(node: DocumentationNode) -> DocumentationNode {
     }
     DocumentationNode::List {
       node_id,
+      position,
       ordered,
       children,
     } => DocumentationNode::List {
       node_id,
+      position,
       ordered,
       children: children.into_iter().map(node_to_stub).collect(),
     },
-    DocumentationNode::ListItem { node_id, children } => {
-      DocumentationNode::ListItem {
-        node_id,
-        children: children.into_iter().map(node_to_stub).collect(),
-      }
-    }
-    DocumentationNode::Emphasis { node_id, children } => {
-      DocumentationNode::Emphasis {
-        node_id,
-        children: children.into_iter().map(node_to_stub).collect(),
-      }
-    }
-    DocumentationNode::Strong { node_id, children } => {
-      DocumentationNode::Strong {
-        node_id,
-        children: children.into_iter().map(node_to_stub).collect(),
-      }
-    }
+    DocumentationNode::ListItem {
+      node_id,
+      position,
+      children,
+    } => DocumentationNode::ListItem {
+      node_id,
+      position,
+      children: children.into_iter().map(node_to_stub).collect(),
+    },
+    DocumentationNode::Emphasis {
+      node_id,
+      position,
+      children,
+    } => DocumentationNode::Emphasis {
+      node_id,
+      position,
+      children: children.into_iter().map(node_to_stub).collect(),
+    },
+    DocumentationNode::Strong {
+      node_id,
+      position,
+      children,
+    } => DocumentationNode::Strong {
+      node_id,
+      position,
+      children: children.into_iter().map(node_to_stub).collect(),
+    },
     DocumentationNode::Link {
       node_id,
+      position,
       url,
       title,
       children,
     } => DocumentationNode::Link {
       node_id,
+      position,
       url,
       title,
       children: children.into_iter().map(node_to_stub).collect(),
     },
-    DocumentationNode::BlockQuote { node_id, children } => {
-      DocumentationNode::BlockQuote {
-        node_id,
-        children: children.into_iter().map(node_to_stub).collect(),
-      }
-    }
+    DocumentationNode::BlockQuote {
+      node_id,
+      position,
+      children,
+    } => DocumentationNode::BlockQuote {
+      node_id,
+      position,
+      children: children.into_iter().map(node_to_stub).collect(),
+    },
     DocumentationNode::InlineCode {
       node_id,
+      position,
       value,
       children,
     } => DocumentationNode::InlineCode {
       node_id,
+      position,
       value,
       children: children.into_iter().map(node_to_stub).collect(),
     },
     DocumentationNode::CodeBlock {
       node_id,
+      position,
       lang,
       value,
       children,
     } => DocumentationNode::CodeBlock {
       node_id,
+      position,
       lang,
       value,
       children: children.into_iter().map(node_to_stub).collect(),

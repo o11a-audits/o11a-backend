@@ -234,6 +234,42 @@ pub fn add_to_scope(scope: &Scope, topic: topic::Topic) -> Scope {
   }
 }
 
+/// Sets the member in a scope, replacing any existing member.
+/// Used for nested headings in documentation where sub-H1 sections
+/// should replace the current member rather than nesting further.
+pub fn set_member(scope: &Scope, topic: topic::Topic) -> Scope {
+  match scope {
+    Scope::Global => Scope::Global, // Global scope cannot have members
+    Scope::Container { .. } => scope.clone(), // Container needs a component first
+    Scope::Component {
+      container,
+      component,
+    } => Scope::Member {
+      container: container.clone(),
+      component: component.clone(),
+      member: topic,
+    },
+    Scope::Member {
+      container,
+      component,
+      ..
+    } => Scope::Member {
+      container: container.clone(),
+      component: component.clone(),
+      member: topic,
+    },
+    Scope::SemanticBlock {
+      container,
+      component,
+      ..
+    } => Scope::Member {
+      container: container.clone(),
+      component: component.clone(),
+      member: topic,
+    },
+  }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum VariableMutability {
   Mutable,
@@ -254,6 +290,13 @@ pub enum NamedTopicKind {
   StateVariable(VariableMutability),
   LocalVariable,
   Builtin,
+}
+
+/// Kinds of titled topics (topics with a title but not a full declaration)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TitledTopicKind {
+  /// Documentation section (H1 becomes component, sub-H1 becomes member)
+  DocumentationSection,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -287,10 +330,10 @@ pub enum UnnamedTopicKind {
   Signature,
   DocumentationRoot,
   DocumentationHeading,
-  DocumentationSection,
   DocumentationParagraph,
   DocumentationSentence,
   DocumentationCodeBlock,
+  DocumentationInlineCode,
   DocumentationList,
   DocumentationBlockQuote,
   Other,
@@ -304,69 +347,73 @@ pub enum NamedTopicVisibility {
   External,
 }
 
-/// Groups references to a declaration by the contract where they occur.
-/// Contains both contract-level references (inheritance, using-for) and
-/// member-level references (inside functions/modifiers).
+/// Groups references to a declaration by the scope where they occur.
+/// For Solidity: scope is a contract, scope_references are contract-level refs, nested_references are function-level refs.
+/// For Documentation: scope is a file, scope_references are file-level refs, nested_references are section-level refs.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReferenceGroup {
-  /// The contract/interface/library where these references occur
-  contract: topic::Topic,
-  /// Whether this contract is defined in one of the audit's in-scope files
+  /// The grouping scope where these references occur (contract for Solidity, file for documentation)
+  scope: topic::Topic,
+  /// Whether this scope is defined in one of the audit's in-scope files
   is_in_scope: bool,
-  /// References at the contract scope level (inheritance, using-for directives, state variable types)
-  contract_references: Vec<topic::Topic>,
-  /// References within members of the contract (functions, modifiers)
-  member_references: Vec<MemberReferenceGroup>,
+  /// References at the scope level (inheritance/using-for for Solidity, file-level for documentation)
+  scope_references: Vec<topic::Topic>,
+  /// References within nested scopes (functions for Solidity, sections for documentation)
+  nested_references: Vec<NestedReferenceGroup>,
 }
 
 impl ReferenceGroup {
   pub fn new(
-    contract: topic::Topic,
+    scope: topic::Topic,
     is_in_scope: bool,
-    contract_references: Vec<topic::Topic>,
-    member_references: Vec<MemberReferenceGroup>,
+    scope_references: Vec<topic::Topic>,
+    nested_references: Vec<NestedReferenceGroup>,
   ) -> Self {
     Self {
-      contract,
+      scope,
       is_in_scope,
-      contract_references,
-      member_references,
+      scope_references,
+      nested_references,
     }
   }
 
-  pub fn contract(&self) -> &topic::Topic {
-    &self.contract
+  pub fn scope(&self) -> &topic::Topic {
+    &self.scope
   }
 
   pub fn is_in_scope(&self) -> bool {
     self.is_in_scope
   }
 
-  pub fn contract_references(&self) -> &[topic::Topic] {
-    &self.contract_references
+  pub fn scope_references(&self) -> &[topic::Topic] {
+    &self.scope_references
   }
 
-  pub fn member_references(&self) -> &[MemberReferenceGroup] {
-    &self.member_references
+  pub fn nested_references(&self) -> &[NestedReferenceGroup] {
+    &self.nested_references
   }
 }
-
-/// Groups references within a single member (function/modifier) of a contract.
+/// Groups references within a nested scope.
+/// For Solidity: represents references within a function/modifier.
+/// For Documentation: represents references within a section (component).
 #[derive(Debug, Clone, PartialEq)]
-pub struct MemberReferenceGroup {
-  /// The function/modifier containing these references
-  member: topic::Topic,
-  /// References within this member
+pub struct NestedReferenceGroup {
+  /// The nested scope containing these references (function for Solidity, section for documentation)
+  subscope: topic::Topic,
+  /// References within this nested scope
   references: Vec<topic::Topic>,
 }
 
-impl MemberReferenceGroup {
-  pub fn new(member: topic::Topic, references: Vec<topic::Topic>) -> Self {
-    Self { member, references }
+impl NestedReferenceGroup {
+  pub fn new(subscope: topic::Topic, references: Vec<topic::Topic>) -> Self {
+    Self {
+      subscope,
+      references,
+    }
   }
 
-  pub fn member(&self) -> &topic::Topic {
-    &self.member
+  pub fn subscope(&self) -> &topic::Topic {
+    &self.subscope
   }
 
   pub fn references(&self) -> &[topic::Topic] {
@@ -403,11 +450,21 @@ pub enum TopicMetadata {
     /// or bitwise binary operations, or as alternatives in conditional (ternary) expressions.
     /// Only populated for variable declarations.
     relatives: Vec<topic::Topic>,
+    /// Documentation sections that mention this topic via code identifiers.
+    /// Grouped by file (container), with section-level and paragraph-level sub-groups.
+    mentions: Vec<ReferenceGroup>,
   },
   UnnamedTopic {
     topic: topic::Topic,
     scope: Scope,
     kind: UnnamedTopicKind,
+  },
+  /// A topic with a title (like documentation sections) but not a full declaration
+  TitledTopic {
+    topic: topic::Topic,
+    scope: Scope,
+    kind: TitledTopicKind,
+    title: String,
   },
 }
 
@@ -415,13 +472,15 @@ impl TopicMetadata {
   pub fn scope(&self) -> &Scope {
     match self {
       TopicMetadata::NamedTopic { scope, .. }
-      | TopicMetadata::UnnamedTopic { scope, .. } => scope,
+      | TopicMetadata::UnnamedTopic { scope, .. }
+      | TopicMetadata::TitledTopic { scope, .. } => scope,
     }
   }
 
   pub fn name(&self) -> &str {
     match self {
       TopicMetadata::NamedTopic { name, .. } => name,
+      TopicMetadata::TitledTopic { title, .. } => title,
       TopicMetadata::UnnamedTopic { topic, .. } => topic.id(),
     }
   }
@@ -429,14 +488,16 @@ impl TopicMetadata {
   pub fn topic(&self) -> &topic::Topic {
     match self {
       TopicMetadata::NamedTopic { topic, .. }
-      | TopicMetadata::UnnamedTopic { topic, .. } => topic,
+      | TopicMetadata::UnnamedTopic { topic, .. }
+      | TopicMetadata::TitledTopic { topic, .. } => topic,
     }
   }
 
   pub fn references(&self) -> &[ReferenceGroup] {
     match self {
       TopicMetadata::NamedTopic { references, .. } => references,
-      TopicMetadata::UnnamedTopic { .. } => &[],
+      TopicMetadata::UnnamedTopic { .. }
+      | TopicMetadata::TitledTopic { .. } => &[],
     }
   }
 
@@ -446,42 +507,56 @@ impl TopicMetadata {
         expanded_references,
         ..
       } => expanded_references,
-      TopicMetadata::UnnamedTopic { .. } => &[],
+      TopicMetadata::UnnamedTopic { .. }
+      | TopicMetadata::TitledTopic { .. } => &[],
     }
   }
 
   pub fn ancestors(&self) -> &[topic::Topic] {
     match self {
       TopicMetadata::NamedTopic { ancestors, .. } => ancestors,
-      TopicMetadata::UnnamedTopic { .. } => &[],
+      TopicMetadata::UnnamedTopic { .. }
+      | TopicMetadata::TitledTopic { .. } => &[],
     }
   }
 
   pub fn descendants(&self) -> &[topic::Topic] {
     match self {
       TopicMetadata::NamedTopic { descendants, .. } => descendants,
-      TopicMetadata::UnnamedTopic { .. } => &[],
+      TopicMetadata::UnnamedTopic { .. }
+      | TopicMetadata::TitledTopic { .. } => &[],
     }
   }
 
   pub fn relatives(&self) -> &[topic::Topic] {
     match self {
       TopicMetadata::NamedTopic { relatives, .. } => relatives,
-      TopicMetadata::UnnamedTopic { .. } => &[],
+      TopicMetadata::UnnamedTopic { .. }
+      | TopicMetadata::TitledTopic { .. } => &[],
     }
   }
 
   pub fn mutations(&self) -> &[topic::Topic] {
     match self {
       TopicMetadata::NamedTopic { mutations, .. } => mutations,
-      TopicMetadata::UnnamedTopic { .. } => &[],
+      TopicMetadata::UnnamedTopic { .. }
+      | TopicMetadata::TitledTopic { .. } => &[],
     }
   }
 
   pub fn is_mutable(&self) -> bool {
     match self {
       TopicMetadata::NamedTopic { is_mutable, .. } => *is_mutable,
-      TopicMetadata::UnnamedTopic { .. } => false,
+      TopicMetadata::UnnamedTopic { .. }
+      | TopicMetadata::TitledTopic { .. } => false,
+    }
+  }
+
+  pub fn mentions(&self) -> &[ReferenceGroup] {
+    match self {
+      TopicMetadata::NamedTopic { mentions, .. } => mentions,
+      TopicMetadata::UnnamedTopic { .. }
+      | TopicMetadata::TitledTopic { .. } => &[],
     }
   }
 
@@ -694,6 +769,7 @@ pub fn new_audit_data(
       ancestors: Vec::new(),
       descendants: Vec::new(),
       relatives: Vec::new(),
+      mentions: Vec::new(),
     },
   );
 
@@ -714,6 +790,7 @@ pub fn new_audit_data(
       ancestors: Vec::new(),
       descendants: Vec::new(),
       relatives: Vec::new(),
+      mentions: Vec::new(),
     },
   );
 
@@ -734,6 +811,7 @@ pub fn new_audit_data(
       ancestors: Vec::new(),
       descendants: Vec::new(),
       relatives: Vec::new(),
+      mentions: Vec::new(),
     },
   );
 

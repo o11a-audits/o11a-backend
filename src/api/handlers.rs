@@ -300,7 +300,8 @@ pub async fn get_contracts(
       crate::core::TopicMetadata::NamedTopic { kind, .. } => {
         matches!(kind, crate::core::NamedTopicKind::Contract(_))
       }
-      crate::core::TopicMetadata::UnnamedTopic { .. } => false,
+      crate::core::TopicMetadata::UnnamedTopic { .. }
+      | crate::core::TopicMetadata::TitledTopic { .. } => false,
     };
 
     if is_contract {
@@ -385,37 +386,66 @@ pub struct ScopeInfo {
 }
 
 #[derive(Debug, Serialize)]
-pub struct MemberReferenceGroupResponse {
-  pub member: String,
+pub struct NestedReferenceGroupResponse {
+  pub subscope: String,
   pub references: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct ReferenceGroupResponse {
-  pub contract: String,
+  pub scope: String,
   pub is_in_scope: bool,
-  pub contract_references: Vec<String>,
-  pub member_references: Vec<MemberReferenceGroupResponse>,
+  pub scope_references: Vec<String>,
+  pub nested_references: Vec<NestedReferenceGroupResponse>,
 }
 
+/// Response for NamedTopic metadata
 #[derive(Debug, Serialize)]
-pub struct TopicMetadataResponse {
+pub struct NamedTopicResponse {
   pub topic_id: String,
-  #[serde(skip_serializing_if = "Option::is_none")]
-  pub name: Option<String>,
+  pub name: String,
   pub kind: String,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub sub_kind: Option<String>,
-  #[serde(skip_serializing_if = "Option::is_none")]
-  pub visibility: Option<String>,
+  pub visibility: String,
   pub scope: ScopeInfo,
   pub references: Vec<ReferenceGroupResponse>,
   pub expanded_references: Vec<ReferenceGroupResponse>,
+  pub mentions: Vec<ReferenceGroupResponse>,
   pub ancestors: Vec<String>,
   pub descendants: Vec<String>,
   pub relatives: Vec<String>,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub mutations: Option<Vec<String>>,
+}
+
+/// Response for TitledTopic metadata
+#[derive(Debug, Serialize)]
+pub struct TitledTopicResponse {
+  pub topic_id: String,
+  pub title: String,
+  pub kind: String,
+  pub scope: ScopeInfo,
+}
+
+/// Response for UnnamedTopic metadata
+#[derive(Debug, Serialize)]
+pub struct UnnamedTopicResponse {
+  pub topic_id: String,
+  pub kind: String,
+  pub scope: ScopeInfo,
+}
+
+/// Enum for different topic metadata response types
+#[derive(Debug, Serialize)]
+#[serde(tag = "type")]
+pub enum TopicMetadataResponse {
+  #[serde(rename = "named")]
+  Named(NamedTopicResponse),
+  #[serde(rename = "titled")]
+  Titled(TitledTopicResponse),
+  #[serde(rename = "unnamed")]
+  Unnamed(UnnamedTopicResponse),
 }
 
 // Helper function to convert Scope to ScopeInfo
@@ -471,116 +501,112 @@ fn scope_to_scope_info(scope: &crate::core::Scope) -> ScopeInfo {
   }
 }
 
+// Helper function to convert ReferenceGroup to ReferenceGroupResponse
+fn convert_reference_groups(
+  groups: &[crate::core::ReferenceGroup],
+) -> Vec<ReferenceGroupResponse> {
+  groups
+    .iter()
+    .map(|group| ReferenceGroupResponse {
+      scope: group.scope().id().to_string(),
+      is_in_scope: group.is_in_scope(),
+      scope_references: group
+        .scope_references()
+        .iter()
+        .map(|t| t.id().to_string())
+        .collect(),
+      nested_references: group
+        .nested_references()
+        .iter()
+        .map(|m| NestedReferenceGroupResponse {
+          subscope: m.subscope().id().to_string(),
+          references: m
+            .references()
+            .iter()
+            .map(|t| t.id().to_string())
+            .collect(),
+        })
+        .collect(),
+    })
+    .collect()
+}
+
 // Helper function to convert TopicMetadata to TopicMetadataResponse
 fn topic_metadata_to_response(
   topic: &crate::core::topic::Topic,
   metadata: &crate::core::TopicMetadata,
 ) -> TopicMetadataResponse {
-  // Extract scope information
   let scope_info = scope_to_scope_info(metadata.scope());
 
-  // Format the kind and sub_kind
-  let (kind_str, sub_kind) = match metadata {
-    crate::core::TopicMetadata::NamedTopic { kind, .. } => match kind {
-      crate::core::NamedTopicKind::Contract(contract_kind) => {
-        ("Contract".to_string(), Some(format!("{:?}", contract_kind)))
-      }
-      crate::core::NamedTopicKind::Function(function_kind) => {
-        ("Function".to_string(), Some(format!("{:?}", function_kind)))
-      }
-      crate::core::NamedTopicKind::StateVariable(mutability) => (
-        "StateVariable".to_string(),
-        Some(format!("{:?}", mutability)),
-      ),
-      kind => (format!("{:?}", kind), None),
-    },
-    crate::core::TopicMetadata::UnnamedTopic { kind, .. } => {
-      (format!("{:?}", kind), None)
-    }
-  };
-
-  // Only include name for NamedTopic
-  let name = match metadata {
-    crate::core::TopicMetadata::NamedTopic { name, .. } => Some(name.clone()),
-    crate::core::TopicMetadata::UnnamedTopic { .. } => None,
-  };
-
-  // Helper closure to convert ReferenceGroup to ReferenceGroupResponse
-  let convert_reference_groups =
-    |groups: &[crate::core::ReferenceGroup]| -> Vec<ReferenceGroupResponse> {
-      groups
-        .iter()
-        .map(|group| ReferenceGroupResponse {
-          contract: group.contract().id().to_string(),
-          is_in_scope: group.is_in_scope(),
-          contract_references: group
-            .contract_references()
-            .iter()
-            .map(|t| t.id().to_string())
-            .collect(),
-          member_references: group
-            .member_references()
-            .iter()
-            .map(|m| MemberReferenceGroupResponse {
-              member: m.member().id().to_string(),
-              references: m
-                .references()
-                .iter()
-                .map(|t| t.id().to_string())
-                .collect(),
-            })
-            .collect(),
-        })
-        .collect()
-    };
-
-  // Extract references as ReferenceGroupResponse objects
-  let references = convert_reference_groups(metadata.references());
-
-  // Extract expanded_references as ReferenceGroupResponse objects
-  let expanded_references =
-    convert_reference_groups(metadata.expanded_references());
-
-  // Extract ancestors, descendants, and relatives
-  let ancestors: Vec<String> =
-    metadata.ancestors().iter().map(|t| t.id.clone()).collect();
-  let descendants: Vec<String> = metadata
-    .descendants()
-    .iter()
-    .map(|t| t.id.clone())
-    .collect();
-  let relatives: Vec<String> =
-    metadata.relatives().iter().map(|t| t.id.clone()).collect();
-
-  let mutations = match metadata {
+  match metadata {
     crate::core::TopicMetadata::NamedTopic {
+      name,
+      kind,
+      visibility,
       mutations,
-      is_mutable: true,
+      is_mutable,
       ..
-    } => Some(mutations.iter().map(|t| t.id.clone()).collect()),
-    _ => None,
-  };
+    } => {
+      // Format the kind and sub_kind for NamedTopic
+      let (kind_str, sub_kind) = match kind {
+        crate::core::NamedTopicKind::Contract(contract_kind) => {
+          ("Contract".to_string(), Some(format!("{:?}", contract_kind)))
+        }
+        crate::core::NamedTopicKind::Function(function_kind) => {
+          ("Function".to_string(), Some(format!("{:?}", function_kind)))
+        }
+        crate::core::NamedTopicKind::StateVariable(mutability) => (
+          "StateVariable".to_string(),
+          Some(format!("{:?}", mutability)),
+        ),
+        kind => (format!("{:?}", kind), None),
+      };
 
-  let visibility = match metadata {
-    crate::core::TopicMetadata::NamedTopic { visibility, .. } => {
-      Some(format!("{:?}", visibility))
+      let mutations_response = if *is_mutable {
+        Some(mutations.iter().map(|t| t.id.clone()).collect())
+      } else {
+        None
+      };
+
+      TopicMetadataResponse::Named(NamedTopicResponse {
+        topic_id: topic.id.clone(),
+        name: name.clone(),
+        kind: kind_str,
+        sub_kind,
+        visibility: format!("{:?}", visibility),
+        scope: scope_info,
+        references: convert_reference_groups(metadata.references()),
+        expanded_references: convert_reference_groups(
+          metadata.expanded_references(),
+        ),
+        ancestors: metadata.ancestors().iter().map(|t| t.id.clone()).collect(),
+        descendants: metadata
+          .descendants()
+          .iter()
+          .map(|t| t.id.clone())
+          .collect(),
+        relatives: metadata.relatives().iter().map(|t| t.id.clone()).collect(),
+        mutations: mutations_response,
+        mentions: convert_reference_groups(metadata.mentions()),
+      })
     }
-    crate::core::TopicMetadata::UnnamedTopic { .. } => None,
-  };
 
-  TopicMetadataResponse {
-    topic_id: topic.id.clone(),
-    name,
-    kind: kind_str,
-    sub_kind,
-    visibility,
-    scope: scope_info,
-    references,
-    expanded_references,
-    ancestors,
-    descendants,
-    relatives,
-    mutations,
+    crate::core::TopicMetadata::TitledTopic { title, kind, .. } => {
+      TopicMetadataResponse::Titled(TitledTopicResponse {
+        topic_id: topic.id.clone(),
+        title: title.clone(),
+        kind: format!("{:?}", kind),
+        scope: scope_info,
+      })
+    }
+
+    crate::core::TopicMetadata::UnnamedTopic { kind, .. } => {
+      TopicMetadataResponse::Unnamed(UnnamedTopicResponse {
+        topic_id: topic.id.clone(),
+        kind: format!("{:?}", kind),
+        scope: scope_info,
+      })
+    }
   }
 }
 

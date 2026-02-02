@@ -27,25 +27,23 @@ fn do_node_to_html(
       formatting::format_block(&content, "documentation-root")
     }
 
-    DocumentationNode::Section {
-      header, children, ..
-    } => {
-      let header_html = do_node_to_html(header, indent_level, nodes_map);
+    // Section: renders just the content (no header, since header is parent)
+    DocumentationNode::Section { children, .. } => {
       let content = children
         .iter()
         .map(|child| do_node_to_html(child, indent_level, nodes_map))
         .collect::<Vec<_>>()
         .join("\n");
 
-      let section_str = format!("\n{}\n{}\n", header_html, content);
-
-      formatting::format_block(&section_str, "section")
+      formatting::format_block(&content, "section")
     }
 
+    // Heading: renders the heading text and its section child (if any)
     DocumentationNode::Heading {
       level,
       children,
       node_id,
+      section,
       ..
     } => {
       let topic_id = topic::new_documentation_topic(*node_id);
@@ -55,7 +53,17 @@ fn do_node_to_html(
         .collect::<Vec<_>>()
         .join("");
 
-      formatting::format_heading(*level, &topic_id, &heading_content)
+      let heading_html =
+        formatting::format_heading(*level, &topic_id, &heading_content);
+
+      // If there's a section child, render it after the heading
+      match section {
+        Some(sec) => {
+          let section_html = do_node_to_html(sec, indent_level, nodes_map);
+          format!("{}\n{}", heading_html, section_html)
+        }
+        None => heading_html,
+      }
     }
 
     DocumentationNode::Paragraph {
@@ -119,7 +127,8 @@ fn do_node_to_html(
     }
 
     DocumentationNode::CodeOperator { value, .. } => {
-      formatting::format_operator(&formatting::html_escape(value))
+      // format_operator already escapes HTML, so don't double-escape
+      formatting::format_operator(value)
     }
 
     DocumentationNode::CodeIdentifier {

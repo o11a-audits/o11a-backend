@@ -12,8 +12,8 @@ impl Topic {
 
   pub fn underlying_id(&self) -> Result<i32, ()> {
     // Check if the topic ID starts with "N" (node topic)
-    if self.id.starts_with("N") {
-      // Try to parse the numeric part after "N"
+    if self.id.starts_with("N") || self.id.starts_with("D") {
+      // Try to parse the numeric part after "N" or "D"
       if let Ok(node_id) = self.id[1..].parse::<i32>() {
         return Ok(node_id);
       }

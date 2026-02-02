@@ -3,8 +3,8 @@ use foundry_compilers_artifacts::Visibility;
 use crate::core::topic;
 use crate::core::{self, UnnamedTopicKind};
 use crate::core::{
-  AST, DataContext, ElementaryType, FunctionModProperties,
-  MemberReferenceGroup, NamedTopicKind, Node, ReferenceGroup, RevertCondition,
+  AST, DataContext, ElementaryType, FunctionModProperties, NamedTopicKind,
+  NestedReferenceGroup, Node, ReferenceGroup, RevertCondition,
   RevertConstraint, RevertConstraintKind, Scope, SolidityType, TopicMetadata,
 };
 use crate::solidity::parser::{
@@ -1163,18 +1163,18 @@ fn build_reference_groups(
       let contract_topic = topic::new_node_topic(&contract_id);
       let is_in_scope = is_contract_in_scope(contract_id);
 
-      // Build member reference groups, sorted by member source location
-      let mut member_references: Vec<MemberReferenceGroup> = member_groups
+      // Build nested reference groups (functions), sorted by source location
+      let mut nested_references: Vec<NestedReferenceGroup> = member_groups
         .into_iter()
         .map(|(member_id, refs)| {
-          MemberReferenceGroup::new(topic::new_node_topic(&member_id), refs)
+          NestedReferenceGroup::new(topic::new_node_topic(&member_id), refs)
         })
         .collect();
 
-      // Sort member groups by member source location
-      member_references.sort_by(|a, b| {
-        let loc_a = get_source_location_start(a.member(), nodes);
-        let loc_b = get_source_location_start(b.member(), nodes);
+      // Sort nested groups by source location
+      nested_references.sort_by(|a, b| {
+        let loc_a = get_source_location_start(a.subscope(), nodes);
+        let loc_b = get_source_location_start(b.subscope(), nodes);
         loc_a.cmp(&loc_b)
       });
 
@@ -1182,7 +1182,7 @@ fn build_reference_groups(
         contract_topic,
         is_in_scope,
         contract_refs,
-        member_references,
+        nested_references,
       )
     })
     .collect();
@@ -1190,8 +1190,8 @@ fn build_reference_groups(
   // Sort groups: subject's contract first, then by contract name
   let subject_contract_id = self_reference.map(|r| r.containing_component);
   groups.sort_by(|a, b| {
-    let id_a = a.contract().underlying_id().ok();
-    let id_b = b.contract().underlying_id().ok();
+    let id_a = a.scope().underlying_id().ok();
+    let id_b = b.scope().underlying_id().ok();
 
     // Subject's contract comes first
     let is_subject_a = subject_contract_id == id_a;
@@ -1204,8 +1204,8 @@ fn build_reference_groups(
     }
 
     // Otherwise sort by contract name
-    let name_a = get_contract_name(a.contract(), in_scope_source_topics);
-    let name_b = get_contract_name(b.contract(), in_scope_source_topics);
+    let name_a = get_scope_name(a.scope(), in_scope_source_topics);
+    let name_b = get_scope_name(b.scope(), in_scope_source_topics);
     name_a.cmp(&name_b)
   });
 
@@ -1324,16 +1324,16 @@ fn build_expanded_reference_groups(
       let contract_topic = topic::new_node_topic(&contract_id);
       let is_in_scope = is_contract_in_scope(contract_id);
 
-      let mut member_references: Vec<MemberReferenceGroup> = member_groups
+      let mut nested_references: Vec<NestedReferenceGroup> = member_groups
         .into_iter()
         .map(|(member_id, refs)| {
-          MemberReferenceGroup::new(topic::new_node_topic(&member_id), refs)
+          NestedReferenceGroup::new(topic::new_node_topic(&member_id), refs)
         })
         .collect();
 
-      member_references.sort_by(|a, b| {
-        let loc_a = get_source_location_start(a.member(), nodes);
-        let loc_b = get_source_location_start(b.member(), nodes);
+      nested_references.sort_by(|a, b| {
+        let loc_a = get_source_location_start(a.subscope(), nodes);
+        let loc_b = get_source_location_start(b.subscope(), nodes);
         loc_a.cmp(&loc_b)
       });
 
@@ -1341,7 +1341,7 @@ fn build_expanded_reference_groups(
         contract_topic,
         is_in_scope,
         contract_refs,
-        member_references,
+        nested_references,
       )
     })
     .collect();
@@ -1350,8 +1350,8 @@ fn build_expanded_reference_groups(
   // 1. Contracts with ancestors (sorted by fewest ancestors first)
   // 2. Contracts with only descendants (sorted by most descendants first)
   groups.sort_by(|a, b| {
-    let id_a = a.contract().underlying_id().unwrap_or(0);
-    let id_b = b.contract().underlying_id().unwrap_or(0);
+    let id_a = a.scope().underlying_id().unwrap_or(0);
+    let id_b = b.scope().underlying_id().unwrap_or(0);
 
     let (ancestors_a, descendants_a) = contract_ancestry_counts
       .get(&id_a)
@@ -1390,21 +1390,21 @@ fn get_source_location_start(
 ) -> Option<usize> {
   nodes.get(topic).and_then(|node| match node {
     Node::Solidity(ast_node) => ast_node.src_location().start,
-    Node::Documentation(_) => None,
+    Node::Documentation(doc_node) => doc_node.position(),
   })
 }
 
-/// Gets the contract name from a topic for sorting.
-fn get_contract_name(
-  contract_topic: &topic::Topic,
+/// Gets the scope name from a topic for sorting.
+fn get_scope_name(
+  scope_topic: &topic::Topic,
   in_scope_source_topics: &BTreeMap<i32, InScopeDeclaration>,
 ) -> String {
-  if let Ok(node_id) = contract_topic.underlying_id() {
+  if let Ok(node_id) = scope_topic.underlying_id() {
     if let Some(decl) = in_scope_source_topics.get(&node_id) {
       return decl.name().clone();
     }
   }
-  contract_topic.id().to_string()
+  scope_topic.id().to_string()
 }
 
 /// Second pass: Parse each AST and build the final data structures for in-scope nodes
@@ -1562,6 +1562,7 @@ fn process_second_pass_nodes(
         ancestors: ancestor_topics,
         descendants: descendant_topics,
         relatives: relative_topics,
+        mentions: vec![], // Populated during documentation analysis
       };
 
       topic_metadata.insert(topic.clone(), topic_metadata_entry);
@@ -3329,8 +3330,9 @@ fn populate_expanded_references(
         } => {
           *expanded_references = expanded_refs.clone();
         }
-        TopicMetadata::UnnamedTopic { .. } => {
-          // No expanded_references for unnamed topics
+        TopicMetadata::UnnamedTopic { .. }
+        | TopicMetadata::TitledTopic { .. } => {
+          // No expanded_references for unnamed/titled topics
         }
       }
     }
