@@ -1471,6 +1471,16 @@ fn second_pass(
     in_scope_files,
   );
 
+  // Populate ancestry (similar to expanded_references but without relatives)
+  populate_ancestry(
+    topic_metadata,
+    ancestors_map,
+    descendants_map,
+    nodes,
+    in_scope_source_topics,
+    in_scope_files,
+  );
+
   Ok(())
 }
 
@@ -1567,6 +1577,7 @@ fn process_second_pass_nodes(
         scope: scope.clone(),
         references: reference_groups,
         expanded_references: vec![], // Populated after all metadata is built
+        ancestry: vec![],            // Populated after all metadata is built
         is_mutable,
         mutations: mutation_topics,
         ancestors: ancestor_topics,
@@ -2586,8 +2597,10 @@ pub type AncestorsMap = BTreeMap<i32, Vec<i32>>;
 pub type DescendantsMap = BTreeMap<i32, Vec<i32>>;
 
 /// Maps variable node_id -> Vec of relative variable node_ids.
-/// Relatives are variables that appear together in comparison, arithmetic,
-/// or bitwise binary operations, or as alternatives in conditional (ternary) expressions.
+/// Relatives are variables that:
+/// 1. Appear together in comparison, arithmetic, or bitwise binary operations
+/// 2. Appear as alternatives in conditional (ternary) expressions
+/// 3. Are involved in another variable's assignment (RHS of assignments)
 pub type RelativesMap = BTreeMap<i32, Vec<i32>>;
 
 /// Context for tracking function return parameters during ancestry collection.
@@ -2612,8 +2625,9 @@ fn collect_ancestry_from_node(
       ..
     } => {
       // Collect all variable references from the initial value expression
-      let ancestor_ids = collect_variable_refs_from_expression(initial_value);
-      add_ancestors(ancestors_map, *node_id, &ancestor_ids);
+      // These are relatives (variables involved in assignment), not ancestors
+      let relative_ids = collect_variable_refs_from_expression(initial_value);
+      add_relatives_unidirectional(relatives_map, *node_id, &relative_ids);
 
       // Recurse into the initial value
       collect_ancestry_from_node(
@@ -2640,11 +2654,11 @@ fn collect_ancestry_from_node(
           && declarations.len() == referenced_return_declarations.len()
         {
           // Multi-return case: pair each declaration with its corresponding return declaration
+          // The return declaration is a relative of this variable (involved in assignment)
           for (i, decl) in declarations.iter().enumerate() {
             if let ASTNode::VariableDeclaration { node_id, .. } = decl {
-              // The return declaration is an ancestor of this variable
-              add_ancestors(
-                ancestors_map,
+              add_relatives_unidirectional(
+                relatives_map,
                 *node_id,
                 &[referenced_return_declarations[i]],
               );
@@ -2672,12 +2686,13 @@ fn collect_ancestry_from_node(
 
       // Single variable or single-return function call case
       // Collect all variable references from the initial value
-      let ancestor_ids = collect_variable_refs_from_expression(init_value);
+      // These are relatives (variables involved in assignment), not ancestors
+      let relative_ids = collect_variable_refs_from_expression(init_value);
 
-      // Add ancestors to each declared variable
+      // Add relatives to each declared variable
       for decl in declarations {
         if let ASTNode::VariableDeclaration { node_id, .. } = decl {
-          add_ancestors(ancestors_map, *node_id, &ancestor_ids);
+          add_relatives_unidirectional(relatives_map, *node_id, &relative_ids);
         }
       }
 
@@ -2693,7 +2708,7 @@ fn collect_ancestry_from_node(
       }
     }
 
-    // Assignment: RHS variables are ancestors of LHS base variable
+    // Assignment: RHS variables are relatives of LHS base variable
     // Also handles index access on LHS (e.g., myMap[key] = val)
     ASTNode::Assignment {
       left_hand_side,
@@ -2703,14 +2718,18 @@ fn collect_ancestry_from_node(
       if let Some(target_var_id) =
         extract_base_variable_reference(left_hand_side)
       {
-        // Collect ancestors from RHS
-        let mut ancestor_ids =
+        // Collect relatives from RHS (variables involved in assignment)
+        let mut relative_ids =
           collect_variable_refs_from_expression(right_hand_side);
 
         // Also collect index expressions from LHS (for mappings/arrays)
-        collect_index_refs_from_lhs(left_hand_side, &mut ancestor_ids);
+        collect_index_refs_from_lhs(left_hand_side, &mut relative_ids);
 
-        add_ancestors(ancestors_map, target_var_id, &ancestor_ids);
+        add_relatives_unidirectional(
+          relatives_map,
+          target_var_id,
+          &relative_ids,
+        );
       }
 
       // Recurse into both sides
@@ -3124,6 +3143,27 @@ fn add_ancestors(
   }
 }
 
+/// Adds relative variable IDs to the relatives map for a target variable (unidirectional).
+/// Used for assignment contexts where RHS variables become relatives of the LHS variable,
+/// but not vice versa.
+fn add_relatives_unidirectional(
+  relatives_map: &mut RelativesMap,
+  target_id: i32,
+  relative_ids: &[i32],
+) {
+  if relative_ids.is_empty() {
+    return;
+  }
+
+  let entry = relatives_map.entry(target_id).or_insert_with(Vec::new);
+  for &relative_id in relative_ids {
+    // Don't add self-references
+    if relative_id != target_id && !entry.contains(&relative_id) {
+      entry.push(relative_id);
+    }
+  }
+}
+
 /// Adds relative relationships bidirectionally between two sets of variable IDs.
 /// Each variable in `left_ids` becomes a relative of each variable in `right_ids` and vice versa.
 fn add_relatives_bidirectional(
@@ -3405,6 +3445,212 @@ fn populate_expanded_references(
       }
     }
   }
+}
+
+/// Populates the ancestry field for all TopicMetadata entries.
+/// Similar to populate_expanded_references but only includes ancestors and descendants,
+/// not relatives.
+fn populate_ancestry(
+  topic_metadata: &mut BTreeMap<topic::Topic, TopicMetadata>,
+  ancestors_map: &AncestorsMap,
+  descendants_map: &DescendantsMap,
+  nodes: &BTreeMap<topic::Topic, Node>,
+  in_scope_source_topics: &BTreeMap<i32, InScopeDeclaration>,
+  in_scope_files: &HashSet<core::ProjectPath>,
+) {
+  // First, collect all scopes from existing topic_metadata
+  let scope_map: BTreeMap<i32, Scope> = topic_metadata
+    .iter()
+    .filter_map(|(topic, metadata)| {
+      let node_id = topic.underlying_id().ok()?;
+      Some((node_id, metadata.scope().clone()))
+    })
+    .collect();
+
+  // Collect ancestry references for each topic before mutating
+  let ancestry_refs_map: BTreeMap<topic::Topic, Vec<ReferenceGroup>> =
+    topic_metadata
+      .iter()
+      .filter_map(|(topic, _metadata)| {
+        let node_id = topic.underlying_id().ok()?;
+
+        // Get recursive ancestry (ancestors and descendants only, no relatives)
+        let ancestry = collect_recursive_ancestry_without_relatives(
+          node_id,
+          ancestors_map,
+          descendants_map,
+        );
+
+        // Build ScopedReferences from ancestry:
+        // 1. The declaration itself (self-reference) for each ancestor/descendant
+        // 2. All references to each ancestor/descendant
+        // Use a set to track seen reference_node IDs for deduplication
+        let mut seen_refs: HashSet<i32> = HashSet::new();
+        let mut scoped_refs: Vec<ScopedReference> = Vec::new();
+
+        // Process ancestors and descendants only (no relatives)
+        let all_related: HashSet<i32> = ancestry
+          .ancestors
+          .iter()
+          .chain(ancestry.descendants.iter())
+          .copied()
+          .collect();
+
+        // Collect self-references and track which semantic blocks contain declarations
+        let mut pending_self_refs: Vec<(ScopedReference, Option<i32>)> =
+          Vec::new(); // (self_ref, containing_semantic_block_id)
+
+        // Map from declaration node_id to its containing semantic block node_id
+        let mut declaration_to_semantic_block: BTreeMap<i32, i32> =
+          BTreeMap::new();
+
+        for &rel_id in &all_related {
+          if let Some(scope) = scope_map.get(&rel_id) {
+            if let Some(self_ref) = scope_to_self_reference(scope, rel_id) {
+              // Check if this declaration is inside a semantic block
+              let containing_block_id = match scope {
+                Scope::SemanticBlock { semantic_block, .. } => {
+                  semantic_block.underlying_id().ok()
+                }
+                _ => None,
+              };
+
+              // Track the mapping from declaration to its containing semantic block
+              if let Some(block_id) = containing_block_id {
+                declaration_to_semantic_block.insert(rel_id, block_id);
+              }
+
+              pending_self_refs.push((self_ref, containing_block_id));
+            }
+          }
+        }
+
+        // Collect all references to ancestors/descendants first to know which
+        // semantic blocks will appear in the final output
+        let mut all_reference_nodes: HashSet<i32> = HashSet::new();
+        for &rel_id in &all_related {
+          if let Some(in_scope_decl) = in_scope_source_topics.get(&rel_id) {
+            for reference in in_scope_decl.references() {
+              all_reference_nodes.insert(reference.reference_node);
+            }
+          }
+        }
+
+        // Add self-references, filtering out declarations whose containing
+        // semantic block will also appear (either as another self-reference or
+        // as a reference_node from the references)
+        for (self_ref, containing_block_id) in pending_self_refs {
+          let should_include = match containing_block_id {
+            Some(block_id) => {
+              // Skip if the semantic block is in our reference nodes
+              // (meaning the semantic block itself will be displayed)
+              !all_reference_nodes.contains(&block_id)
+            }
+            // No containing semantic block, always include
+            None => true,
+          };
+
+          if should_include && seen_refs.insert(self_ref.reference_node) {
+            scoped_refs.push(self_ref);
+          }
+        }
+
+        // Add all references to each ancestor/descendant
+        for &rel_id in &all_related {
+          if let Some(in_scope_decl) = in_scope_source_topics.get(&rel_id) {
+            for reference in in_scope_decl.references() {
+              // Skip references whose reference_node is a declaration that's
+              // inside a semantic block that will also appear
+              let dominated_by_semantic_block = declaration_to_semantic_block
+                .get(&reference.reference_node)
+                .map_or(false, |block_id| {
+                  all_reference_nodes.contains(block_id)
+                });
+
+              if !dominated_by_semantic_block
+                && seen_refs.insert(reference.reference_node)
+              {
+                scoped_refs.push(reference.clone());
+              }
+            }
+          }
+        }
+
+        // Build reference groups with ancestry-aware sorting
+        let ancestry_refs = build_expanded_reference_groups(
+          &scoped_refs,
+          &ancestry.ancestors,
+          &ancestry.descendants,
+          &scope_map,
+          nodes,
+          in_scope_source_topics,
+          in_scope_files,
+        );
+
+        Some((topic.clone(), ancestry_refs))
+      })
+      .collect();
+
+  // Now update each metadata with ancestry
+  for (topic, metadata) in topic_metadata.iter_mut() {
+    if let Some(ancestry_refs) = ancestry_refs_map.get(topic) {
+      match metadata {
+        TopicMetadata::NamedTopic { ancestry, .. } => {
+          *ancestry = ancestry_refs.clone();
+        }
+        TopicMetadata::UnnamedTopic { .. }
+        | TopicMetadata::TitledTopic { .. } => {
+          // No ancestry for unnamed/titled topics
+        }
+      }
+    }
+  }
+}
+
+/// Collects recursive ancestors and descendants only (no relatives).
+/// Used for the ancestry field.
+fn collect_recursive_ancestry_without_relatives(
+  start_node_id: i32,
+  ancestors_map: &AncestorsMap,
+  descendants_map: &DescendantsMap,
+) -> RecursiveAncestryWithoutRelatives {
+  let mut ancestors = HashSet::new();
+  let mut descendants = HashSet::new();
+  let mut visited = HashSet::new();
+
+  // Collect recursive ancestors
+  collect_ancestry_in_direction(
+    start_node_id,
+    ancestors_map,
+    &mut ancestors,
+    &mut visited,
+  );
+
+  // Reset visited for descendants traversal
+  visited.clear();
+
+  // Collect recursive descendants
+  collect_ancestry_in_direction(
+    start_node_id,
+    descendants_map,
+    &mut descendants,
+    &mut visited,
+  );
+
+  // Remove self if present
+  ancestors.remove(&start_node_id);
+  descendants.remove(&start_node_id);
+
+  RecursiveAncestryWithoutRelatives {
+    ancestors,
+    descendants,
+  }
+}
+
+/// Result of collecting recursive ancestors and descendants without relatives.
+struct RecursiveAncestryWithoutRelatives {
+  ancestors: HashSet<i32>,
+  descendants: HashSet<i32>,
 }
 
 /// Filters the ancestors and relatives maps to only include in-scope variables and derives descendants.

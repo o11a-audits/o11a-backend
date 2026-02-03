@@ -411,6 +411,7 @@ pub struct NamedTopicResponse {
   pub scope: ScopeInfo,
   pub references: Vec<ReferenceGroupResponse>,
   pub expanded_references: Vec<ReferenceGroupResponse>,
+  pub ancestry: Vec<ReferenceGroupResponse>,
   pub mentions: Vec<ReferenceGroupResponse>,
   pub ancestors: Vec<String>,
   pub descendants: Vec<String>,
@@ -579,6 +580,7 @@ fn topic_metadata_to_response(
         expanded_references: convert_reference_groups(
           metadata.expanded_references(),
         ),
+        ancestry: convert_reference_groups(metadata.ancestry()),
         ancestors: metadata.ancestors().iter().map(|t| t.id.clone()).collect(),
         descendants: metadata
           .descendants()

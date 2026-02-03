@@ -430,24 +430,28 @@ pub enum TopicMetadata {
     name: String,
     visibility: NamedTopicVisibility,
     references: Vec<ReferenceGroup>,
-    /// References derived from recursively traversing all ancestors and descendants.
+    /// References derived from recursively traversing all ancestors, descendants, and relatives.
     /// Contains grouped references showing where all transitive ancestry-related
     /// variables are declared/referenced.
     expanded_references: Vec<ReferenceGroup>,
+    /// References derived from recursively traversing ancestors and descendants only.
+    /// Similar to expanded_references but excludes relatives.
+    ancestry: Vec<ReferenceGroup>,
     /// Whether this topic has mutations (was previously NamedMutableTopic)
     is_mutable: bool,
     /// The assignment or unary operation nodes that mutate this variable.
     /// Empty for non-mutable topics.
     mutations: Vec<topic::Topic>,
-    /// Variables that contribute to this variable's value (e.g., RHS of assignments,
-    /// function arguments that flow into parameters, return expression variables).
+    /// Variables that are true ancestors of this variable
     /// Only populated for variable declarations.
     ancestors: Vec<topic::Topic>,
     /// Variables whose values are derived from this variable.
     /// Only populated for variable declarations.
     descendants: Vec<topic::Topic>,
-    /// Variables that appear together with this variable in comparison, arithmetic,
-    /// or bitwise binary operations, or as alternatives in conditional (ternary) expressions.
+    /// Variables that are related to this variable:
+    /// 1. Appear together in comparison, arithmetic, or bitwise binary operations
+    /// 2. Appear as alternatives in conditional (ternary) expressions
+    /// 3. Are involved in this variable's assignment (RHS of assignments)
     /// Only populated for variable declarations.
     relatives: Vec<topic::Topic>,
     /// Documentation sections that mention this topic via code identifiers.
@@ -507,6 +511,14 @@ impl TopicMetadata {
         expanded_references,
         ..
       } => expanded_references,
+      TopicMetadata::UnnamedTopic { .. }
+      | TopicMetadata::TitledTopic { .. } => &[],
+    }
+  }
+
+  pub fn ancestry(&self) -> &[ReferenceGroup] {
+    match self {
+      TopicMetadata::NamedTopic { ancestry, .. } => ancestry,
       TopicMetadata::UnnamedTopic { .. }
       | TopicMetadata::TitledTopic { .. } => &[],
     }
@@ -764,6 +776,7 @@ pub fn new_audit_data(
       name: "keccak256".to_string(),
       references: Vec::new(),
       expanded_references: Vec::new(),
+      ancestry: Vec::new(),
       is_mutable: false,
       mutations: Vec::new(),
       ancestors: Vec::new(),
@@ -785,6 +798,7 @@ pub fn new_audit_data(
       name: "type".to_string(),
       references: Vec::new(),
       expanded_references: Vec::new(),
+      ancestry: Vec::new(),
       is_mutable: false,
       mutations: Vec::new(),
       ancestors: Vec::new(),
@@ -806,6 +820,7 @@ pub fn new_audit_data(
       name: "this".to_string(),
       references: Vec::new(),
       expanded_references: Vec::new(),
+      ancestry: Vec::new(),
       is_mutable: false,
       mutations: Vec::new(),
       ancestors: Vec::new(),
