@@ -563,6 +563,31 @@ fn transform_node(node: &mut ASTNode, context: &TransformContext) {
       referenced_return_declarations,
       ..
     } => {
+      // Check if this is a library method-style call (e.g., x.mulDiv(a, b))
+      // and transform it to include the implicit first argument (e.g., uint256.mulDiv(x, a, b))
+      if let ASTNode::MemberAccess {
+        expression: base_expr,
+        type_descriptions,
+        ..
+      } = expression.as_mut()
+      {
+        // Library extension methods have "attached_to" in their type_identifier
+        if let Some(attached_type) =
+          extract_attached_type(&type_descriptions.type_identifier)
+        {
+          // Extract the base expression and prepend it as the first argument
+          // Replace the base expression with the attached type (e.g., uint256)
+          let type_node = ASTNode::ElementaryTypeName {
+            node_id: generate_node_id(),
+            src_location: base_expr.src_location().clone(),
+            name: attached_type,
+          };
+          let implicit_first_arg =
+            std::mem::replace(base_expr.as_mut(), type_node);
+          arguments.insert(0, implicit_first_arg);
+        }
+      }
+
       // Wrap arguments with Argument nodes
       let new_arguments = wrap_arguments(arguments, expression, context);
       *arguments = new_arguments;
@@ -816,4 +841,32 @@ fn wrap_arguments_impl(
       }
     })
     .collect()
+}
+
+/// Extracts the attached type from a type_identifier string.
+/// Library extension methods have type_identifiers like:
+/// "t_function_internal_pure$_..._$attached_to$_t_uint256_$"
+/// This function extracts "uint256" from such strings.
+fn extract_attached_type(type_identifier: &str) -> Option<String> {
+  // Find the "attached_to$" marker
+  let marker = "attached_to$_t_";
+  let start = type_identifier.find(marker)?;
+  let after_marker = &type_identifier[start + marker.len()..];
+
+  // Find the ending "_$" for the type
+  let end = after_marker.find("_$")?;
+  let type_str = &after_marker[..end];
+
+  // Handle contract types: "contract$_ContractName_$12345" -> "ContractName"
+  if type_str.starts_with("contract$_") {
+    let after_contract = &type_str["contract$_".len()..];
+    // Find the next "_$" which separates the name from the ID
+    if let Some(name_end) = after_contract.find("_$") {
+      return Some(after_contract[..name_end].to_string());
+    }
+    return Some(after_contract.to_string());
+  }
+
+  // For elementary types like "uint256", "address", etc., return as-is
+  Some(type_str.to_string())
 }

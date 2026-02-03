@@ -693,6 +693,7 @@ pub enum ASTNode {
     member_location: SourceLocation,
     member_name: String,
     referenced_declaration: Option<i32>,
+    type_descriptions: TypeDescriptions,
   },
   NewExpression {
     node_id: i32,
@@ -2221,6 +2222,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       member_location,
       member_name,
       referenced_declaration,
+      type_descriptions,
     } => ASTNode::MemberAccess {
       node_id: node_id,
       src_location: src_location,
@@ -2228,6 +2230,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       member_location: member_location,
       member_name: member_name,
       referenced_declaration: referenced_declaration,
+      type_descriptions: type_descriptions,
     },
     ASTNode::NewExpression {
       node_id,
@@ -4099,6 +4102,11 @@ fn node_from_json(
         .get("referencedDeclaration")
         .and_then(|v| v.as_i64())
         .map(|v| v as i32);
+      let type_descriptions = get_required_type_descriptions_with_context(
+        val,
+        "typeDescriptions",
+        node_type_str,
+      )?;
 
       Ok(ASTNode::MemberAccess {
         node_id,
@@ -4107,6 +4115,7 @@ fn node_from_json(
         member_location,
         member_name,
         referenced_declaration,
+        type_descriptions,
       })
     }
     "NewExpression" => {
