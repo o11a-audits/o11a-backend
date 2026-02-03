@@ -1865,15 +1865,10 @@ fn collect_references_and_statements(
 ) {
   // Update current_containing_block when entering a block-like node.
   // This includes SemanticBlocks, FunctionSignatures, and VariableDeclarationStatements.
-  // For VariableDeclarationStatements, we use the first declaration's node_id so that
-  // references in the initial value share the same statement_node as the declaration itself.
   let containing_block = match node {
-    ASTNode::SemanticBlock { node_id, .. } => Some(*node_id),
-    ASTNode::FunctionSignature { node_id, .. } => Some(*node_id),
-    ASTNode::VariableDeclarationStatement { declarations, .. } => {
-      // Use the first VariableDeclaration's node_id as the containing block
-      declarations.first().map(|decl| decl.node_id())
-    }
+    ASTNode::SemanticBlock { node_id, .. }
+    | ASTNode::FunctionSignature { node_id, .. }
+    | ASTNode::VariableDeclarationStatement { node_id, .. } => Some(*node_id),
     _ => current_containing_block,
   };
 
