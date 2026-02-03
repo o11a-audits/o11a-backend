@@ -3246,6 +3246,9 @@ fn collect_ancestry_in_direction(
 /// Populates the expanded_references field for all TopicMetadata entries.
 /// This must be called after all TopicMetadata entries have been created,
 /// as it needs access to the scopes of all ancestry-related topics.
+///
+/// This was written by Claude Code and I think it is pretty bloated, but
+/// it works.
 fn populate_expanded_references(
   topic_metadata: &mut BTreeMap<topic::Topic, TopicMetadata>,
   ancestors_map: &AncestorsMap,
@@ -3295,20 +3298,80 @@ fn populate_expanded_references(
           .copied()
           .collect();
 
+        // Collect self-references and track which semantic blocks contain declarations
+        let mut pending_self_refs: Vec<(ScopedReference, Option<i32>)> =
+          Vec::new(); // (self_ref, containing_semantic_block_id)
+
+        // Map from declaration node_id to its containing semantic block node_id
+        let mut declaration_to_semantic_block: BTreeMap<i32, i32> =
+          BTreeMap::new();
+
         for &rel_id in &all_related {
-          // Add the declaration's self-reference (if not global)
           if let Some(scope) = scope_map.get(&rel_id) {
             if let Some(self_ref) = scope_to_self_reference(scope, rel_id) {
-              if seen_refs.insert(self_ref.reference_node) {
-                scoped_refs.push(self_ref);
+              // Check if this declaration is inside a semantic block
+              let containing_block_id = match scope {
+                Scope::SemanticBlock { semantic_block, .. } => {
+                  semantic_block.underlying_id().ok()
+                }
+                _ => None,
+              };
+
+              // Track the mapping from declaration to its containing semantic block
+              if let Some(block_id) = containing_block_id {
+                declaration_to_semantic_block.insert(rel_id, block_id);
               }
+
+              pending_self_refs.push((self_ref, containing_block_id));
             }
           }
+        }
 
-          // Add all references to this ancestor/descendant
+        // Collect all references to ancestors/descendants first to know which
+        // semantic blocks will appear in the final output
+        let mut all_reference_nodes: HashSet<i32> = HashSet::new();
+        for &rel_id in &all_related {
           if let Some(in_scope_decl) = in_scope_source_topics.get(&rel_id) {
             for reference in in_scope_decl.references() {
-              if seen_refs.insert(reference.reference_node) {
+              all_reference_nodes.insert(reference.reference_node);
+            }
+          }
+        }
+
+        // Add self-references, filtering out declarations whose containing
+        // semantic block will also appear (either as another self-reference or
+        // as a reference_node from the references)
+        for (self_ref, containing_block_id) in pending_self_refs {
+          let should_include = match containing_block_id {
+            Some(block_id) => {
+              // Skip if the semantic block is in our reference nodes
+              // (meaning the semantic block itself will be displayed)
+              !all_reference_nodes.contains(&block_id)
+            }
+            // No containing semantic block, always include
+            None => true,
+          };
+
+          if should_include && seen_refs.insert(self_ref.reference_node) {
+            scoped_refs.push(self_ref);
+          }
+        }
+
+        // Add all references to each ancestor/descendant
+        for &rel_id in &all_related {
+          if let Some(in_scope_decl) = in_scope_source_topics.get(&rel_id) {
+            for reference in in_scope_decl.references() {
+              // Skip references whose reference_node is a declaration that's
+              // inside a semantic block that will also appear
+              let dominated_by_semantic_block = declaration_to_semantic_block
+                .get(&reference.reference_node)
+                .map_or(false, |block_id| {
+                  all_reference_nodes.contains(block_id)
+                });
+
+              if !dominated_by_semantic_block
+                && seen_refs.insert(reference.reference_node)
+              {
                 scoped_refs.push(reference.clone());
               }
             }
