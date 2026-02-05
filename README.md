@@ -73,8 +73,10 @@ The collaborator allows users to comment on topics in the audit. The types of co
 
 The types of topics and their prefixes are:
  - Source code nodes (N)
- - Text Documentation, text comments, and text sections (T)
+ - Documentation (D)
+ - Comments (C)
  - Attack vectors (A)
+ - Invariants (I)
 
  The topic id is a string identifier that uniquely identifies a topic within the audit. Each source code contract, function, block, statement, expression, variable, and literal value has an unique topic id. Each text document/comment and section has an unique topic id. It is sequential number for that topic type preceeded by the topic type prefix. For example, the first added Attack Vector will be `A1`, and the second `A2`.
 
@@ -222,9 +224,9 @@ The functional failure points are a list of things that could invalidate the cur
 
 ### Managing Functional Failure Consequences
 
-There needs to be a way to state the severity of a functional property not holding so that the auditor can prioritize the importance of the property. Maybe the functional property can be linked to an attack vector as a defense to it, so that the consequence of a statement can be understood.
+There needs to be a way to state the severity of a functional property not holding so that the auditor can prioritize the importance of the property. Maybe the functional property can be linked to an attack vector as a defense to it, so that the consequence of a statement can be understood. Then, each attack vector can be linked to an invariant, which has a severity.
 
-What is the difference in stating an invariant and an attack vector -- are they inverses? What is the relationship between an invariant/attack vector and a convergence. Does the convergence uphold an invariant, or defend against an attack vector?
+What is the difference in stating an invariant and an attack vector -- are they inverses? What is the relationship between an invariant/attack vector and a convergence. Does the convergence uphold an invariant, or defend against an attack vector? Answer: Invariants are few and general, attack vectors are many and specific to the implementation. Project documentation informs invariants, and implementation informs attack vectors. An invariant may be that users cannot lose funds, an attack vector may be that funds can be sent to an irrecoverable address, or that funds can be burned -- both invalidate the invariant. I think each topic should have a "threatened by", "subject to", or "targeted by" section that attaches to an attack vector, then each attack vector is attached to an invariant. So, the flow is 1. read the documentation and enstablish protocol design invariants. 2. read the implementation and establish attack vectors. 3. work through functional requirements and establish the attack vector a topic is subject to.
 
 ## Implementation Patterns
 
@@ -240,9 +242,10 @@ Patterns annotate type constraint checks and can be checked by a constraint algo
 
 General audit flow is:
  1. Read and understand the docs and the purpose of the project
- 2. Brainstorm potential attack vectors
+ 2. Brainstorm invariants
  3. Read the code, noting what every variable is, is used for, and its type and specification properties, cross-referencing the docs
- 4. Step through all convergences, checking that the properties hold up correctly (types and specifications), and noting the invariants that uphold the attack vectors as functional requirements
+ 4. Identify attack vectors
+ 5. Step through all convergences, checking that the properties hold up correctly (types and specifications), and noting the invariants that uphold the attack vectors as functional requirements
 
 ### Managing Convergences
 
