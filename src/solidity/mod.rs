@@ -2,7 +2,6 @@ pub use formatter::node_to_source_text;
 pub use parser::{ASTNode, SolidityAST};
 
 pub mod analyzer;
-pub mod collaborator;
 pub mod formatter;
 pub mod parser;
 pub mod transform;

@@ -1,7 +1,9 @@
 use o11a_backend::api::{AppState, routes};
+use o11a_backend::collaborator::{CommentStore, db as collab_db};
 use o11a_backend::core::{self, project};
 use o11a_backend::db;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 #[tokio::main]
 async fn main() {
@@ -26,15 +28,19 @@ async fn main() {
     .await
     .expect("Failed to run migrations");
 
+  // Run collaborator migrations
+  println!("Running collaborator migrations...");
+  collab_db::run_migrations(&pool)
+    .await
+    .expect("Failed to run collaborator migrations");
+
   println!("Creating DataContext...");
 
   // Create empty DataContext
   let data_context = core::new_data_context();
+  let data_context = Arc::new(Mutex::new(data_context));
 
   println!("DataContext created successfully");
-
-  // Create app state
-  let state = AppState::new(pool, data_context);
 
   // Get project root and audit ID from environment variables
   let project_root = std::env::var("PROJECT_ROOT")
@@ -50,8 +56,35 @@ async fn main() {
     project_root.display()
   );
 
-  project::load_project(project_root, &audit_id, &state.data_context)
+  project::load_project(project_root, &audit_id, &data_context)
     .expect("Unable to load project");
+
+  // Load and parse all comments
+  println!("Loading comments...");
+  let comment_store = {
+    let ctx = data_context.lock().unwrap();
+    collab_db::load_and_parse_all_comments(&pool, &ctx)
+      .await
+      .unwrap_or_else(|e| {
+        eprintln!("Warning: Failed to load comments: {}", e);
+        CommentStore::new()
+      })
+  };
+
+  println!(
+    "Loaded {} comments into store",
+    comment_store.html_cache.len()
+  );
+
+  // Extract DataContext from Arc<Mutex<>> for AppState
+  let data_context = Arc::try_unwrap(data_context)
+    .ok()
+    .expect("Multiple references to data_context")
+    .into_inner()
+    .expect("Mutex poisoned");
+
+  // Create app state with all components
+  let state = AppState::new(pool, data_context, comment_store);
 
   // Build router
   let app = routes::create_router(state);

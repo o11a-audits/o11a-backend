@@ -1,10 +1,11 @@
 use axum::{
   Router,
-  routing::{get, post},
+  routing::{delete, get, post},
 };
 use tower_http::cors::CorsLayer;
 
 use crate::api::{AppState, handlers};
+use crate::collaborator::{handlers as collab_handlers, websocket};
 
 pub fn create_router(state: AppState) -> Router {
   Router::new()
@@ -12,10 +13,7 @@ pub fn create_router(state: AppState) -> Router {
     // Audit management
     .route("/api/v1/audits", get(handlers::list_audits))
     .route("/api/v1/audits", post(handlers::create_audit))
-    .route(
-      "/api/v1/audits/:audit_id",
-      axum::routing::delete(handlers::delete_audit),
-    )
+    .route("/api/v1/audits/:audit_id", delete(handlers::delete_audit))
     // Audit-specific data
     .route(
       "/api/v1/audits/:audit_id/data-context",
@@ -48,6 +46,51 @@ pub fn create_router(state: AppState) -> Router {
     .route(
       "/api/v1/audits/:audit_id/metadata/:topic_id",
       get(handlers::get_metadata),
+    )
+    // ============================================
+    // Collaborator comment routes
+    // ============================================
+    .route(
+      "/api/v1/audits/:audit_id/comments/:comment_type",
+      get(collab_handlers::list_comments_by_type),
+    )
+    .route(
+      "/api/v1/audits/:audit_id/comments",
+      post(collab_handlers::create_comment),
+    )
+    .route(
+      "/api/v1/audits/:audit_id/comments/status",
+      get(collab_handlers::get_batch_status),
+    )
+    .route(
+      "/api/v1/audits/:audit_id/comments/:comment_id/status",
+      get(collab_handlers::get_status).put(collab_handlers::update_status),
+    )
+    .route(
+      "/api/v1/audits/:audit_id/topics/:topic_id/comments",
+      get(collab_handlers::get_topic_comments),
+    )
+    .route(
+      "/api/v1/audits/:audit_id/mentions/:topic_id",
+      get(collab_handlers::get_comments_mentioning_topic),
+    )
+    // WebSocket for real-time comment updates
+    .route(
+      "/api/v1/audits/:audit_id/comments/ws",
+      get(websocket::comment_websocket),
+    )
+    // ============================================
+    // Vote routes
+    // ============================================
+    .route(
+      "/api/v1/audits/:audit_id/votes/unvoted",
+      get(collab_handlers::get_unvoted_comment_ids),
+    )
+    .route(
+      "/api/v1/audits/:audit_id/votes/:comment_id",
+      get(collab_handlers::get_vote_summary)
+        .post(collab_handlers::cast_vote)
+        .delete(collab_handlers::remove_vote),
     )
     .layer(CorsLayer::permissive())
     .with_state(state)

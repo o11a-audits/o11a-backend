@@ -1,0 +1,265 @@
+use serde::{Deserialize, Serialize};
+use sqlx::FromRow;
+
+/// Reserved author IDs
+pub const AUTHOR_SYSTEM: i64 = 1;
+pub const AUTHOR_AGENT: i64 = 2;
+
+/// Comment type for classification
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CommentType {
+  Note,        // General observation or annotation
+  Info,        // Informational context or explanation
+  Question,    // Question needing an answer
+  Answer,      // Answer to a question
+  Todo,        // Action item to be completed
+  FindingLead, // Potential vulnerability or issue to investigate
+}
+
+impl Default for CommentType {
+  fn default() -> Self {
+    Self::Note
+  }
+}
+
+impl CommentType {
+  pub fn as_str(&self) -> &'static str {
+    match self {
+      CommentType::Note => "note",
+      CommentType::Info => "info",
+      CommentType::Question => "question",
+      CommentType::Answer => "answer",
+      CommentType::Todo => "todo",
+      CommentType::FindingLead => "finding_lead",
+    }
+  }
+
+  pub fn from_str(s: &str) -> Option<Self> {
+    match s {
+      "note" => Some(CommentType::Note),
+      "info" => Some(CommentType::Info),
+      "question" => Some(CommentType::Question),
+      "answer" => Some(CommentType::Answer),
+      "todo" => Some(CommentType::Todo),
+      "finding_lead" => Some(CommentType::FindingLead),
+      _ => None,
+    }
+  }
+
+  /// Returns the default status for this comment type
+  pub fn default_status(&self) -> CommentStatus {
+    match self {
+      CommentType::Question => CommentStatus::Unanswered,
+      CommentType::FindingLead => CommentStatus::Unconfirmed,
+      _ => CommentStatus::Active,
+    }
+  }
+}
+
+/// Comment status - controls visibility and state
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CommentStatus {
+  // General statuses (all comment types)
+  Active,   // Visible normally (default for most types)
+  Hidden,   // Soft-deleted, hidden from default view
+  Resolved, // Marked as addressed/completed
+
+  // Question-specific statuses
+  Unanswered, // Question awaiting answer (default for questions)
+  Answered,   // Question has been answered
+
+  // Finding lead-specific statuses
+  Unconfirmed, // Finding lead awaiting review (default for finding_lead)
+  Confirmed,   // Finding lead confirmed as valid
+  Rejected,    // Finding lead rejected as invalid
+}
+
+impl CommentStatus {
+  pub fn as_str(&self) -> &'static str {
+    match self {
+      CommentStatus::Active => "active",
+      CommentStatus::Hidden => "hidden",
+      CommentStatus::Resolved => "resolved",
+      CommentStatus::Unanswered => "unanswered",
+      CommentStatus::Answered => "answered",
+      CommentStatus::Unconfirmed => "unconfirmed",
+      CommentStatus::Confirmed => "confirmed",
+      CommentStatus::Rejected => "rejected",
+    }
+  }
+
+  pub fn from_str(s: &str) -> Self {
+    match s {
+      "hidden" => CommentStatus::Hidden,
+      "resolved" => CommentStatus::Resolved,
+      "unanswered" => CommentStatus::Unanswered,
+      "answered" => CommentStatus::Answered,
+      "unconfirmed" => CommentStatus::Unconfirmed,
+      "confirmed" => CommentStatus::Confirmed,
+      "rejected" => CommentStatus::Rejected,
+      _ => CommentStatus::Active,
+    }
+  }
+}
+
+/// Vote value
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum VoteValue {
+  Up,
+  Down,
+}
+
+impl VoteValue {
+  pub fn to_i32(&self) -> i32 {
+    match self {
+      VoteValue::Up => 1,
+      VoteValue::Down => -1,
+    }
+  }
+
+  pub fn from_i32(v: i32) -> Self {
+    if v >= 0 {
+      VoteValue::Up
+    } else {
+      VoteValue::Down
+    }
+  }
+}
+
+/// Core comment structure (database row)
+#[derive(Debug, Clone, Serialize, FromRow)]
+pub struct Comment {
+  pub id: i64,
+  pub audit_id: String,
+  pub topic_id: String, // Topic being commented on (N123, D45, C99 for replies)
+
+  // Immutable fields
+  pub content_markdown: String, // Raw markdown content
+  pub author_id: i64,           // 1=system, 2=agent, 3+=users
+  pub comment_type: String,     // Stored as string, convert to CommentType
+  pub created_at: String,
+
+  // Mutable field
+  pub status: String, // Stored as string, convert to CommentStatus
+}
+
+impl Comment {
+  /// Returns this comment's topic ID (e.g., "C42" for id=42)
+  pub fn comment_topic_id(&self) -> String {
+    format!("C{}", self.id)
+  }
+
+  /// Returns the parsed comment type
+  pub fn get_comment_type(&self) -> CommentType {
+    CommentType::from_str(&self.comment_type).unwrap_or_default()
+  }
+
+  /// Returns the parsed comment status
+  pub fn get_status(&self) -> CommentStatus {
+    CommentStatus::from_str(&self.status)
+  }
+}
+
+/// Vote record (database row)
+#[derive(Debug, Clone, Serialize, FromRow)]
+pub struct CommentVote {
+  pub id: i64,
+  pub comment_id: i64,
+  pub user_id: i64,
+  pub vote: i32, // 1 or -1
+  pub created_at: String,
+}
+
+// ============================================================================
+// Request types
+// ============================================================================
+
+/// Request to create a new comment
+#[derive(Debug, Deserialize)]
+pub struct CreateCommentRequest {
+  pub topic_id: String, // Topic to comment on (N123, D45, or C99 for replies)
+  pub content: String,  // Markdown content
+  pub author_id: i64,   // 1=system, 2=agent, 3+=users
+  #[serde(default)]
+  pub comment_type: CommentType, // Defaults to Note
+}
+
+/// Request to update comment status
+#[derive(Debug, Deserialize)]
+pub struct UpdateStatusRequest {
+  pub status: CommentStatus,
+}
+
+/// Request to cast a vote
+#[derive(Debug, Deserialize)]
+pub struct VoteRequest {
+  pub user_id: i64,
+  pub vote: VoteValue,
+}
+
+// ============================================================================
+// Response types
+// ============================================================================
+
+/// Response for create operations (returns the comment's topic ID)
+#[derive(Debug, Clone, Serialize)]
+pub struct CommentCreatedResponse {
+  pub comment_topic_id: String, // "C{id}" - use this to fetch full metadata
+}
+
+/// Response for listing comment topic IDs
+#[derive(Debug, Clone, Serialize)]
+pub struct CommentListResponse {
+  pub comment_topic_ids: Vec<String>, // ["C1", "C2", "C3"]
+}
+
+/// Response for status queries
+#[derive(Debug, Clone, Serialize)]
+pub struct CommentStatusResponse {
+  pub comment_topic_id: String,
+  pub status: CommentStatus,
+}
+
+/// Vote summary for a single comment
+#[derive(Debug, Clone, Serialize)]
+pub struct CommentVoteSummary {
+  pub comment_id: i64,
+  pub comment_topic_id: String, // "C{id}"
+  pub score: i64,               // Sum of all votes
+  pub upvotes: i64,
+  pub downvotes: i64,
+  pub user_vote: Option<VoteValue>, // Current user's vote if requested
+}
+
+// ============================================================================
+// WebSocket event types
+// ============================================================================
+
+/// WebSocket event types for real-time updates
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type")]
+pub enum CommentEvent {
+  /// New comment created - fetch /metadata/:topic_id and /source_text/:topic_id
+  Created {
+    audit_id: String,
+    comment_topic_id: String,
+  },
+  /// Status updated - includes new status directly (no need to refetch)
+  StatusUpdated {
+    audit_id: String,
+    comment_topic_id: String,
+    status: CommentStatus,
+  },
+}
+
+impl CommentEvent {
+  pub fn audit_id(&self) -> &str {
+    match self {
+      CommentEvent::Created { audit_id, .. } => audit_id,
+      CommentEvent::StatusUpdated { audit_id, .. } => audit_id,
+    }
+  }
+}

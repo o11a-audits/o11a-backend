@@ -2,7 +2,6 @@ pub use formatter::node_to_html;
 pub use parser::{DocumentationAST, DocumentationNode};
 
 pub mod analyzer;
-pub mod collaborator;
 pub mod formatter;
 pub mod parser;
 
