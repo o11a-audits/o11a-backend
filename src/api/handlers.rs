@@ -1,14 +1,15 @@
 use axum::{
   Json,
-  extract::{Path, State},
+  extract::{Path, Query, State},
   http::StatusCode,
   response::{Html, IntoResponse},
 };
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
-use crate::core::{Node, project};
-use crate::{api::AppState, core::topic::new_topic};
+use crate::api::AppState;
+use crate::collaborator::{db, formatter, models::*, parser};
+use crate::core::{self, Node, project, topic::new_topic};
 
 // Health check handler
 pub async fn health_check() -> StatusCode {
@@ -372,7 +373,9 @@ pub async fn get_source_text(
 }
 
 // Topic metadata response
-#[derive(Debug, Serialize)]
+
+/// Serializable scope information for storing in database and API responses
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScopeInfo {
   pub scope_type: String,
   #[serde(skip_serializing_if = "Option::is_none")]
@@ -383,6 +386,83 @@ pub struct ScopeInfo {
   pub member: Option<String>,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub semantic_block: Option<String>,
+}
+
+impl ScopeInfo {
+  /// Convert from core::Scope to ScopeInfo
+  pub fn from_scope(scope: &core::Scope) -> Self {
+    match scope {
+      core::Scope::Global => ScopeInfo {
+        scope_type: "Global".to_string(),
+        container: None,
+        component: None,
+        member: None,
+        semantic_block: None,
+      },
+      core::Scope::Container { container } => ScopeInfo {
+        scope_type: "Container".to_string(),
+        container: Some(container.file_path.clone()),
+        component: None,
+        member: None,
+        semantic_block: None,
+      },
+      core::Scope::Component {
+        container,
+        component,
+      } => ScopeInfo {
+        scope_type: "Component".to_string(),
+        container: Some(container.file_path.clone()),
+        component: Some(component.id.clone()),
+        member: None,
+        semantic_block: None,
+      },
+      core::Scope::Member {
+        container,
+        component,
+        member,
+      } => ScopeInfo {
+        scope_type: "Member".to_string(),
+        container: Some(container.file_path.clone()),
+        component: Some(component.id.clone()),
+        member: Some(member.id.clone()),
+        semantic_block: None,
+      },
+      core::Scope::SemanticBlock {
+        container,
+        component,
+        member,
+        semantic_block,
+      } => ScopeInfo {
+        scope_type: "SemanticBlock".to_string(),
+        container: Some(container.file_path.clone()),
+        component: Some(component.id.clone()),
+        member: Some(member.id.clone()),
+        semantic_block: Some(semantic_block.id.clone()),
+      },
+    }
+  }
+
+  /// Get the scope from a topic's metadata, or return Global scope if not found
+  pub fn from_topic(topic_id: &str, audit_data: &core::AuditData) -> Self {
+    let topic = new_topic(topic_id);
+    if let Some(metadata) = audit_data.topic_metadata.get(&topic) {
+      Self::from_scope(metadata.scope())
+    } else {
+      Self::default()
+    }
+  }
+}
+
+impl Default for ScopeInfo {
+  fn default() -> Self {
+    ScopeInfo {
+      scope_type: "Global".to_string(),
+      container: None,
+      component: None,
+      member: None,
+      semantic_block: None,
+    }
+  }
 }
 
 #[derive(Debug, Serialize)]
@@ -449,59 +529,6 @@ pub enum TopicMetadataResponse {
   Unnamed(UnnamedTopicResponse),
 }
 
-// Helper function to convert Scope to ScopeInfo
-fn scope_to_scope_info(scope: &crate::core::Scope) -> ScopeInfo {
-  match scope {
-    crate::core::Scope::Global => ScopeInfo {
-      scope_type: "Global".to_string(),
-      container: None,
-      component: None,
-      member: None,
-      semantic_block: None,
-    },
-    crate::core::Scope::Container { container } => ScopeInfo {
-      scope_type: "Container".to_string(),
-      container: Some(container.file_path.clone()),
-      component: None,
-      member: None,
-      semantic_block: None,
-    },
-    crate::core::Scope::Component {
-      container,
-      component,
-    } => ScopeInfo {
-      scope_type: "Component".to_string(),
-      container: Some(container.file_path.clone()),
-      component: Some(component.id.clone()),
-      member: None,
-      semantic_block: None,
-    },
-    crate::core::Scope::Member {
-      container,
-      component,
-      member,
-    } => ScopeInfo {
-      scope_type: "Member".to_string(),
-      container: Some(container.file_path.clone()),
-      component: Some(component.id.clone()),
-      member: Some(member.id.clone()),
-      semantic_block: None,
-    },
-    crate::core::Scope::SemanticBlock {
-      container,
-      component,
-      member,
-      semantic_block,
-    } => ScopeInfo {
-      scope_type: "SemanticBlock".to_string(),
-      container: Some(container.file_path.clone()),
-      component: Some(component.id.clone()),
-      member: Some(member.id.clone()),
-      semantic_block: Some(semantic_block.id.clone()),
-    },
-  }
-}
-
 // Helper function to convert ReferenceGroup to ReferenceGroupResponse
 fn convert_reference_groups(
   groups: &[crate::core::ReferenceGroup],
@@ -537,7 +564,7 @@ fn topic_metadata_to_response(
   topic: &crate::core::topic::Topic,
   metadata: &crate::core::TopicMetadata,
 ) -> TopicMetadataResponse {
-  let scope_info = scope_to_scope_info(metadata.scope());
+  let scope_info = ScopeInfo::from_scope(metadata.scope());
 
   match metadata {
     crate::core::TopicMetadata::NamedTopic {
@@ -639,4 +666,333 @@ pub async fn get_metadata(
   })?;
 
   Ok(Json(topic_metadata_to_response(&topic, metadata)))
+}
+
+// ============================================================================
+// Collaborator query parameter types
+// ============================================================================
+
+#[derive(Debug, Deserialize)]
+pub struct UserIdQuery {
+  pub user_id: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct OptionalUserIdQuery {
+  pub user_id: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BatchStatusQuery {
+  pub ids: String, // Comma-separated: "C1,C2,C3"
+}
+
+// ============================================================================
+// Comment handlers
+// ============================================================================
+
+/// GET /api/v1/audits/:audit_id/topics/:topic_id/comments
+/// Returns topic IDs of comments on this topic.
+pub async fn get_topic_comments(
+  State(state): State<AppState>,
+  Path((audit_id, topic_id)): Path<(String, String)>,
+) -> Result<Json<CommentListResponse>, StatusCode> {
+  let comments =
+    db::get_comments_for_topic_raw(&state.db, &audit_id, &topic_id)
+      .await
+      .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+  let comment_topic_ids =
+    comments.iter().map(|c| c.comment_topic_id()).collect();
+
+  Ok(Json(CommentListResponse { comment_topic_ids }))
+}
+
+/// GET /api/v1/audits/:audit_id/comments/:comment_type
+/// Returns topic IDs of comments of the specified type.
+pub async fn list_comments_by_type(
+  State(state): State<AppState>,
+  Path((audit_id, comment_type)): Path<(String, String)>,
+) -> Result<Json<CommentListResponse>, StatusCode> {
+  let comments =
+    db::get_comments_for_audit_raw(&state.db, &audit_id, &comment_type)
+      .await
+      .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+  let comment_topic_ids =
+    comments.iter().map(|c| c.comment_topic_id()).collect();
+
+  Ok(Json(CommentListResponse { comment_topic_ids }))
+}
+
+/// POST /api/v1/audits/:audit_id/comments
+/// Creates a new comment. Returns the new comment's topic ID.
+pub async fn create_comment(
+  State(state): State<AppState>,
+  Path(audit_id): Path<String>,
+  Json(payload): Json<CreateCommentRequest>,
+) -> Result<Json<CommentCreatedResponse>, StatusCode> {
+  // Determine the scope from the target topic
+  // If target is a comment (starts with "C"), copy scope from parent comment
+  // Otherwise, get scope from the topic's metadata in audit data
+  let scope = if payload.topic_id.starts_with('C') {
+    // Target is a comment - get scope from parent comment
+    let parent_comment_id: i64 = payload
+      .topic_id
+      .trim_start_matches('C')
+      .parse()
+      .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let parent_comment = db::get_comment_raw(&state.db, parent_comment_id)
+      .await
+      .map_err(|_| StatusCode::NOT_FOUND)?;
+    // Parse the stored scope JSON
+    serde_json::from_str(&parent_comment.scope).unwrap_or_default()
+  } else {
+    // Target is a regular topic - get scope from audit metadata
+    let ctx = state
+      .data_context
+      .lock()
+      .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+    ScopeInfo::from_topic(&payload.topic_id, audit_data)
+  };
+
+  // Insert comment into database with scope
+  let comment = db::create_comment(&state.db, &audit_id, &payload, &scope)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+  // Parse and add to in-memory store
+  let (html, mentions) = {
+    let ctx = state
+      .data_context
+      .lock()
+      .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+
+    let mentions = parser::parse_comment(&payload.content, audit_data);
+    let html = formatter::render_comment_html(&payload.content, &mentions);
+    (html, mentions)
+  };
+
+  // Update in-memory store
+  {
+    let mut store = state
+      .comment_store
+      .write()
+      .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    store.insert(comment.id, html, mentions);
+  }
+
+  let comment_topic_id = comment.comment_topic_id();
+
+  // Broadcast via WebSocket
+  let _ = state.comment_broadcast.send(CommentEvent::Created {
+    audit_id: audit_id.clone(),
+    comment_topic_id: comment_topic_id.clone(),
+  });
+
+  Ok(Json(CommentCreatedResponse { comment_topic_id }))
+}
+
+/// GET /api/v1/audits/:audit_id/mentions/:topic_id
+/// Returns topic IDs of comments that mention the given topic.
+pub async fn get_comments_mentioning_topic(
+  State(state): State<AppState>,
+  Path((audit_id, mentioned_topic_id)): Path<(String, String)>,
+) -> Result<Json<CommentListResponse>, StatusCode> {
+  // Look up comment IDs from in-memory store
+  let comment_ids = {
+    let store = state
+      .comment_store
+      .read()
+      .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    store.get_comments_mentioning(&mentioned_topic_id)
+  };
+
+  // Fetch raw comments from database to filter by audit_id
+  let comments = db::get_comments_by_ids(&state.db, &comment_ids)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+  // Filter by audit_id and collect topic IDs
+  let comment_topic_ids = comments
+    .iter()
+    .filter(|c| c.audit_id == audit_id)
+    .map(|c| c.comment_topic_id())
+    .collect();
+
+  Ok(Json(CommentListResponse { comment_topic_ids }))
+}
+
+// ============================================================================
+// Status handlers
+// ============================================================================
+
+/// GET /api/v1/audits/:audit_id/comments/:comment_id/status
+/// Returns status for a single comment.
+pub async fn get_comment_status(
+  State(state): State<AppState>,
+  Path((_audit_id, comment_id)): Path<(String, i64)>,
+) -> Result<Json<CommentStatusResponse>, StatusCode> {
+  let response = db::get_comment_status(&state.db, comment_id)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+  Ok(Json(response))
+}
+
+/// GET /api/v1/audits/:audit_id/comments/status?ids=C1,C2,C3
+/// Returns status for multiple comments.
+pub async fn get_batch_status(
+  State(state): State<AppState>,
+  Path(_audit_id): Path<String>,
+  Query(params): Query<BatchStatusQuery>,
+) -> Result<Json<Vec<CommentStatusResponse>>, StatusCode> {
+  let comment_ids: Vec<i64> = params
+    .ids
+    .split(',')
+    .filter_map(|s| s.trim().trim_start_matches('C').parse().ok())
+    .collect();
+
+  let statuses = db::get_comment_statuses(&state.db, &comment_ids)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+  Ok(Json(statuses))
+}
+
+/// PUT /api/v1/audits/:audit_id/comments/:comment_id/status
+/// Updates comment status.
+pub async fn update_comment_status(
+  State(state): State<AppState>,
+  Path((audit_id, comment_id)): Path<(String, i64)>,
+  Json(payload): Json<UpdateStatusRequest>,
+) -> Result<Json<CommentStatusResponse>, StatusCode> {
+  // Update status in database
+  let response = db::update_status(&state.db, comment_id, &payload.status)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+  // Broadcast status update via WebSocket
+  let _ = state.comment_broadcast.send(CommentEvent::StatusUpdated {
+    audit_id: audit_id.clone(),
+    comment_topic_id: response.comment_topic_id.clone(),
+    status: response.status.clone(),
+  });
+
+  Ok(Json(response))
+}
+
+// ============================================================================
+// Vote handlers
+// ============================================================================
+
+/// GET /api/v1/audits/:audit_id/votes/:comment_id
+/// Returns vote summary for a comment.
+pub async fn get_vote_summary(
+  State(state): State<AppState>,
+  Path((_audit_id, comment_id)): Path<(String, i64)>,
+  Query(params): Query<OptionalUserIdQuery>,
+) -> Result<Json<CommentVoteSummary>, StatusCode> {
+  let vote_info = db::get_vote_info(&state.db, comment_id, params.user_id)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+  Ok(Json(CommentVoteSummary {
+    comment_id,
+    comment_topic_id: format!("C{}", comment_id),
+    score: vote_info.score,
+    upvotes: vote_info.upvotes,
+    downvotes: vote_info.downvotes,
+    user_vote: vote_info.user_vote,
+  }))
+}
+
+/// GET /api/v1/audits/:audit_id/votes/unvoted?user_id=N
+/// Returns comment topic IDs the user has not voted on.
+pub async fn get_unvoted_comment_ids(
+  State(state): State<AppState>,
+  Path(audit_id): Path<String>,
+  Query(params): Query<UserIdQuery>,
+) -> Result<Json<Vec<String>>, StatusCode> {
+  let comment_ids =
+    db::get_unvoted_comment_ids(&state.db, &audit_id, params.user_id)
+      .await
+      .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+  // Return as topic IDs (C1, C2, etc.)
+  Ok(Json(
+    comment_ids
+      .into_iter()
+      .map(|id| format!("C{}", id))
+      .collect(),
+  ))
+}
+
+/// POST /api/v1/audits/:audit_id/votes/:comment_id
+/// Casts or updates a vote.
+pub async fn cast_vote(
+  State(state): State<AppState>,
+  Path((audit_id, comment_id)): Path<(String, i64)>,
+  Json(payload): Json<VoteRequest>,
+) -> Result<Json<CommentVoteSummary>, StatusCode> {
+  let vote_value = payload.vote.to_i32();
+
+  db::upsert_vote(&state.db, comment_id, payload.user_id, vote_value)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+  // Return updated vote summary
+  let vote_info =
+    db::get_vote_info(&state.db, comment_id, Some(payload.user_id))
+      .await
+      .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+  let comment_topic_id = format!("C{}", comment_id);
+
+  // Broadcast vote update via WebSocket
+  let _ = state.comment_broadcast.send(CommentEvent::VoteUpdated {
+    audit_id,
+    comment_topic_id: comment_topic_id.clone(),
+    score: vote_info.score,
+    upvotes: vote_info.upvotes,
+    downvotes: vote_info.downvotes,
+  });
+
+  Ok(Json(CommentVoteSummary {
+    comment_id,
+    comment_topic_id,
+    score: vote_info.score,
+    upvotes: vote_info.upvotes,
+    downvotes: vote_info.downvotes,
+    user_vote: vote_info.user_vote,
+  }))
+}
+
+/// DELETE /api/v1/audits/:audit_id/votes/:comment_id?user_id=N
+/// Removes a user's vote.
+pub async fn remove_vote(
+  State(state): State<AppState>,
+  Path((audit_id, comment_id)): Path<(String, i64)>,
+  Query(params): Query<UserIdQuery>,
+) -> Result<StatusCode, StatusCode> {
+  db::delete_vote(&state.db, comment_id, params.user_id)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+  // Get updated vote info and broadcast
+  let vote_info = db::get_vote_info(&state.db, comment_id, None)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+  let _ = state.comment_broadcast.send(CommentEvent::VoteUpdated {
+    audit_id,
+    comment_topic_id: format!("C{}", comment_id),
+    score: vote_info.score,
+    upvotes: vote_info.upvotes,
+    downvotes: vote_info.downvotes,
+  });
+
+  Ok(StatusCode::NO_CONTENT)
 }

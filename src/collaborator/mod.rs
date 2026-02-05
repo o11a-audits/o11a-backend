@@ -1,6 +1,5 @@
 pub mod db;
 pub mod formatter;
-pub mod handlers;
 pub mod models;
 pub mod parser;
 pub mod store;

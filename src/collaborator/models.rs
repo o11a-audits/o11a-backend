@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
+pub use crate::api::ScopeInfo;
+
 /// Reserved author IDs
 pub const AUTHOR_SYSTEM: i64 = 1;
 pub const AUTHOR_AGENT: i64 = 2;
@@ -144,6 +146,9 @@ pub struct Comment {
 
   // Mutable field
   pub status: String, // Stored as string, convert to CommentStatus
+
+  // Scope copied from target topic at creation time (stored as JSON)
+  pub scope: String,
 }
 
 impl Comment {
@@ -253,6 +258,14 @@ pub enum CommentEvent {
     comment_topic_id: String,
     status: CommentStatus,
   },
+  /// Vote updated - includes current vote counts
+  VoteUpdated {
+    audit_id: String,
+    comment_topic_id: String,
+    score: i64,
+    upvotes: i64,
+    downvotes: i64,
+  },
 }
 
 impl CommentEvent {
@@ -260,6 +273,7 @@ impl CommentEvent {
     match self {
       CommentEvent::Created { audit_id, .. } => audit_id,
       CommentEvent::StatusUpdated { audit_id, .. } => audit_id,
+      CommentEvent::VoteUpdated { audit_id, .. } => audit_id,
     }
   }
 }
