@@ -4,8 +4,8 @@ use crate::core::topic;
 use crate::core::{self, UnnamedTopicKind};
 use crate::core::{
   AST, DataContext, ElementaryType, FunctionModProperties, NamedTopicKind,
-  NestedReferenceGroup, Node, ReferenceGroup, RevertCondition,
-  RevertConstraint, RevertConstraintKind, Scope, SolidityType, TopicMetadata,
+  Node, ReferenceGroup, RevertCondition, RevertConstraint,
+  RevertConstraintKind, Scope, SolidityType, TopicMetadata, insert_reference,
 };
 use crate::solidity::parser::{
   self, ASTNode, FunctionVisibility, SolidityAST, VariableVisibility,
@@ -1069,17 +1069,9 @@ fn scope_to_self_reference(
 }
 
 /// Builds reference groups from scoped references.
-/// Groups references by:
-/// - containing_component (the contract where the reference occurs)
-/// - containing_member (Some = member scope, None = contract scope)
-///
-/// If `self_reference` is provided, it is included in the appropriate group,
-/// representing the declaration itself as a reference.
-///
-/// Returns a Vec<ReferenceGroup> where each group contains:
-/// - contract: the contract topic
-/// - contract_references: references at contract level (inheritance, using-for, etc.)
-/// - member_references: references within members, grouped by member
+/// Groups references by containing_component (contract) and containing_member (function).
+/// The self_reference, if provided, is included in the appropriate group.
+/// Groups are post-sorted: subject's contract first, then by contract name.
 fn build_reference_groups(
   scoped_refs: &[ScopedReference],
   self_reference: Option<ScopedReference>,
@@ -1087,124 +1079,56 @@ fn build_reference_groups(
   in_scope_source_topics: &BTreeMap<i32, InScopeDeclaration>,
   in_scope_files: &HashSet<core::ProjectPath>,
 ) -> Vec<ReferenceGroup> {
-  // First, group by contract, then within each contract by member (or None for contract-level)
-  // contract_id -> (contract_refs, member_id -> refs)
-  let mut contract_groups: BTreeMap<
-    i32,
-    (Vec<core::Reference>, BTreeMap<i32, Vec<core::Reference>>),
-  > = BTreeMap::new();
+  let mut groups: Vec<ReferenceGroup> = Vec::new();
 
-  // Helper to add a scoped reference to the groups
-  let mut add_to_groups = |scoped_ref: &ScopedReference| {
+  let mut insert_scoped_ref = |scoped_ref: &ScopedReference| {
     let ref_topic = topic::new_node_topic(&scoped_ref.reference_node);
-    let reference = core::Reference::project_reference(ref_topic);
-    let contract_id = scoped_ref.containing_component;
+    let ref_sort_key = get_source_location_start(&ref_topic, nodes);
+    let contract_topic =
+      topic::new_node_topic(&scoped_ref.containing_component);
+    let contract_sort_key = get_source_location_start(&contract_topic, nodes);
+    let is_in_scope = is_contract_in_scope(
+      scoped_ref.containing_component,
+      in_scope_source_topics,
+      in_scope_files,
+    );
 
-    let (contract_refs, member_groups) =
-      contract_groups.entry(contract_id).or_default();
-
-    match scoped_ref.containing_member {
-      Some(member_id) => {
-        // Member-level reference
-        member_groups.entry(member_id).or_default().push(reference);
-      }
-      None => {
-        // Contract-level reference
-        contract_refs.push(reference);
-      }
-    }
-  };
-
-  // Add the self-reference first (if provided) so it appears at the declaration location
-  if let Some(ref self_ref) = self_reference {
-    add_to_groups(self_ref);
-  }
-
-  // Add all other references
-  for scoped_ref in scoped_refs {
-    add_to_groups(scoped_ref);
-  }
-
-  // Sort references within each group by source location
-  for (contract_refs, member_groups) in contract_groups.values_mut() {
-    // Sort contract-level references
-    contract_refs.sort_by(|a, b| {
-      let loc_a = get_source_location_start(a.reference_topic(), nodes);
-      let loc_b = get_source_location_start(b.reference_topic(), nodes);
-      loc_a.cmp(&loc_b)
+    let subscope = scoped_ref.containing_member.map(|member_id| {
+      let member_topic = topic::new_node_topic(&member_id);
+      let member_sort_key = get_source_location_start(&member_topic, nodes);
+      (member_topic, member_sort_key)
     });
 
-    // Sort references within each member group
-    for refs in member_groups.values_mut() {
-      refs.sort_by(|a, b| {
-        let loc_a = get_source_location_start(a.reference_topic(), nodes);
-        let loc_b = get_source_location_start(b.reference_topic(), nodes);
-        loc_a.cmp(&loc_b)
-      });
-    }
-  }
-
-  // Helper to check if a contract is in scope
-  let is_contract_in_scope = |contract_id: i32| -> bool {
-    in_scope_source_topics
-      .get(&contract_id)
-      .and_then(|decl| match decl {
-        InScopeDeclaration::Contract { container_file, .. } => {
-          Some(in_scope_files.contains(container_file))
-        }
-        _ => None,
-      })
-      .unwrap_or(false)
+    insert_reference(
+      &mut groups,
+      contract_topic,
+      contract_sort_key,
+      is_in_scope,
+      subscope,
+      core::Reference::project_reference(ref_topic, ref_sort_key),
+    );
   };
 
-  // Convert to Vec<ReferenceGroup>
-  let mut groups: Vec<ReferenceGroup> = contract_groups
-    .into_iter()
-    .map(|(contract_id, (contract_refs, member_groups))| {
-      let contract_topic = topic::new_node_topic(&contract_id);
-      let is_in_scope = is_contract_in_scope(contract_id);
+  if let Some(ref self_ref) = self_reference {
+    insert_scoped_ref(self_ref);
+  }
+  for scoped_ref in scoped_refs {
+    insert_scoped_ref(scoped_ref);
+  }
 
-      // Build nested reference groups (functions), sorted by source location
-      let mut nested_references: Vec<NestedReferenceGroup> = member_groups
-        .into_iter()
-        .map(|(member_id, refs)| {
-          NestedReferenceGroup::new(topic::new_node_topic(&member_id), refs)
-        })
-        .collect();
-
-      // Sort nested groups by source location
-      nested_references.sort_by(|a, b| {
-        let loc_a = get_source_location_start(a.subscope(), nodes);
-        let loc_b = get_source_location_start(b.subscope(), nodes);
-        loc_a.cmp(&loc_b)
-      });
-
-      ReferenceGroup::new(
-        contract_topic,
-        is_in_scope,
-        contract_refs,
-        nested_references,
-      )
-    })
-    .collect();
-
-  // Sort groups: subject's contract first, then by contract name
+  // Post-sort: subject's contract first, then by contract name
   let subject_contract_id = self_reference.map(|r| r.containing_component);
   groups.sort_by(|a, b| {
     let id_a = a.scope().underlying_id().ok();
     let id_b = b.scope().underlying_id().ok();
 
-    // Subject's contract comes first
     let is_subject_a = subject_contract_id == id_a;
     let is_subject_b = subject_contract_id == id_b;
 
     if is_subject_a != is_subject_b {
-      // If a is the subject, it should come first (Less)
-      // If b is the subject, a should come after (Greater)
       return is_subject_a.cmp(&is_subject_b).reverse();
     }
 
-    // Otherwise sort by contract name
     let name_a = get_scope_name(a.scope(), in_scope_source_topics);
     let name_b = get_scope_name(b.scope(), in_scope_source_topics);
     name_a.cmp(&name_b)
@@ -1214,8 +1138,7 @@ fn build_reference_groups(
 }
 
 /// Builds reference groups for expanded_references, sorted by ancestor/descendant counts.
-/// Contracts with only ancestors appear first (sorted by fewest ancestors),
-/// then contracts with both, then contracts with only descendants (sorted by most descendants).
+/// Groups are post-sorted: in-scope first, then by ancestry counts.
 fn build_expanded_reference_groups(
   scoped_refs: &[ScopedReference],
   ancestors: &HashSet<i32>,
@@ -1226,11 +1149,9 @@ fn build_expanded_reference_groups(
   in_scope_files: &HashSet<core::ProjectPath>,
 ) -> Vec<ReferenceGroup> {
   // Track ancestor/descendant counts per contract
-  // contract_id -> (ancestor_count, descendant_count)
   let mut contract_ancestry_counts: BTreeMap<i32, (usize, usize)> =
     BTreeMap::new();
 
-  // Helper to extract component ID from a Scope
   let get_component_id = |scope: &Scope| -> Option<i32> {
     match scope {
       Scope::Global | Scope::Container { .. } => None,
@@ -1242,8 +1163,6 @@ fn build_expanded_reference_groups(
     }
   };
 
-  // First pass: count ancestors and descendants per contract
-  // We need to look at which variable declarations are in each contract
   for &var_id in ancestors.iter().chain(descendants.iter()) {
     if let Some(scope) = declaration_scopes.get(&var_id) {
       if let Some(contract_id) = get_component_id(scope) {
@@ -1259,135 +1178,75 @@ fn build_expanded_reference_groups(
     }
   }
 
-  // Group references by contract, then by member
-  // contract_id -> (contract_refs, member_id -> refs)
-  let mut contract_groups: BTreeMap<
-    i32,
-    (Vec<core::Reference>, BTreeMap<i32, Vec<core::Reference>>),
-  > = BTreeMap::new();
-
-  // Helper to add a scoped reference to the groups
-  let mut add_to_groups = |scoped_ref: &ScopedReference| {
-    let ref_topic = topic::new_node_topic(&scoped_ref.reference_node);
-    let reference = core::Reference::project_reference(ref_topic);
-    let contract_id = scoped_ref.containing_component;
-
-    let (contract_refs, member_groups) =
-      contract_groups.entry(contract_id).or_default();
-
-    match scoped_ref.containing_member {
-      Some(member_id) => {
-        member_groups.entry(member_id).or_default().push(reference);
-      }
-      None => {
-        contract_refs.push(reference);
-      }
-    }
-  };
+  let mut groups: Vec<ReferenceGroup> = Vec::new();
 
   for scoped_ref in scoped_refs {
-    add_to_groups(scoped_ref);
-  }
+    let ref_topic = topic::new_node_topic(&scoped_ref.reference_node);
+    let ref_sort_key = get_source_location_start(&ref_topic, nodes);
+    let contract_topic =
+      topic::new_node_topic(&scoped_ref.containing_component);
+    let contract_sort_key = get_source_location_start(&contract_topic, nodes);
+    let in_scope = is_contract_in_scope(
+      scoped_ref.containing_component,
+      in_scope_source_topics,
+      in_scope_files,
+    );
 
-  // Sort references within each group by source location
-  for (contract_refs, member_groups) in contract_groups.values_mut() {
-    contract_refs.sort_by(|a, b| {
-      let loc_a = get_source_location_start(a.reference_topic(), nodes);
-      let loc_b = get_source_location_start(b.reference_topic(), nodes);
-      loc_a.cmp(&loc_b)
+    let subscope = scoped_ref.containing_member.map(|member_id| {
+      let member_topic = topic::new_node_topic(&member_id);
+      let member_sort_key = get_source_location_start(&member_topic, nodes);
+      (member_topic, member_sort_key)
     });
 
-    for refs in member_groups.values_mut() {
-      refs.sort_by(|a, b| {
-        let loc_a = get_source_location_start(a.reference_topic(), nodes);
-        let loc_b = get_source_location_start(b.reference_topic(), nodes);
-        loc_a.cmp(&loc_b)
-      });
-    }
+    insert_reference(
+      &mut groups,
+      contract_topic,
+      contract_sort_key,
+      in_scope,
+      subscope,
+      core::Reference::project_reference(ref_topic, ref_sort_key),
+    );
   }
 
-  // Helper to check if a contract is in scope
-  let is_contract_in_scope = |contract_id: i32| -> bool {
-    in_scope_source_topics
-      .get(&contract_id)
-      .and_then(|decl| match decl {
-        InScopeDeclaration::Contract { container_file, .. } => {
-          Some(in_scope_files.contains(container_file))
-        }
-        _ => None,
-      })
-      .unwrap_or(false)
-  };
-
-  // Convert to Vec<ReferenceGroup>
-  let mut groups: Vec<ReferenceGroup> = contract_groups
-    .into_iter()
-    .map(|(contract_id, (contract_refs, member_groups))| {
-      let contract_topic = topic::new_node_topic(&contract_id);
-      let is_in_scope = is_contract_in_scope(contract_id);
-
-      let mut nested_references: Vec<NestedReferenceGroup> = member_groups
-        .into_iter()
-        .map(|(member_id, refs)| {
-          NestedReferenceGroup::new(topic::new_node_topic(&member_id), refs)
-        })
-        .collect();
-
-      nested_references.sort_by(|a, b| {
-        let loc_a = get_source_location_start(a.subscope(), nodes);
-        let loc_b = get_source_location_start(b.subscope(), nodes);
-        loc_a.cmp(&loc_b)
-      });
-
-      ReferenceGroup::new(
-        contract_topic,
-        is_in_scope,
-        contract_refs,
-        nested_references,
-      )
-    })
-    .collect();
-
-  // Sort groups by:
-  // 1. In-scope contracts first, out-of-scope contracts last
-  // 2. Within in-scope: contracts with ancestors (sorted by fewest ancestors first)
-  // 3. Within in-scope: contracts with only descendants (sorted by most descendants first)
+  // Post-sort: in-scope first, then by ancestry counts
   groups.sort_by(|a, b| {
-    // Primary sort: in-scope contracts come before out-of-scope contracts
     let in_scope_a = a.is_in_scope();
     let in_scope_b = b.is_in_scope();
 
     if in_scope_a != in_scope_b {
-      // In-scope contracts come first (true > false, so reverse comparison)
       return in_scope_b.cmp(&in_scope_a);
     }
 
     let id_a = a.scope().underlying_id().unwrap_or(0);
     let id_b = b.scope().underlying_id().unwrap_or(0);
 
-    let (ancestors_a, descendants_a) = contract_ancestry_counts
+    let (ancestors_a, _) = contract_ancestry_counts
       .get(&id_a)
       .copied()
       .unwrap_or((0, 0));
-    let (ancestors_b, descendants_b) = contract_ancestry_counts
+    let (ancestors_b, _) = contract_ancestry_counts
+      .get(&id_b)
+      .copied()
+      .unwrap_or((0, 0));
+    let (_, descendants_a) = contract_ancestry_counts
+      .get(&id_a)
+      .copied()
+      .unwrap_or((0, 0));
+    let (_, descendants_b) = contract_ancestry_counts
       .get(&id_b)
       .copied()
       .unwrap_or((0, 0));
 
-    // Secondary sort: contracts with ancestors come before contracts without
     let has_ancestors_a = ancestors_a > 0;
     let has_ancestors_b = ancestors_b > 0;
 
     if has_ancestors_a != has_ancestors_b {
-      // Contracts with ancestors come first
       return has_ancestors_b.cmp(&has_ancestors_a);
     }
 
     if has_ancestors_a {
-      // Both have ancestors: sort by fewest ancestors first
       ancestors_a.cmp(&ancestors_b)
     } else {
-      // Neither has ancestors (only descendants): sort by most descendants first
       descendants_b.cmp(&descendants_a)
     }
   });
@@ -1395,15 +1254,31 @@ fn build_expanded_reference_groups(
   groups
 }
 
+/// Checks whether a contract (by node ID) is defined in one of the audit's in-scope files.
+fn is_contract_in_scope(
+  contract_id: i32,
+  in_scope_source_topics: &BTreeMap<i32, InScopeDeclaration>,
+  in_scope_files: &HashSet<core::ProjectPath>,
+) -> bool {
+  in_scope_source_topics
+    .get(&contract_id)
+    .and_then(|decl| match decl {
+      InScopeDeclaration::Contract { container_file, .. } => {
+        Some(in_scope_files.contains(container_file))
+      }
+      _ => None,
+    })
+    .unwrap_or(false)
+}
+
 /// Gets the source location start for a topic from the nodes map.
 fn get_source_location_start(
   topic: &topic::Topic,
   nodes: &BTreeMap<topic::Topic, Node>,
 ) -> Option<usize> {
-  nodes.get(topic).and_then(|node| match node {
-    Node::Solidity(ast_node) => ast_node.src_location().start,
-    Node::Documentation(doc_node) => doc_node.position(),
-  })
+  nodes
+    .get(topic)
+    .and_then(|node| node.source_location_start())
 }
 
 /// Gets the scope name from a topic for sorting.

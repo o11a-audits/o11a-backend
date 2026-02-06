@@ -9,7 +9,7 @@ use sqlx::FromRow;
 
 use crate::api::AppState;
 use crate::collaborator::{db, formatter, models::*, parser};
-use crate::core::{self, Node, project, topic::new_topic};
+use crate::core::{self, Node, insert_reference, project, topic::new_topic};
 
 // Health check handler
 pub async fn health_check() -> StatusCode {
@@ -271,7 +271,7 @@ pub async fn get_documents(
         if *kind == crate::core::UnnamedTopicKind::DocumentationRoot =>
       {
         // Documents don't have comment mentions (they're unnamed topics)
-        documents.push(topic_metadata_to_response(topic, metadata, vec![]));
+        documents.push(topic_metadata_to_response(topic, metadata));
       }
       _ => (),
     };
@@ -320,7 +320,7 @@ pub async fn get_contracts(
       }
 
       // Contracts list doesn't include comment mentions for performance
-      contracts.push(topic_metadata_to_response(topic, metadata, vec![]));
+      contracts.push(topic_metadata_to_response(topic, metadata));
     }
   }
 
@@ -478,44 +478,64 @@ impl Default for ScopeInfo {
 }
 
 /// Response type for a single reference
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type")]
 pub enum ReferenceResponse {
   #[serde(rename = "project")]
   Project { reference_topic: String },
+  #[serde(rename = "project_with_mentions")]
+  ProjectWithMentions {
+    reference_topic: String,
+    mention_topics: Vec<String>,
+  },
   #[serde(rename = "comment")]
   Comment {
     reference_topic: String,
-    mention_topic: String,
+    mention_topics: Vec<String>,
   },
 }
 
 impl ReferenceResponse {
   fn from_reference(reference: &crate::core::Reference) -> Self {
     match reference {
-      crate::core::Reference::ProjectReference { reference_topic } => {
-        ReferenceResponse::Project {
-          reference_topic: reference_topic.id().to_string(),
-        }
-      }
+      crate::core::Reference::ProjectReference {
+        reference_topic, ..
+      } => ReferenceResponse::Project {
+        reference_topic: reference_topic.id().to_string(),
+      },
+      crate::core::Reference::ProjectReferenceWithMentions {
+        reference_topic,
+        mention_topics,
+        ..
+      } => ReferenceResponse::ProjectWithMentions {
+        reference_topic: reference_topic.id().to_string(),
+        mention_topics: mention_topics
+          .iter()
+          .map(|t| t.id().to_string())
+          .collect(),
+      },
       crate::core::Reference::CommentMention {
         reference_topic,
-        mention_topic,
+        mention_topics,
+        ..
       } => ReferenceResponse::Comment {
         reference_topic: reference_topic.id().to_string(),
-        mention_topic: mention_topic.id().to_string(),
+        mention_topics: mention_topics
+          .iter()
+          .map(|t| t.id().to_string())
+          .collect(),
       },
     }
   }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct NestedReferenceGroupResponse {
   pub subscope: String,
   pub references: Vec<ReferenceResponse>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ReferenceGroupResponse {
   pub scope: String,
   pub is_in_scope: bool,
@@ -607,7 +627,6 @@ fn convert_reference_groups(
 fn topic_metadata_to_response(
   topic: &crate::core::topic::Topic,
   metadata: &crate::core::TopicMetadata,
-  comment_mention_refs: Vec<ReferenceGroupResponse>,
 ) -> TopicMetadataResponse {
   let scope_info = ScopeInfo::from_scope(metadata.scope());
 
@@ -641,10 +660,6 @@ fn topic_metadata_to_response(
         None
       };
 
-      // Combine documentation mentions with comment mentions
-      let mut all_mentions = convert_reference_groups(metadata.mentions());
-      all_mentions.extend(comment_mention_refs);
-
       TopicMetadataResponse::Named(NamedTopicResponse {
         topic_id: topic.id.clone(),
         name: name.clone(),
@@ -665,7 +680,7 @@ fn topic_metadata_to_response(
           .collect(),
         relatives: metadata.relatives().iter().map(|t| t.id.clone()).collect(),
         mutations: mutations_response,
-        mentions: all_mentions,
+        mentions: convert_reference_groups(metadata.mentions()),
       })
     }
 
@@ -695,28 +710,6 @@ pub async fn get_metadata(
 ) -> Result<Json<TopicMetadataResponse>, StatusCode> {
   println!("GET /api/v1/audits/{}/metadata/{}", audit_id, topic_id);
 
-  // Get comment mentions for this topic
-  let comment_mention_refs = {
-    let comment_ids = {
-      let store = state
-        .comment_store
-        .read()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-      store.get_comments_mentioning(&topic_id)
-    };
-
-    if !comment_ids.is_empty() {
-      // Fetch comment details from DB to get scopes
-      let comments = db::get_comments_by_ids(&state.db, &comment_ids)
-        .await
-        .unwrap_or_default();
-
-      build_comment_mention_refs(&comments)
-    } else {
-      vec![]
-    }
-  };
-
   let ctx = state.data_context.lock().map_err(|e| {
     eprintln!("Mutex poisoned in get_metadata: {}", e);
     StatusCode::INTERNAL_SERVER_ERROR
@@ -736,68 +729,73 @@ pub async fn get_metadata(
     StatusCode::NOT_FOUND
   })?;
 
-  Ok(Json(topic_metadata_to_response(
-    &topic,
-    metadata,
-    comment_mention_refs,
-  )))
+  Ok(Json(topic_metadata_to_response(&topic, metadata)))
 }
 
-/// Builds ReferenceGroupResponse items from comments that mention a topic.
-/// Groups comments by their scope's component (contract/file).
-fn build_comment_mention_refs(
-  comments: &[Comment],
-) -> Vec<ReferenceGroupResponse> {
-  use std::collections::BTreeMap;
+/// Inserts a CommentMention reference into the mentioned topic's
+/// `TopicMetadata::NamedTopic.mentions` ReferenceGroups.
+///
+/// Uses the comment's scope to determine the correct group (component) and
+/// nested group (member), and the reference_topic (lowest scope topic).
+fn insert_comment_mention(
+  audit_data: &mut core::AuditData,
+  scope: &ScopeInfo,
+  mentioned_topic_id: &str,
+  mention_topic: core::topic::Topic,
+) {
+  // Determine reference_topic from the comment's scope (lowest scope level)
+  let reference_topic_id = match scope.lowest_scope_topic_id() {
+    Some(id) => id.to_string(),
+    None => return, // Global/Container scope — can't place in a ReferenceGroup
+  };
 
-  // Group comments by their scope's component
-  // component_id -> Vec<(reference_topic_id, mention_topic_id)>
-  let mut component_groups: BTreeMap<String, Vec<(String, String)>> =
-    BTreeMap::new();
+  let reference_topic = new_topic(&reference_topic_id);
+  let ref_sort_key = audit_data
+    .nodes
+    .get(&reference_topic)
+    .and_then(|n| n.source_location_start());
 
-  for comment in comments {
-    let scope_info: ScopeInfo =
-      serde_json::from_str(&comment.scope).unwrap_or_default();
+  // Determine component (group scope) — fall back to reference_topic if no component
+  let component_id = match &scope.component {
+    Some(id) => id.clone(),
+    None => return, // No component means we can't group it
+  };
+  let component_topic = new_topic(&component_id);
+  let component_sort_key = audit_data
+    .nodes
+    .get(&component_topic)
+    .and_then(|n| n.source_location_start());
 
-    // Get the lowest scope topic ID as the reference_topic
-    if let Some(reference_topic_id) = scope_info.lowest_scope_topic_id() {
-      let mention_topic_id = comment.comment_topic_id();
+  // Determine subscope (nested group) from member, if present
+  let subscope = scope.member.as_ref().map(|member_id| {
+    let member_topic = new_topic(member_id);
+    let member_sort_key = audit_data
+      .nodes
+      .get(&member_topic)
+      .and_then(|n| n.source_location_start());
+    (member_topic, member_sort_key)
+  });
 
-      // Group by component (or use reference_topic as fallback)
-      let group_key = scope_info
-        .component
-        .clone()
-        .unwrap_or_else(|| reference_topic_id.to_string());
+  let reference = core::Reference::comment_mention(
+    reference_topic,
+    mention_topic,
+    ref_sort_key,
+  );
 
-      component_groups
-        .entry(group_key)
-        .or_default()
-        .push((reference_topic_id.to_string(), mention_topic_id));
-    }
+  // Get the mentioned topic's metadata and insert into its mentions field
+  let mentioned_topic = new_topic(mentioned_topic_id);
+  if let Some(core::TopicMetadata::NamedTopic { mentions, .. }) =
+    audit_data.topic_metadata.get_mut(&mentioned_topic)
+  {
+    insert_reference(
+      mentions,
+      component_topic,
+      component_sort_key,
+      true,
+      subscope,
+      reference,
+    );
   }
-
-  // Convert to ReferenceGroupResponse
-  component_groups
-    .into_iter()
-    .map(|(component_id, refs)| {
-      let scope_references: Vec<ReferenceResponse> = refs
-        .into_iter()
-        .map(
-          |(reference_topic, mention_topic)| ReferenceResponse::Comment {
-            reference_topic,
-            mention_topic,
-          },
-        )
-        .collect();
-
-      ReferenceGroupResponse {
-        scope: component_id,
-        is_in_scope: true, // Comments are always considered in-scope
-        scope_references,
-        nested_references: vec![], // Comment mentions don't have nested structure
-      }
-    })
-    .collect()
 }
 
 // ============================================================================
@@ -894,7 +892,7 @@ pub async fn create_comment(
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-  // Parse and add to in-memory store
+  // Parse mentions and render HTML
   let (html, mentions) = {
     let ctx = state
       .data_context
@@ -907,6 +905,48 @@ pub async fn create_comment(
     (html, mentions)
   };
 
+  let comment_topic_id = comment.comment_topic_id();
+
+  // Insert comment mentions into topic_metadata ReferenceGroups
+  // and collect updated mentions for broadcasting
+  let mut mentions_updates: Vec<(String, Vec<ReferenceGroupResponse>)> =
+    Vec::new();
+  if !mentions.is_empty() {
+    let mut ctx = state
+      .data_context
+      .lock()
+      .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let audit_data =
+      ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+    let mention_topic = new_topic(&comment_topic_id);
+
+    // Collect unique mentioned topic IDs
+    let mut mentioned_ids: Vec<&str> =
+      mentions.iter().map(|m| m.topic_id.as_str()).collect();
+    mentioned_ids.sort_unstable();
+    mentioned_ids.dedup();
+
+    for mention in &mentions {
+      insert_comment_mention(
+        audit_data,
+        &scope,
+        &mention.topic_id,
+        mention_topic.clone(),
+      );
+    }
+
+    // Read back updated mentions for each mentioned topic
+    for topic_id in mentioned_ids {
+      let topic = new_topic(topic_id);
+      if let Some(metadata) = audit_data.topic_metadata.get(&topic) {
+        mentions_updates.push((
+          topic_id.to_string(),
+          convert_reference_groups(metadata.mentions()),
+        ));
+      }
+    }
+  }
+
   // Update in-memory store
   {
     let mut store = state
@@ -916,13 +956,19 @@ pub async fn create_comment(
     store.insert(comment.id, html, mentions);
   }
 
-  let comment_topic_id = comment.comment_topic_id();
-
   // Broadcast via WebSocket
   let _ = state.comment_broadcast.send(CommentEvent::Created {
     audit_id: audit_id.clone(),
     comment_topic_id: comment_topic_id.clone(),
   });
+
+  for (topic_id, updated_mentions) in mentions_updates {
+    let _ = state.comment_broadcast.send(CommentEvent::MentionsUpdated {
+      audit_id: audit_id.clone(),
+      topic_id,
+      mentions: updated_mentions,
+    });
+  }
 
   Ok(Json(CommentCreatedResponse { comment_topic_id }))
 }

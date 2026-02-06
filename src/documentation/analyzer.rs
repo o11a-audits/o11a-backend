@@ -1,8 +1,8 @@
 use crate::core;
 use crate::core::topic;
 use crate::core::{
-  AST, AuditData, DataContext, NestedReferenceGroup, Node, ReferenceGroup,
-  Scope, TitledTopicKind, TopicMetadata, UnnamedTopicKind,
+  AST, AuditData, DataContext, Node, Scope, TitledTopicKind, TopicMetadata,
+  UnnamedTopicKind, ensure_group, insert_reference,
 };
 use crate::documentation::parser::{self, DocumentationAST, DocumentationNode};
 use std::collections::BTreeMap;
@@ -427,7 +427,7 @@ fn process_documentation_node(
   Ok(())
 }
 
-/// Builds ReferenceGroups from collected mentions and updates the referenced topics' mentions field
+/// Builds ReferenceGroups from collected mentions and updates the referenced topics' mentions field.
 /// Groups mentions by component (H1 section), with member-level (sub-H1) and semantic_block-level (paragraph) sub-groups.
 fn populate_mentions(
   topic_metadata: &mut BTreeMap<topic::Topic, TopicMetadata>,
@@ -435,15 +435,7 @@ fn populate_mentions(
   nodes: &BTreeMap<topic::Topic, Node>,
 ) {
   for (referenced_topic, scopes) in mentions_by_topic {
-    // Group mentions by component (H1 section)
-    // Structure: component -> (scope-level refs (members), nested groups by member -> semantic_block refs)
-    let mut component_groups: BTreeMap<
-      topic::Topic,
-      (
-        Vec<core::Reference>,
-        BTreeMap<topic::Topic, Vec<core::Reference>>,
-      ),
-    > = BTreeMap::new();
+    let mut mention_groups: Vec<core::ReferenceGroup> = Vec::new();
 
     for scope in scopes {
       match scope {
@@ -451,15 +443,24 @@ fn populate_mentions(
           // Global/Container scope shouldn't have documentation mentions, skip
         }
         core::Scope::Component { component, .. } => {
-          // Component-level reference (first nested section) - add empty entry
-          component_groups.entry(component).or_default();
+          // Component-level reference - ensure group exists (no reference to add)
+          let scope_sort_key = get_source_location_start(&component, nodes);
+          ensure_group(&mut mention_groups, component, scope_sort_key, true);
         }
         core::Scope::Member {
           component, member, ..
         } => {
-          // Member-level reference (second nested section) - use member as scope-level reference
-          let (scope_refs, _) = component_groups.entry(component).or_default();
-          scope_refs.push(core::Reference::project_reference(member));
+          // Member-level reference - add member as a scope-level reference
+          let component_sort_key = get_source_location_start(&component, nodes);
+          let member_sort_key = get_source_location_start(&member, nodes);
+          insert_reference(
+            &mut mention_groups,
+            component,
+            component_sort_key,
+            true,
+            None,
+            core::Reference::project_reference(member, member_sort_key),
+          );
         }
         core::Scope::SemanticBlock {
           component,
@@ -467,69 +468,21 @@ fn populate_mentions(
           semantic_block,
           ..
         } => {
-          // SemanticBlock-level reference (third nested section) - group by member
-          let (_, nested_groups) =
-            component_groups.entry(component).or_default();
-          nested_groups
-            .entry(member)
-            .or_default()
-            .push(core::Reference::project_reference(semantic_block));
+          // SemanticBlock-level reference - nested under member
+          let component_sort_key = get_source_location_start(&component, nodes);
+          let member_sort_key = get_source_location_start(&member, nodes);
+          let sb_sort_key = get_source_location_start(&semantic_block, nodes);
+          insert_reference(
+            &mut mention_groups,
+            component,
+            component_sort_key,
+            true,
+            Some((member, member_sort_key)),
+            core::Reference::project_reference(semantic_block, sb_sort_key),
+          );
         }
       }
     }
-
-    // Sort and de-duplicate references within each group
-    for (scope_refs, nested_groups) in component_groups.values_mut() {
-      scope_refs.sort_by(|a, b| {
-        let loc_a = get_source_location_start(a.reference_topic(), nodes);
-        let loc_b = get_source_location_start(b.reference_topic(), nodes);
-        loc_a.cmp(&loc_b)
-      });
-      scope_refs.dedup_by(|a, b| a.reference_topic() == b.reference_topic());
-
-      for refs in nested_groups.values_mut() {
-        refs.sort_by(|a, b| {
-          let loc_a = get_source_location_start(a.reference_topic(), nodes);
-          let loc_b = get_source_location_start(b.reference_topic(), nodes);
-          loc_a.cmp(&loc_b)
-        });
-        refs.dedup_by(|a, b| a.reference_topic() == b.reference_topic());
-      }
-    }
-
-    // Convert to Vec<ReferenceGroup>, sorted by component source location
-    let mut mention_groups: Vec<ReferenceGroup> = component_groups
-      .into_iter()
-      .map(|(component, (scope_refs, nested_groups))| {
-        // Build nested reference groups (by member), sorted by member source location
-        let mut nested_references: Vec<NestedReferenceGroup> = nested_groups
-          .into_iter()
-          .map(|(member_topic, refs)| {
-            NestedReferenceGroup::new(member_topic, refs)
-          })
-          .collect();
-
-        nested_references.sort_by(|a, b| {
-          let loc_a = get_source_location_start(a.subscope(), nodes);
-          let loc_b = get_source_location_start(b.subscope(), nodes);
-          loc_a.cmp(&loc_b)
-        });
-
-        ReferenceGroup::new(
-          component,
-          true, // Documentation is always in-scope
-          scope_refs,
-          nested_references,
-        )
-      })
-      .collect();
-
-    // Sort ReferenceGroups by component source location
-    mention_groups.sort_by(|a, b| {
-      let loc_a = get_source_location_start(a.scope(), nodes);
-      let loc_b = get_source_location_start(b.scope(), nodes);
-      loc_a.cmp(&loc_b)
-    });
 
     // Update the referenced topic's mentions field
     if let Some(TopicMetadata::NamedTopic { mentions, .. }) =
@@ -545,10 +498,9 @@ fn get_source_location_start(
   topic: &topic::Topic,
   nodes: &BTreeMap<topic::Topic, Node>,
 ) -> Option<usize> {
-  nodes.get(topic).and_then(|node| match node {
-    Node::Solidity(ast_node) => ast_node.src_location().start,
-    Node::Documentation(doc_node) => doc_node.position(),
-  })
+  nodes
+    .get(topic)
+    .and_then(|node| node.source_location_start())
 }
 
 #[cfg(test)]

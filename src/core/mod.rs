@@ -167,6 +167,16 @@ pub enum Node {
   Documentation(crate::documentation::parser::DocumentationNode),
 }
 
+impl Node {
+  /// Returns the source location start (byte offset) for this node.
+  pub fn source_location_start(&self) -> Option<usize> {
+    match self {
+      Node::Solidity(ast_node) => ast_node.src_location().start,
+      Node::Documentation(doc_node) => doc_node.position(),
+    }
+  }
+}
+
 pub enum AST {
   Solidity(crate::solidity::parser::SolidityAST),
   Documentation(crate::documentation::parser::DocumentationAST),
@@ -351,49 +361,81 @@ pub enum NamedTopicVisibility {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Reference {
   /// A reference from project analysis (solidity analyzer or documentation analyzer).
-  /// The reference_topic is the AST node where the referenced topic appears.
-  ProjectReference { reference_topic: topic::Topic },
-  /// A reference from a user comment mentioning a topic.
-  /// - reference_topic: The lowest scope of the comment (where it spatially applies)
-  /// - mention_topic: The comment's own topic ID (C{id})
+  ProjectReference {
+    reference_topic: topic::Topic,
+    sort_key: Option<usize>,
+  },
+  /// A project reference that is also targeted by one or more comment mentions.
+  ProjectReferenceWithMentions {
+    reference_topic: topic::Topic,
+    mention_topics: Vec<topic::Topic>,
+    sort_key: Option<usize>,
+  },
+  /// A reference from user comments only (not present in source code).
   CommentMention {
     reference_topic: topic::Topic,
-    mention_topic: topic::Topic,
+    mention_topics: Vec<topic::Topic>,
+    sort_key: Option<usize>,
   },
 }
 
 impl Reference {
-  /// Returns the primary reference topic for common operations like sorting.
+  /// Returns the primary reference topic.
   pub fn reference_topic(&self) -> &topic::Topic {
     match self {
-      Reference::ProjectReference { reference_topic } => reference_topic,
-      Reference::CommentMention {
+      Reference::ProjectReference {
+        reference_topic, ..
+      }
+      | Reference::ProjectReferenceWithMentions {
+        reference_topic, ..
+      }
+      | Reference::CommentMention {
         reference_topic, ..
       } => reference_topic,
     }
   }
 
-  /// Returns the mention topic for CommentMention, None for ProjectReference.
-  pub fn mention_topic(&self) -> Option<&topic::Topic> {
+  /// Returns the mention topics, if any.
+  pub fn mention_topics(&self) -> Option<&[topic::Topic]> {
     match self {
       Reference::ProjectReference { .. } => None,
-      Reference::CommentMention { mention_topic, .. } => Some(mention_topic),
+      Reference::ProjectReferenceWithMentions { mention_topics, .. }
+      | Reference::CommentMention { mention_topics, .. } => {
+        Some(mention_topics)
+      }
+    }
+  }
+
+  /// Returns the sort key (source location start) for ordering within a group.
+  pub fn sort_key(&self) -> Option<usize> {
+    match self {
+      Reference::ProjectReference { sort_key, .. }
+      | Reference::ProjectReferenceWithMentions { sort_key, .. }
+      | Reference::CommentMention { sort_key, .. } => *sort_key,
     }
   }
 
   /// Creates a new ProjectReference.
-  pub fn project_reference(reference_topic: topic::Topic) -> Self {
-    Reference::ProjectReference { reference_topic }
+  pub fn project_reference(
+    reference_topic: topic::Topic,
+    sort_key: Option<usize>,
+  ) -> Self {
+    Reference::ProjectReference {
+      reference_topic,
+      sort_key,
+    }
   }
 
   /// Creates a new CommentMention.
   pub fn comment_mention(
     reference_topic: topic::Topic,
     mention_topic: topic::Topic,
+    sort_key: Option<usize>,
   ) -> Self {
     Reference::CommentMention {
       reference_topic,
-      mention_topic,
+      mention_topics: vec![mention_topic],
+      sort_key,
     }
   }
 }
@@ -405,6 +447,8 @@ impl Reference {
 pub struct ReferenceGroup {
   /// The grouping scope where these references occur (contract for Solidity, file for documentation)
   scope: topic::Topic,
+  /// Source location start for sorting groups relative to each other
+  sort_key: Option<usize>,
   /// Whether this scope is defined in one of the audit's in-scope files
   is_in_scope: bool,
   /// References at the scope level (inheritance/using-for for Solidity, file-level for documentation)
@@ -414,22 +458,12 @@ pub struct ReferenceGroup {
 }
 
 impl ReferenceGroup {
-  pub fn new(
-    scope: topic::Topic,
-    is_in_scope: bool,
-    scope_references: Vec<Reference>,
-    nested_references: Vec<NestedReferenceGroup>,
-  ) -> Self {
-    Self {
-      scope,
-      is_in_scope,
-      scope_references,
-      nested_references,
-    }
-  }
-
   pub fn scope(&self) -> &topic::Topic {
     &self.scope
+  }
+
+  pub fn sort_key(&self) -> Option<usize> {
+    self.sort_key
   }
 
   pub fn is_in_scope(&self) -> bool {
@@ -444,6 +478,7 @@ impl ReferenceGroup {
     &self.nested_references
   }
 }
+
 /// Groups references within a nested scope.
 /// For Solidity: represents references within a function/modifier.
 /// For Documentation: represents references within a section (component).
@@ -451,25 +486,204 @@ impl ReferenceGroup {
 pub struct NestedReferenceGroup {
   /// The nested scope containing these references (function for Solidity, section for documentation)
   subscope: topic::Topic,
+  /// Source location start for sorting nested groups relative to each other
+  sort_key: Option<usize>,
   /// References within this nested scope
   references: Vec<Reference>,
 }
 
 impl NestedReferenceGroup {
-  pub fn new(subscope: topic::Topic, references: Vec<Reference>) -> Self {
-    Self {
-      subscope,
-      references,
-    }
-  }
-
   pub fn subscope(&self) -> &topic::Topic {
     &self.subscope
+  }
+
+  pub fn sort_key(&self) -> Option<usize> {
+    self.sort_key
   }
 
   pub fn references(&self) -> &[Reference] {
     &self.references
   }
+}
+
+/// Ensures a ReferenceGroup exists for the given scope, creating one at the
+/// correct sorted position if absent. Does not add any references.
+pub fn ensure_group(
+  groups: &mut Vec<ReferenceGroup>,
+  scope: topic::Topic,
+  scope_sort_key: Option<usize>,
+  is_in_scope: bool,
+) {
+  if groups.iter().any(|g| g.scope == scope) {
+    return;
+  }
+  let pos = groups
+    .binary_search_by(|g| g.sort_key.cmp(&scope_sort_key))
+    .unwrap_or_else(|pos| pos);
+  groups.insert(
+    pos,
+    ReferenceGroup {
+      scope,
+      sort_key: scope_sort_key,
+      is_in_scope,
+      scope_references: Vec::new(),
+      nested_references: Vec::new(),
+    },
+  );
+}
+
+/// Inserts a reference into a sorted, deduplicated Vec<ReferenceGroup>.
+///
+/// Finds or creates the appropriate ReferenceGroup (by scope topic) and, if a subscope
+/// is provided, the appropriate NestedReferenceGroup. Inserts the reference at the
+/// correct sorted position. Skips insertion if a reference with the same reference_topic
+/// already exists at that level.
+pub fn insert_reference(
+  groups: &mut Vec<ReferenceGroup>,
+  scope: topic::Topic,
+  scope_sort_key: Option<usize>,
+  is_in_scope: bool,
+  subscope: Option<(topic::Topic, Option<usize>)>,
+  reference: Reference,
+) {
+  // Ensure the group exists
+  ensure_group(groups, scope.clone(), scope_sort_key, is_in_scope);
+
+  // We know the group exists now — find it
+  let group = groups.iter_mut().find(|g| g.scope == scope).unwrap();
+
+  match subscope {
+    None => {
+      // Insert into scope_references with dedup
+      insert_ref_sorted(&mut group.scope_references, reference);
+    }
+    Some((subscope_topic, subscope_sort_key)) => {
+      // Find or create the NestedReferenceGroup for this subscope
+      if !group
+        .nested_references
+        .iter()
+        .any(|n| n.subscope == subscope_topic)
+      {
+        let pos = group
+          .nested_references
+          .binary_search_by(|n| n.sort_key.cmp(&subscope_sort_key))
+          .unwrap_or_else(|pos| pos);
+        group.nested_references.insert(
+          pos,
+          NestedReferenceGroup {
+            subscope: subscope_topic.clone(),
+            sort_key: subscope_sort_key,
+            references: Vec::new(),
+          },
+        );
+      }
+
+      let nested = group
+        .nested_references
+        .iter_mut()
+        .find(|n| n.subscope == subscope_topic)
+        .unwrap();
+
+      insert_ref_sorted(&mut nested.references, reference);
+    }
+  }
+}
+
+/// Inserts a reference into a sorted Vec, merging by reference_topic.
+///
+/// Merge rules for duplicate reference_topics:
+/// - ProjectReference + ProjectReference → skip (already present)
+/// - CommentMention + CommentMention → merge mention_topics
+/// - ProjectReference + CommentMention → promote to ProjectReferenceWithMentions
+/// - ProjectReferenceWithMentions + CommentMention → merge mention_topics
+fn insert_ref_sorted(refs: &mut Vec<Reference>, reference: Reference) {
+  let ref_topic = reference.reference_topic().clone();
+
+  if let Some(existing) =
+    refs.iter_mut().find(|r| *r.reference_topic() == ref_topic)
+  {
+    match (&mut *existing, &reference) {
+      // ProjectReference + ProjectReference → already present, skip
+      (
+        Reference::ProjectReference { .. },
+        Reference::ProjectReference { .. },
+      ) => {}
+
+      // ProjectReference + CommentMention → promote to ProjectReferenceWithMentions
+      (
+        existing_ref @ Reference::ProjectReference { .. },
+        Reference::CommentMention { mention_topics, .. },
+      ) => {
+        let sort_key = existing_ref.sort_key();
+        *existing_ref = Reference::ProjectReferenceWithMentions {
+          reference_topic: ref_topic,
+          mention_topics: mention_topics.clone(),
+          sort_key,
+        };
+      }
+
+      // ProjectReferenceWithMentions + CommentMention → merge mention_topics
+      (
+        Reference::ProjectReferenceWithMentions {
+          mention_topics: existing_mentions,
+          ..
+        },
+        Reference::CommentMention {
+          mention_topics: new_mentions,
+          ..
+        },
+      ) => {
+        for mt in new_mentions {
+          if !existing_mentions.contains(mt) {
+            existing_mentions.push(mt.clone());
+          }
+        }
+      }
+
+      // CommentMention + CommentMention → merge mention_topics
+      (
+        Reference::CommentMention {
+          mention_topics: existing_mentions,
+          ..
+        },
+        Reference::CommentMention {
+          mention_topics: new_mentions,
+          ..
+        },
+      ) => {
+        for mt in new_mentions {
+          if !existing_mentions.contains(mt) {
+            existing_mentions.push(mt.clone());
+          }
+        }
+      }
+
+      // CommentMention + ProjectReference → promote to ProjectReferenceWithMentions
+      (
+        existing_ref @ Reference::CommentMention { .. },
+        Reference::ProjectReference { .. },
+      ) => {
+        let sort_key = existing_ref.sort_key();
+        let mention_topics = existing_ref.mention_topics().unwrap().to_vec();
+        *existing_ref = Reference::ProjectReferenceWithMentions {
+          reference_topic: ref_topic,
+          mention_topics,
+          sort_key,
+        };
+      }
+
+      // All other combinations with ProjectReferenceWithMentions as the incoming
+      // reference shouldn't occur in practice, but handle gracefully
+      _ => {}
+    }
+    return;
+  }
+
+  let sort_key = reference.sort_key();
+  let pos = refs
+    .binary_search_by(|r| r.sort_key().cmp(&sort_key))
+    .unwrap_or_else(|pos| pos);
+  refs.insert(pos, reference);
 }
 
 #[derive(Debug, Clone)]

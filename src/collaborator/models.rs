@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
-pub use crate::api::ScopeInfo;
+pub use crate::api::{ReferenceGroupResponse, ScopeInfo};
 
 /// Reserved author IDs
 pub const AUTHOR_SYSTEM: i64 = 1;
@@ -266,14 +266,22 @@ pub enum CommentEvent {
     upvotes: i64,
     downvotes: i64,
   },
+  /// A topic's mentions field was updated (e.g. due to a new comment mentioning it).
+  /// Contains the full replacement payload for the topic's mentions.
+  MentionsUpdated {
+    audit_id: String,
+    topic_id: String,
+    mentions: Vec<ReferenceGroupResponse>,
+  },
 }
 
 impl CommentEvent {
   pub fn audit_id(&self) -> &str {
     match self {
-      CommentEvent::Created { audit_id, .. } => audit_id,
-      CommentEvent::StatusUpdated { audit_id, .. } => audit_id,
-      CommentEvent::VoteUpdated { audit_id, .. } => audit_id,
+      CommentEvent::Created { audit_id, .. }
+      | CommentEvent::StatusUpdated { audit_id, .. }
+      | CommentEvent::VoteUpdated { audit_id, .. }
+      | CommentEvent::MentionsUpdated { audit_id, .. } => audit_id,
     }
   }
 }
