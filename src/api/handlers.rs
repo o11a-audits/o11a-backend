@@ -270,7 +270,8 @@ pub async fn get_documents(
       crate::core::TopicMetadata::UnnamedTopic { kind, .. }
         if *kind == crate::core::UnnamedTopicKind::DocumentationRoot =>
       {
-        documents.push(topic_metadata_to_response(topic, metadata));
+        // Documents don't have comment mentions (they're unnamed topics)
+        documents.push(topic_metadata_to_response(topic, metadata, vec![]));
       }
       _ => (),
     };
@@ -318,7 +319,8 @@ pub async fn get_contracts(
         continue;
       }
 
-      contracts.push(topic_metadata_to_response(topic, metadata));
+      // Contracts list doesn't include comment mentions for performance
+      contracts.push(topic_metadata_to_response(topic, metadata, vec![]));
     }
   }
 
@@ -451,6 +453,16 @@ impl ScopeInfo {
       Self::default()
     }
   }
+
+  /// Returns the lowest (most specific) scope topic ID.
+  /// Returns semantic_block > member > component > None for Container/Global.
+  pub fn lowest_scope_topic_id(&self) -> Option<&str> {
+    self
+      .semantic_block
+      .as_deref()
+      .or(self.member.as_deref())
+      .or(self.component.as_deref())
+  }
 }
 
 impl Default for ScopeInfo {
@@ -465,17 +477,49 @@ impl Default for ScopeInfo {
   }
 }
 
+/// Response type for a single reference
+#[derive(Debug, Serialize)]
+#[serde(tag = "type")]
+pub enum ReferenceResponse {
+  #[serde(rename = "project")]
+  Project { reference_topic: String },
+  #[serde(rename = "comment")]
+  Comment {
+    reference_topic: String,
+    mention_topic: String,
+  },
+}
+
+impl ReferenceResponse {
+  fn from_reference(reference: &crate::core::Reference) -> Self {
+    match reference {
+      crate::core::Reference::ProjectReference { reference_topic } => {
+        ReferenceResponse::Project {
+          reference_topic: reference_topic.id().to_string(),
+        }
+      }
+      crate::core::Reference::CommentMention {
+        reference_topic,
+        mention_topic,
+      } => ReferenceResponse::Comment {
+        reference_topic: reference_topic.id().to_string(),
+        mention_topic: mention_topic.id().to_string(),
+      },
+    }
+  }
+}
+
 #[derive(Debug, Serialize)]
 pub struct NestedReferenceGroupResponse {
   pub subscope: String,
-  pub references: Vec<String>,
+  pub references: Vec<ReferenceResponse>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct ReferenceGroupResponse {
   pub scope: String,
   pub is_in_scope: bool,
-  pub scope_references: Vec<String>,
+  pub scope_references: Vec<ReferenceResponse>,
   pub nested_references: Vec<NestedReferenceGroupResponse>,
 }
 
@@ -541,7 +585,7 @@ fn convert_reference_groups(
       scope_references: group
         .scope_references()
         .iter()
-        .map(|t| t.id().to_string())
+        .map(ReferenceResponse::from_reference)
         .collect(),
       nested_references: group
         .nested_references()
@@ -551,7 +595,7 @@ fn convert_reference_groups(
           references: m
             .references()
             .iter()
-            .map(|t| t.id().to_string())
+            .map(ReferenceResponse::from_reference)
             .collect(),
         })
         .collect(),
@@ -563,6 +607,7 @@ fn convert_reference_groups(
 fn topic_metadata_to_response(
   topic: &crate::core::topic::Topic,
   metadata: &crate::core::TopicMetadata,
+  comment_mention_refs: Vec<ReferenceGroupResponse>,
 ) -> TopicMetadataResponse {
   let scope_info = ScopeInfo::from_scope(metadata.scope());
 
@@ -596,6 +641,10 @@ fn topic_metadata_to_response(
         None
       };
 
+      // Combine documentation mentions with comment mentions
+      let mut all_mentions = convert_reference_groups(metadata.mentions());
+      all_mentions.extend(comment_mention_refs);
+
       TopicMetadataResponse::Named(NamedTopicResponse {
         topic_id: topic.id.clone(),
         name: name.clone(),
@@ -616,7 +665,7 @@ fn topic_metadata_to_response(
           .collect(),
         relatives: metadata.relatives().iter().map(|t| t.id.clone()).collect(),
         mutations: mutations_response,
-        mentions: convert_reference_groups(metadata.mentions()),
+        mentions: all_mentions,
       })
     }
 
@@ -646,6 +695,28 @@ pub async fn get_metadata(
 ) -> Result<Json<TopicMetadataResponse>, StatusCode> {
   println!("GET /api/v1/audits/{}/metadata/{}", audit_id, topic_id);
 
+  // Get comment mentions for this topic
+  let comment_mention_refs = {
+    let comment_ids = {
+      let store = state
+        .comment_store
+        .read()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+      store.get_comments_mentioning(&topic_id)
+    };
+
+    if !comment_ids.is_empty() {
+      // Fetch comment details from DB to get scopes
+      let comments = db::get_comments_by_ids(&state.db, &comment_ids)
+        .await
+        .unwrap_or_default();
+
+      build_comment_mention_refs(&comments)
+    } else {
+      vec![]
+    }
+  };
+
   let ctx = state.data_context.lock().map_err(|e| {
     eprintln!("Mutex poisoned in get_metadata: {}", e);
     StatusCode::INTERNAL_SERVER_ERROR
@@ -665,7 +736,68 @@ pub async fn get_metadata(
     StatusCode::NOT_FOUND
   })?;
 
-  Ok(Json(topic_metadata_to_response(&topic, metadata)))
+  Ok(Json(topic_metadata_to_response(
+    &topic,
+    metadata,
+    comment_mention_refs,
+  )))
+}
+
+/// Builds ReferenceGroupResponse items from comments that mention a topic.
+/// Groups comments by their scope's component (contract/file).
+fn build_comment_mention_refs(
+  comments: &[Comment],
+) -> Vec<ReferenceGroupResponse> {
+  use std::collections::BTreeMap;
+
+  // Group comments by their scope's component
+  // component_id -> Vec<(reference_topic_id, mention_topic_id)>
+  let mut component_groups: BTreeMap<String, Vec<(String, String)>> =
+    BTreeMap::new();
+
+  for comment in comments {
+    let scope_info: ScopeInfo =
+      serde_json::from_str(&comment.scope).unwrap_or_default();
+
+    // Get the lowest scope topic ID as the reference_topic
+    if let Some(reference_topic_id) = scope_info.lowest_scope_topic_id() {
+      let mention_topic_id = comment.comment_topic_id();
+
+      // Group by component (or use reference_topic as fallback)
+      let group_key = scope_info
+        .component
+        .clone()
+        .unwrap_or_else(|| reference_topic_id.to_string());
+
+      component_groups
+        .entry(group_key)
+        .or_default()
+        .push((reference_topic_id.to_string(), mention_topic_id));
+    }
+  }
+
+  // Convert to ReferenceGroupResponse
+  component_groups
+    .into_iter()
+    .map(|(component_id, refs)| {
+      let scope_references: Vec<ReferenceResponse> = refs
+        .into_iter()
+        .map(
+          |(reference_topic, mention_topic)| ReferenceResponse::Comment {
+            reference_topic,
+            mention_topic,
+          },
+        )
+        .collect();
+
+      ReferenceGroupResponse {
+        scope: component_id,
+        is_in_scope: true, // Comments are always considered in-scope
+        scope_references,
+        nested_references: vec![], // Comment mentions don't have nested structure
+      }
+    })
+    .collect()
 }
 
 // ============================================================================

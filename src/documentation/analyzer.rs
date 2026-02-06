@@ -439,7 +439,10 @@ fn populate_mentions(
     // Structure: component -> (scope-level refs (members), nested groups by member -> semantic_block refs)
     let mut component_groups: BTreeMap<
       topic::Topic,
-      (Vec<topic::Topic>, BTreeMap<topic::Topic, Vec<topic::Topic>>),
+      (
+        Vec<core::Reference>,
+        BTreeMap<topic::Topic, Vec<core::Reference>>,
+      ),
     > = BTreeMap::new();
 
     for scope in scopes {
@@ -456,7 +459,7 @@ fn populate_mentions(
         } => {
           // Member-level reference (second nested section) - use member as scope-level reference
           let (scope_refs, _) = component_groups.entry(component).or_default();
-          scope_refs.push(member);
+          scope_refs.push(core::Reference::project_reference(member));
         }
         core::Scope::SemanticBlock {
           component,
@@ -470,7 +473,7 @@ fn populate_mentions(
           nested_groups
             .entry(member)
             .or_default()
-            .push(semantic_block);
+            .push(core::Reference::project_reference(semantic_block));
         }
       }
     }
@@ -478,19 +481,19 @@ fn populate_mentions(
     // Sort and de-duplicate references within each group
     for (scope_refs, nested_groups) in component_groups.values_mut() {
       scope_refs.sort_by(|a, b| {
-        let loc_a = get_source_location_start(a, nodes);
-        let loc_b = get_source_location_start(b, nodes);
+        let loc_a = get_source_location_start(a.reference_topic(), nodes);
+        let loc_b = get_source_location_start(b.reference_topic(), nodes);
         loc_a.cmp(&loc_b)
       });
-      scope_refs.dedup();
+      scope_refs.dedup_by(|a, b| a.reference_topic() == b.reference_topic());
 
       for refs in nested_groups.values_mut() {
         refs.sort_by(|a, b| {
-          let loc_a = get_source_location_start(a, nodes);
-          let loc_b = get_source_location_start(b, nodes);
+          let loc_a = get_source_location_start(a.reference_topic(), nodes);
+          let loc_b = get_source_location_start(b.reference_topic(), nodes);
           loc_a.cmp(&loc_b)
         });
-        refs.dedup();
+        refs.dedup_by(|a, b| a.reference_topic() == b.reference_topic());
       }
     }
 

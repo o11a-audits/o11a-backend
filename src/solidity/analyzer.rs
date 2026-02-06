@@ -1091,12 +1091,13 @@ fn build_reference_groups(
   // contract_id -> (contract_refs, member_id -> refs)
   let mut contract_groups: BTreeMap<
     i32,
-    (Vec<topic::Topic>, BTreeMap<i32, Vec<topic::Topic>>),
+    (Vec<core::Reference>, BTreeMap<i32, Vec<core::Reference>>),
   > = BTreeMap::new();
 
   // Helper to add a scoped reference to the groups
   let mut add_to_groups = |scoped_ref: &ScopedReference| {
     let ref_topic = topic::new_node_topic(&scoped_ref.reference_node);
+    let reference = core::Reference::project_reference(ref_topic);
     let contract_id = scoped_ref.containing_component;
 
     let (contract_refs, member_groups) =
@@ -1105,11 +1106,11 @@ fn build_reference_groups(
     match scoped_ref.containing_member {
       Some(member_id) => {
         // Member-level reference
-        member_groups.entry(member_id).or_default().push(ref_topic);
+        member_groups.entry(member_id).or_default().push(reference);
       }
       None => {
         // Contract-level reference
-        contract_refs.push(ref_topic);
+        contract_refs.push(reference);
       }
     }
   };
@@ -1128,16 +1129,16 @@ fn build_reference_groups(
   for (contract_refs, member_groups) in contract_groups.values_mut() {
     // Sort contract-level references
     contract_refs.sort_by(|a, b| {
-      let loc_a = get_source_location_start(a, nodes);
-      let loc_b = get_source_location_start(b, nodes);
+      let loc_a = get_source_location_start(a.reference_topic(), nodes);
+      let loc_b = get_source_location_start(b.reference_topic(), nodes);
       loc_a.cmp(&loc_b)
     });
 
     // Sort references within each member group
     for refs in member_groups.values_mut() {
       refs.sort_by(|a, b| {
-        let loc_a = get_source_location_start(a, nodes);
-        let loc_b = get_source_location_start(b, nodes);
+        let loc_a = get_source_location_start(a.reference_topic(), nodes);
+        let loc_b = get_source_location_start(b.reference_topic(), nodes);
         loc_a.cmp(&loc_b)
       });
     }
@@ -1262,12 +1263,13 @@ fn build_expanded_reference_groups(
   // contract_id -> (contract_refs, member_id -> refs)
   let mut contract_groups: BTreeMap<
     i32,
-    (Vec<topic::Topic>, BTreeMap<i32, Vec<topic::Topic>>),
+    (Vec<core::Reference>, BTreeMap<i32, Vec<core::Reference>>),
   > = BTreeMap::new();
 
   // Helper to add a scoped reference to the groups
   let mut add_to_groups = |scoped_ref: &ScopedReference| {
     let ref_topic = topic::new_node_topic(&scoped_ref.reference_node);
+    let reference = core::Reference::project_reference(ref_topic);
     let contract_id = scoped_ref.containing_component;
 
     let (contract_refs, member_groups) =
@@ -1275,10 +1277,10 @@ fn build_expanded_reference_groups(
 
     match scoped_ref.containing_member {
       Some(member_id) => {
-        member_groups.entry(member_id).or_default().push(ref_topic);
+        member_groups.entry(member_id).or_default().push(reference);
       }
       None => {
-        contract_refs.push(ref_topic);
+        contract_refs.push(reference);
       }
     }
   };
@@ -1290,15 +1292,15 @@ fn build_expanded_reference_groups(
   // Sort references within each group by source location
   for (contract_refs, member_groups) in contract_groups.values_mut() {
     contract_refs.sort_by(|a, b| {
-      let loc_a = get_source_location_start(a, nodes);
-      let loc_b = get_source_location_start(b, nodes);
+      let loc_a = get_source_location_start(a.reference_topic(), nodes);
+      let loc_b = get_source_location_start(b.reference_topic(), nodes);
       loc_a.cmp(&loc_b)
     });
 
     for refs in member_groups.values_mut() {
       refs.sort_by(|a, b| {
-        let loc_a = get_source_location_start(a, nodes);
-        let loc_b = get_source_location_start(b, nodes);
+        let loc_a = get_source_location_start(a.reference_topic(), nodes);
+        let loc_b = get_source_location_start(b.reference_topic(), nodes);
         loc_a.cmp(&loc_b)
       });
     }

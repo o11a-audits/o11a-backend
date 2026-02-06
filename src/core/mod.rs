@@ -347,6 +347,57 @@ pub enum NamedTopicVisibility {
   External,
 }
 
+/// Represents a reference to a topic, with type information about its source.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Reference {
+  /// A reference from project analysis (solidity analyzer or documentation analyzer).
+  /// The reference_topic is the AST node where the referenced topic appears.
+  ProjectReference { reference_topic: topic::Topic },
+  /// A reference from a user comment mentioning a topic.
+  /// - reference_topic: The lowest scope of the comment (where it spatially applies)
+  /// - mention_topic: The comment's own topic ID (C{id})
+  CommentMention {
+    reference_topic: topic::Topic,
+    mention_topic: topic::Topic,
+  },
+}
+
+impl Reference {
+  /// Returns the primary reference topic for common operations like sorting.
+  pub fn reference_topic(&self) -> &topic::Topic {
+    match self {
+      Reference::ProjectReference { reference_topic } => reference_topic,
+      Reference::CommentMention {
+        reference_topic, ..
+      } => reference_topic,
+    }
+  }
+
+  /// Returns the mention topic for CommentMention, None for ProjectReference.
+  pub fn mention_topic(&self) -> Option<&topic::Topic> {
+    match self {
+      Reference::ProjectReference { .. } => None,
+      Reference::CommentMention { mention_topic, .. } => Some(mention_topic),
+    }
+  }
+
+  /// Creates a new ProjectReference.
+  pub fn project_reference(reference_topic: topic::Topic) -> Self {
+    Reference::ProjectReference { reference_topic }
+  }
+
+  /// Creates a new CommentMention.
+  pub fn comment_mention(
+    reference_topic: topic::Topic,
+    mention_topic: topic::Topic,
+  ) -> Self {
+    Reference::CommentMention {
+      reference_topic,
+      mention_topic,
+    }
+  }
+}
+
 /// Groups references to a declaration by the scope where they occur.
 /// For Solidity: scope is a contract, scope_references are contract-level refs, nested_references are function-level refs.
 /// For Documentation: scope is a file, scope_references are file-level refs, nested_references are section-level refs.
@@ -357,7 +408,7 @@ pub struct ReferenceGroup {
   /// Whether this scope is defined in one of the audit's in-scope files
   is_in_scope: bool,
   /// References at the scope level (inheritance/using-for for Solidity, file-level for documentation)
-  scope_references: Vec<topic::Topic>,
+  scope_references: Vec<Reference>,
   /// References within nested scopes (functions for Solidity, sections for documentation)
   nested_references: Vec<NestedReferenceGroup>,
 }
@@ -366,7 +417,7 @@ impl ReferenceGroup {
   pub fn new(
     scope: topic::Topic,
     is_in_scope: bool,
-    scope_references: Vec<topic::Topic>,
+    scope_references: Vec<Reference>,
     nested_references: Vec<NestedReferenceGroup>,
   ) -> Self {
     Self {
@@ -385,7 +436,7 @@ impl ReferenceGroup {
     self.is_in_scope
   }
 
-  pub fn scope_references(&self) -> &[topic::Topic] {
+  pub fn scope_references(&self) -> &[Reference] {
     &self.scope_references
   }
 
@@ -401,11 +452,11 @@ pub struct NestedReferenceGroup {
   /// The nested scope containing these references (function for Solidity, section for documentation)
   subscope: topic::Topic,
   /// References within this nested scope
-  references: Vec<topic::Topic>,
+  references: Vec<Reference>,
 }
 
 impl NestedReferenceGroup {
-  pub fn new(subscope: topic::Topic, references: Vec<topic::Topic>) -> Self {
+  pub fn new(subscope: topic::Topic, references: Vec<Reference>) -> Self {
     Self {
       subscope,
       references,
@@ -416,7 +467,7 @@ impl NestedReferenceGroup {
     &self.subscope
   }
 
-  pub fn references(&self) -> &[topic::Topic] {
+  pub fn references(&self) -> &[Reference] {
     &self.references
   }
 }
