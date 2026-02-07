@@ -1,83 +1,52 @@
-use crate::collaborator::store::ExtractedMention;
-use crate::core::AuditData;
-use crate::core::topic;
-use regex::Regex;
+use crate::core::topic::Topic;
+use crate::core::{self, ProjectPath};
+use crate::documentation::parser as doc_parser;
+use crate::documentation::parser::DocumentationNode;
 
-/// Extracts mentions from markdown content.
-/// Mentions can be:
-/// - Direct topic IDs: N123, D45, C99
-/// - Named references: functionName, ContractName
-pub fn extract_mentions(
+/// Parses comment markdown and extracts mentions.
+/// Uses the documentation parser to parse markdown into an AST, then
+/// collects CodeIdentifier nodes with resolved referenced_topic values.
+/// This ensures only identifiers inside code spans (backticks) are matched.
+pub fn parse_comment(
   content: &str,
-  audit_data: &AuditData,
-) -> Vec<ExtractedMention> {
-  // Match identifiers that could be topic IDs or names
-  // Topic IDs: N123, D45, C99 (letter followed by digits)
-  // Names: valid identifiers (letter/underscore followed by alphanumeric/underscore)
-  let mention_re = Regex::new(r"\b([A-Za-z_][A-Za-z0-9_]*)\b").unwrap();
+  audit_data: &core::AuditData,
+) -> Vec<Topic> {
+  // Use a dummy project path — it's only stored on the AST, not used during parsing
+  let dummy_path = ProjectPath {
+    file_path: String::new(),
+  };
+
+  let ast =
+    match doc_parser::ast_from_markdown(content, &dummy_path, audit_data) {
+      Ok(ast) => ast,
+      Err(_) => return vec![],
+    };
+
   let mut mentions = Vec::new();
-
-  for cap in mention_re.captures_iter(content) {
-    let full_match = cap.get(0).unwrap();
-    let identifier = cap.get(1).unwrap().as_str();
-
-    // Try to resolve: first as topic ID, then by name
-    if let Some(topic_id) = resolve_mention(identifier, audit_data) {
-      mentions.push(ExtractedMention {
-        topic_id,
-        mention_text: full_match.as_str().to_string(),
-        start_offset: full_match.start(),
-        end_offset: full_match.end(),
-      });
-    }
+  for node in &ast.nodes {
+    collect_referenced_topics(node, &mut mentions);
   }
 
+  mentions.sort_unstable();
+  mentions.dedup();
   mentions
 }
 
-/// Resolves a mention identifier to a topic ID
-fn resolve_mention(identifier: &str, audit_data: &AuditData) -> Option<String> {
-  // First: check if it's a direct topic ID (N123, D45, C99)
-  let topic = topic::new_topic(identifier);
-  if audit_data.topic_metadata.contains_key(&topic) {
-    return Some(identifier.to_string());
-  }
-
-  // Second: search by name in topic_metadata
-  for (t, metadata) in &audit_data.topic_metadata {
-    if metadata.name() == identifier {
-      return Some(t.id.clone());
+/// Recursively walks a DocumentationNode tree and collects referenced_topic
+/// from CodeIdentifier nodes (identifiers inside code spans that resolved
+/// to known topics in the audit data).
+fn collect_referenced_topics(node: &DocumentationNode, out: &mut Vec<Topic>) {
+  match node {
+    DocumentationNode::CodeIdentifier {
+      referenced_topic: Some(topic),
+      ..
+    } => {
+      out.push(topic.clone());
     }
-  }
-
-  None // Unresolved mention - keep as plain text
-}
-
-/// Parses comment markdown and extracts mentions.
-/// Returns the extracted mentions (HTML rendering is done by formatter).
-pub fn parse_comment(
-  content: &str,
-  audit_data: &AuditData,
-) -> Vec<ExtractedMention> {
-  extract_mentions(content, audit_data)
-}
-
-#[cfg(test)]
-mod tests {
-  use super::*;
-
-  #[test]
-  fn test_mention_regex_matches_topic_ids() {
-    let re = Regex::new(r"\b([A-Za-z_][A-Za-z0-9_]*)\b").unwrap();
-
-    // Should match topic ID patterns
-    assert!(re.is_match("N123"));
-    assert!(re.is_match("D45"));
-    assert!(re.is_match("C99"));
-
-    // Should match identifier patterns
-    assert!(re.is_match("transferFrom"));
-    assert!(re.is_match("_privateVar"));
-    assert!(re.is_match("MyContract"));
+    _ => {
+      for child in node.children() {
+        collect_referenced_topics(child, out);
+      }
+    }
   }
 }

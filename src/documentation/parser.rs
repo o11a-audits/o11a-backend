@@ -143,7 +143,8 @@ fn get_named_topic_kind(
   match metadata {
     core::TopicMetadata::NamedTopic { kind, .. } => Some(kind.clone()),
     core::TopicMetadata::UnnamedTopic { .. }
-    | core::TopicMetadata::TitledTopic { .. } => None,
+    | core::TopicMetadata::TitledTopic { .. }
+    | core::TopicMetadata::CommentTopic { .. } => None,
   }
 }
 

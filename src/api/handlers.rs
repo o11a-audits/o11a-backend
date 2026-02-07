@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
 use crate::api::AppState;
-use crate::collaborator::{db, formatter, models::*, parser};
-use crate::core::{self, Node, insert_reference, project, topic::new_topic};
+use crate::collaborator::{db, formatter, models::*, parser, store};
+use crate::core::{self, Node, project, topic::new_topic};
 
 // Health check handler
 pub async fn health_check() -> StatusCode {
@@ -303,7 +303,8 @@ pub async fn get_contracts(
         matches!(kind, crate::core::NamedTopicKind::Contract(_))
       }
       crate::core::TopicMetadata::UnnamedTopic { .. }
-      | crate::core::TopicMetadata::TitledTopic { .. } => false,
+      | crate::core::TopicMetadata::TitledTopic { .. }
+      | crate::core::TopicMetadata::CommentTopic { .. } => false,
     };
 
     if is_contract {
@@ -333,6 +334,20 @@ pub async fn get_source_text(
   Path((audit_id, topic_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, StatusCode> {
   println!("GET /api/v1/audits/{}/source_text/{}", audit_id, topic_id);
+
+  // Serve comment HTML from the in-memory store
+  if topic_id.starts_with('C') {
+    let comment_id: i64 = topic_id
+      .trim_start_matches('C')
+      .parse()
+      .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let store = state
+      .comment_store
+      .read()
+      .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let html = store.get_html(comment_id).ok_or(StatusCode::NOT_FOUND)?;
+    return Ok(Html(html.clone()));
+  }
 
   let ctx = state.data_context.lock().map_err(|e| {
     eprintln!("Mutex poisoned in get_source_text: {}", e);
@@ -463,6 +478,34 @@ impl ScopeInfo {
       .or(self.member.as_deref())
       .or(self.component.as_deref())
   }
+
+  /// Convert from ScopeInfo back to core::Scope
+  pub fn to_scope(&self) -> core::Scope {
+    let container = || core::ProjectPath {
+      file_path: self.container.clone().unwrap(),
+    };
+    match self.scope_type.as_str() {
+      "SemanticBlock" => core::Scope::SemanticBlock {
+        container: container(),
+        component: new_topic(self.component.as_ref().unwrap()),
+        member: new_topic(self.member.as_ref().unwrap()),
+        semantic_block: new_topic(self.semantic_block.as_ref().unwrap()),
+      },
+      "Member" => core::Scope::Member {
+        container: container(),
+        component: new_topic(self.component.as_ref().unwrap()),
+        member: new_topic(self.member.as_ref().unwrap()),
+      },
+      "Component" => core::Scope::Component {
+        container: container(),
+        component: new_topic(self.component.as_ref().unwrap()),
+      },
+      "Container" => core::Scope::Container {
+        container: container(),
+      },
+      _ => core::Scope::Global,
+    }
+  }
 }
 
 impl Default for ScopeInfo {
@@ -581,6 +624,19 @@ pub struct UnnamedTopicResponse {
   pub scope: ScopeInfo,
 }
 
+/// Response for CommentTopic metadata
+#[derive(Debug, Serialize)]
+pub struct CommentTopicResponse {
+  pub topic_id: String,
+  pub author_id: i64,
+  pub comment_type: String,
+  pub target_topic: String,
+  pub created_at: String,
+  pub scope: ScopeInfo,
+  pub mentioned_topics: Vec<String>,
+  pub mentions: Vec<ReferenceGroupResponse>,
+}
+
 /// Enum for different topic metadata response types
 #[derive(Debug, Serialize)]
 #[serde(tag = "type")]
@@ -591,6 +647,8 @@ pub enum TopicMetadataResponse {
   Titled(TitledTopicResponse),
   #[serde(rename = "unnamed")]
   Unnamed(UnnamedTopicResponse),
+  #[serde(rename = "CommentTopic")]
+  CommentTopic(CommentTopicResponse),
 }
 
 // Helper function to convert ReferenceGroup to ReferenceGroupResponse
@@ -700,6 +758,24 @@ fn topic_metadata_to_response(
         scope: scope_info,
       })
     }
+
+    crate::core::TopicMetadata::CommentTopic {
+      author_id,
+      comment_type,
+      target_topic,
+      created_at,
+      mentioned_topics,
+      ..
+    } => TopicMetadataResponse::CommentTopic(CommentTopicResponse {
+      topic_id: topic.id.clone(),
+      author_id: *author_id,
+      comment_type: comment_type.clone(),
+      target_topic: target_topic.id.clone(),
+      created_at: created_at.clone(),
+      scope: scope_info,
+      mentioned_topics: mentioned_topics.iter().map(|t| t.id.clone()).collect(),
+      mentions: convert_reference_groups(metadata.mentions()),
+    }),
   }
 }
 
@@ -732,72 +808,6 @@ pub async fn get_metadata(
   Ok(Json(topic_metadata_to_response(&topic, metadata)))
 }
 
-/// Inserts a CommentMention reference into the mentioned topic's
-/// `TopicMetadata::NamedTopic.mentions` ReferenceGroups.
-///
-/// Uses the comment's scope to determine the correct group (component) and
-/// nested group (member), and the reference_topic (lowest scope topic).
-fn insert_comment_mention(
-  audit_data: &mut core::AuditData,
-  scope: &ScopeInfo,
-  mentioned_topic_id: &str,
-  mention_topic: core::topic::Topic,
-) {
-  // Determine reference_topic from the comment's scope (lowest scope level)
-  let reference_topic_id = match scope.lowest_scope_topic_id() {
-    Some(id) => id.to_string(),
-    None => return, // Global/Container scope — can't place in a ReferenceGroup
-  };
-
-  let reference_topic = new_topic(&reference_topic_id);
-  let ref_sort_key = audit_data
-    .nodes
-    .get(&reference_topic)
-    .and_then(|n| n.source_location_start());
-
-  // Determine component (group scope) — fall back to reference_topic if no component
-  let component_id = match &scope.component {
-    Some(id) => id.clone(),
-    None => return, // No component means we can't group it
-  };
-  let component_topic = new_topic(&component_id);
-  let component_sort_key = audit_data
-    .nodes
-    .get(&component_topic)
-    .and_then(|n| n.source_location_start());
-
-  // Determine subscope (nested group) from member, if present
-  let subscope = scope.member.as_ref().map(|member_id| {
-    let member_topic = new_topic(member_id);
-    let member_sort_key = audit_data
-      .nodes
-      .get(&member_topic)
-      .and_then(|n| n.source_location_start());
-    (member_topic, member_sort_key)
-  });
-
-  let reference = core::Reference::comment_mention(
-    reference_topic,
-    mention_topic,
-    ref_sort_key,
-  );
-
-  // Get the mentioned topic's metadata and insert into its mentions field
-  let mentioned_topic = new_topic(mentioned_topic_id);
-  if let Some(core::TopicMetadata::NamedTopic { mentions, .. }) =
-    audit_data.topic_metadata.get_mut(&mentioned_topic)
-  {
-    insert_reference(
-      mentions,
-      component_topic,
-      component_sort_key,
-      true,
-      subscope,
-      reference,
-    );
-  }
-}
-
 // ============================================================================
 // Collaborator query parameter types
 // ============================================================================
@@ -827,6 +837,10 @@ pub async fn get_topic_comments(
   State(state): State<AppState>,
   Path((audit_id, topic_id)): Path<(String, String)>,
 ) -> Result<Json<CommentListResponse>, StatusCode> {
+  println!(
+    "GET /api/v1/audits/{}/topics/{}/comments",
+    audit_id, topic_id
+  );
   let comments =
     db::get_comments_for_topic_raw(&state.db, &audit_id, &topic_id)
       .await
@@ -844,6 +858,7 @@ pub async fn list_comments_by_type(
   State(state): State<AppState>,
   Path((audit_id, comment_type)): Path<(String, String)>,
 ) -> Result<Json<CommentListResponse>, StatusCode> {
+  println!("GET /api/v1/audits/{}/comments/{}", audit_id, comment_type);
   let comments =
     db::get_comments_for_audit_raw(&state.db, &audit_id, &comment_type)
       .await
@@ -862,6 +877,7 @@ pub async fn create_comment(
   Path(audit_id): Path<String>,
   Json(payload): Json<CreateCommentRequest>,
 ) -> Result<Json<CommentCreatedResponse>, StatusCode> {
+  println!("POST /api/v1/audits/{}/comments", audit_id);
   // Determine the scope from the target topic
   // If target is a comment (starts with "C"), copy scope from parent comment
   // Otherwise, get scope from the topic's metadata in audit data
@@ -901,48 +917,42 @@ pub async fn create_comment(
     let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
 
     let mentions = parser::parse_comment(&payload.content, audit_data);
-    let html = formatter::render_comment_html(&payload.content, &mentions);
+    let html = formatter::render_comment_html(&payload.content);
     (html, mentions)
   };
 
   let comment_topic_id = comment.comment_topic_id();
 
-  // Insert comment mentions into topic_metadata ReferenceGroups
-  // and collect updated mentions for broadcasting
+  // Register comment in topic_metadata and wire up mentions
   let mut mentions_updates: Vec<(String, Vec<ReferenceGroupResponse>)> =
     Vec::new();
-  if !mentions.is_empty() {
+  {
     let mut ctx = state
       .data_context
       .lock()
       .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let audit_data =
       ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
-    let mention_topic = new_topic(&comment_topic_id);
 
-    // Collect unique mentioned topic IDs
-    let mut mentioned_ids: Vec<&str> =
-      mentions.iter().map(|m| m.topic_id.as_str()).collect();
-    mentioned_ids.sort_unstable();
-    mentioned_ids.dedup();
+    store::register_comment_in_audit_data(
+      audit_data, &comment, &scope, &mentions,
+    );
 
-    for mention in &mentions {
-      insert_comment_mention(
-        audit_data,
-        &scope,
-        &mention.topic_id,
-        mention_topic.clone(),
-      );
-    }
+    // Read back updated mentions for broadcasting
+    if !mentions.is_empty() {
+      let mut mentioned_ids: Vec<&str> =
+        mentions.iter().map(|m| m.id.as_str()).collect();
+      mentioned_ids.sort_unstable();
+      mentioned_ids.dedup();
 
-    // Read back updated mentions for each mentioned topic
-    for topic_id in mentioned_ids {
-      let topic = new_topic(topic_id);
-      if let Some(metadata) = audit_data.topic_metadata.get(&topic) {
-        mentions_updates.push((
-          topic_id.to_string(),
-          convert_reference_groups(metadata.mentions()),
-        ));
+      for topic_id in mentioned_ids {
+        let topic = new_topic(topic_id);
+        if let Some(topic_meta) = audit_data.topic_metadata.get(&topic) {
+          mentions_updates.push((
+            topic_id.to_string(),
+            convert_reference_groups(topic_meta.mentions()),
+          ));
+        }
       }
     }
   }
@@ -979,6 +989,10 @@ pub async fn get_comments_mentioning_topic(
   State(state): State<AppState>,
   Path((audit_id, mentioned_topic_id)): Path<(String, String)>,
 ) -> Result<Json<CommentListResponse>, StatusCode> {
+  println!(
+    "GET /api/v1/audits/{}/mentions/{}",
+    audit_id, mentioned_topic_id
+  );
   // Look up comment IDs from in-memory store
   let comment_ids = {
     let store = state
@@ -1011,8 +1025,12 @@ pub async fn get_comments_mentioning_topic(
 /// Returns status for a single comment.
 pub async fn get_comment_status(
   State(state): State<AppState>,
-  Path((_audit_id, comment_id)): Path<(String, i64)>,
+  Path((audit_id, comment_id)): Path<(String, i64)>,
 ) -> Result<Json<CommentStatusResponse>, StatusCode> {
+  println!(
+    "GET /api/v1/audits/{}/comments/{}/status",
+    audit_id, comment_id
+  );
   let response = db::get_comment_status(&state.db, comment_id)
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -1024,9 +1042,13 @@ pub async fn get_comment_status(
 /// Returns status for multiple comments.
 pub async fn get_batch_status(
   State(state): State<AppState>,
-  Path(_audit_id): Path<String>,
+  Path(audit_id): Path<String>,
   Query(params): Query<BatchStatusQuery>,
 ) -> Result<Json<Vec<CommentStatusResponse>>, StatusCode> {
+  println!(
+    "GET /api/v1/audits/{}/comments/status?ids={}",
+    audit_id, params.ids
+  );
   let comment_ids: Vec<i64> = params
     .ids
     .split(',')
@@ -1047,6 +1069,10 @@ pub async fn update_comment_status(
   Path((audit_id, comment_id)): Path<(String, i64)>,
   Json(payload): Json<UpdateStatusRequest>,
 ) -> Result<Json<CommentStatusResponse>, StatusCode> {
+  println!(
+    "PUT /api/v1/audits/{}/comments/{}/status",
+    audit_id, comment_id
+  );
   // Update status in database
   let response = db::update_status(&state.db, comment_id, &payload.status)
     .await
@@ -1070,9 +1096,10 @@ pub async fn update_comment_status(
 /// Returns vote summary for a comment.
 pub async fn get_vote_summary(
   State(state): State<AppState>,
-  Path((_audit_id, comment_id)): Path<(String, i64)>,
+  Path((audit_id, comment_id)): Path<(String, i64)>,
   Query(params): Query<OptionalUserIdQuery>,
 ) -> Result<Json<CommentVoteSummary>, StatusCode> {
+  println!("GET /api/v1/audits/{}/votes/{}", audit_id, comment_id);
   let vote_info = db::get_vote_info(&state.db, comment_id, params.user_id)
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -1094,6 +1121,10 @@ pub async fn get_unvoted_comment_ids(
   Path(audit_id): Path<String>,
   Query(params): Query<UserIdQuery>,
 ) -> Result<Json<Vec<String>>, StatusCode> {
+  println!(
+    "GET /api/v1/audits/{}/votes/unvoted?user_id={}",
+    audit_id, params.user_id
+  );
   let comment_ids =
     db::get_unvoted_comment_ids(&state.db, &audit_id, params.user_id)
       .await
@@ -1115,6 +1146,7 @@ pub async fn cast_vote(
   Path((audit_id, comment_id)): Path<(String, i64)>,
   Json(payload): Json<VoteRequest>,
 ) -> Result<Json<CommentVoteSummary>, StatusCode> {
+  println!("POST /api/v1/audits/{}/votes/{}", audit_id, comment_id);
   let vote_value = payload.vote.to_i32();
 
   db::upsert_vote(&state.db, comment_id, payload.user_id, vote_value)
@@ -1155,6 +1187,10 @@ pub async fn remove_vote(
   Path((audit_id, comment_id)): Path<(String, i64)>,
   Query(params): Query<UserIdQuery>,
 ) -> Result<StatusCode, StatusCode> {
+  println!(
+    "DELETE /api/v1/audits/{}/votes/{}?user_id={}",
+    audit_id, comment_id, params.user_id
+  );
   db::delete_vote(&state.db, comment_id, params.user_id)
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;

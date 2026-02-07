@@ -78,10 +78,12 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 // Startup loading
 // ============================================================================
 
-/// Load and parse all comments on server startup
+/// Load and parse all comments on server startup.
+/// Populates the CommentStore and registers each comment in
+/// audit_data.topic_metadata (including mention wiring).
 pub async fn load_and_parse_all_comments(
   pool: &SqlitePool,
-  data_context: &DataContext,
+  data_context: &mut DataContext,
 ) -> Result<CommentStore, sqlx::Error> {
   let mut store = CommentStore::new();
 
@@ -94,11 +96,20 @@ pub async fn load_and_parse_all_comments(
 
   // Parse each comment with its audit's data
   for comment in comments {
-    if let Some(audit_data) = data_context.get_audit(&comment.audit_id) {
+    if let Some(audit_data) = data_context.get_audit_mut(&comment.audit_id) {
       let mentions =
         parser::parse_comment(&comment.content_markdown, audit_data);
-      let html =
-        formatter::render_comment_html(&comment.content_markdown, &mentions);
+      let html = formatter::render_comment_html(&comment.content_markdown);
+
+      // Parse scope from stored JSON
+      let scope: crate::api::ScopeInfo =
+        serde_json::from_str(&comment.scope).unwrap_or_default();
+
+      // Register in topic_metadata and wire up mentions
+      super::store::register_comment_in_audit_data(
+        audit_data, &comment, &scope, &mentions,
+      );
+
       store.insert(comment.id, html, mentions);
     }
   }

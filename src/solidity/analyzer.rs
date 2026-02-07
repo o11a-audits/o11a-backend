@@ -1666,6 +1666,7 @@ fn process_second_pass_nodes(
           topic,
           scope: scope.clone(),
           kind,
+          mentions: vec![],
         },
       );
     }
@@ -3316,8 +3317,9 @@ fn populate_expanded_references(
           *expanded_references = expanded_refs.clone();
         }
         TopicMetadata::UnnamedTopic { .. }
-        | TopicMetadata::TitledTopic { .. } => {
-          // No expanded_references for unnamed/titled topics
+        | TopicMetadata::TitledTopic { .. }
+        | TopicMetadata::CommentTopic { .. } => {
+          // No expanded_references for unnamed/titled/comment topics
         }
       }
     }
@@ -3476,8 +3478,9 @@ fn populate_ancestry(
           *ancestry = ancestry_refs.clone();
         }
         TopicMetadata::UnnamedTopic { .. }
-        | TopicMetadata::TitledTopic { .. } => {
-          // No ancestry for unnamed/titled topics
+        | TopicMetadata::TitledTopic { .. }
+        | TopicMetadata::CommentTopic { .. } => {
+          // No ancestry for unnamed/titled/comment topics
         }
       }
     }

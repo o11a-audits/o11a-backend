@@ -102,6 +102,7 @@ fn process_documentation_node(
           topic: topic.clone(),
           kind: UnnamedTopicKind::DocumentationRoot,
           scope: scope.clone(),
+          mentions: vec![],
         },
       );
 
@@ -135,6 +136,7 @@ fn process_documentation_node(
           topic: topic.clone(),
           kind: UnnamedTopicKind::DocumentationHeading,
           scope: scope.clone(),
+          mentions: vec![],
         },
       );
 
@@ -173,6 +175,7 @@ fn process_documentation_node(
           scope: scope.clone(),
           kind: TitledTopicKind::DocumentationSection,
           title: title.clone(),
+          mentions: vec![],
         },
       );
 
@@ -208,6 +211,7 @@ fn process_documentation_node(
           topic: topic.clone(),
           kind: UnnamedTopicKind::DocumentationParagraph,
           scope: scope.clone(),
+          mentions: vec![],
         },
       );
 
@@ -236,6 +240,7 @@ fn process_documentation_node(
           topic: topic.clone(),
           kind: UnnamedTopicKind::DocumentationSentence,
           scope: scope.clone(),
+          mentions: vec![],
         },
       );
 
@@ -264,6 +269,7 @@ fn process_documentation_node(
           topic: topic.clone(),
           kind: UnnamedTopicKind::DocumentationCodeBlock,
           scope: scope.clone(),
+          mentions: vec![],
         },
       );
 
@@ -291,6 +297,7 @@ fn process_documentation_node(
           topic: topic.clone(),
           kind: UnnamedTopicKind::DocumentationList,
           scope: scope.clone(),
+          mentions: vec![],
         },
       );
 
@@ -318,6 +325,7 @@ fn process_documentation_node(
           topic: topic.clone(),
           kind: UnnamedTopicKind::DocumentationBlockQuote,
           scope: scope.clone(),
+          mentions: vec![],
         },
       );
 
@@ -346,6 +354,7 @@ fn process_documentation_node(
           topic: topic.clone(),
           kind: UnnamedTopicKind::DocumentationInlineCode,
           scope: scope.clone(),
+          mentions: vec![],
         },
       );
 

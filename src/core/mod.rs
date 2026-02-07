@@ -727,6 +727,7 @@ pub enum TopicMetadata {
     topic: topic::Topic,
     scope: Scope,
     kind: UnnamedTopicKind,
+    mentions: Vec<ReferenceGroup>,
   },
   /// A topic with a title (like documentation sections) but not a full declaration
   TitledTopic {
@@ -734,6 +735,18 @@ pub enum TopicMetadata {
     scope: Scope,
     kind: TitledTopicKind,
     title: String,
+    mentions: Vec<ReferenceGroup>,
+  },
+  /// A comment topic with immutable metadata
+  CommentTopic {
+    topic: topic::Topic,
+    author_id: i64,
+    comment_type: String,
+    target_topic: topic::Topic,
+    created_at: String,
+    scope: Scope,
+    mentioned_topics: Vec<topic::Topic>,
+    mentions: Vec<ReferenceGroup>,
   },
 }
 
@@ -742,7 +755,8 @@ impl TopicMetadata {
     match self {
       TopicMetadata::NamedTopic { scope, .. }
       | TopicMetadata::UnnamedTopic { scope, .. }
-      | TopicMetadata::TitledTopic { scope, .. } => scope,
+      | TopicMetadata::TitledTopic { scope, .. }
+      | TopicMetadata::CommentTopic { scope, .. } => scope,
     }
   }
 
@@ -750,7 +764,8 @@ impl TopicMetadata {
     match self {
       TopicMetadata::NamedTopic { name, .. } => name,
       TopicMetadata::TitledTopic { title, .. } => title,
-      TopicMetadata::UnnamedTopic { topic, .. } => topic.id(),
+      TopicMetadata::UnnamedTopic { topic, .. }
+      | TopicMetadata::CommentTopic { topic, .. } => topic.id(),
     }
   }
 
@@ -758,7 +773,8 @@ impl TopicMetadata {
     match self {
       TopicMetadata::NamedTopic { topic, .. }
       | TopicMetadata::UnnamedTopic { topic, .. }
-      | TopicMetadata::TitledTopic { topic, .. } => topic,
+      | TopicMetadata::TitledTopic { topic, .. }
+      | TopicMetadata::CommentTopic { topic, .. } => topic,
     }
   }
 
@@ -766,7 +782,8 @@ impl TopicMetadata {
     match self {
       TopicMetadata::NamedTopic { references, .. } => references,
       TopicMetadata::UnnamedTopic { .. }
-      | TopicMetadata::TitledTopic { .. } => &[],
+      | TopicMetadata::TitledTopic { .. }
+      | TopicMetadata::CommentTopic { .. } => &[],
     }
   }
 
@@ -777,7 +794,8 @@ impl TopicMetadata {
         ..
       } => expanded_references,
       TopicMetadata::UnnamedTopic { .. }
-      | TopicMetadata::TitledTopic { .. } => &[],
+      | TopicMetadata::TitledTopic { .. }
+      | TopicMetadata::CommentTopic { .. } => &[],
     }
   }
 
@@ -785,7 +803,8 @@ impl TopicMetadata {
     match self {
       TopicMetadata::NamedTopic { ancestry, .. } => ancestry,
       TopicMetadata::UnnamedTopic { .. }
-      | TopicMetadata::TitledTopic { .. } => &[],
+      | TopicMetadata::TitledTopic { .. }
+      | TopicMetadata::CommentTopic { .. } => &[],
     }
   }
 
@@ -793,7 +812,8 @@ impl TopicMetadata {
     match self {
       TopicMetadata::NamedTopic { ancestors, .. } => ancestors,
       TopicMetadata::UnnamedTopic { .. }
-      | TopicMetadata::TitledTopic { .. } => &[],
+      | TopicMetadata::TitledTopic { .. }
+      | TopicMetadata::CommentTopic { .. } => &[],
     }
   }
 
@@ -801,7 +821,8 @@ impl TopicMetadata {
     match self {
       TopicMetadata::NamedTopic { descendants, .. } => descendants,
       TopicMetadata::UnnamedTopic { .. }
-      | TopicMetadata::TitledTopic { .. } => &[],
+      | TopicMetadata::TitledTopic { .. }
+      | TopicMetadata::CommentTopic { .. } => &[],
     }
   }
 
@@ -809,7 +830,8 @@ impl TopicMetadata {
     match self {
       TopicMetadata::NamedTopic { relatives, .. } => relatives,
       TopicMetadata::UnnamedTopic { .. }
-      | TopicMetadata::TitledTopic { .. } => &[],
+      | TopicMetadata::TitledTopic { .. }
+      | TopicMetadata::CommentTopic { .. } => &[],
     }
   }
 
@@ -817,7 +839,8 @@ impl TopicMetadata {
     match self {
       TopicMetadata::NamedTopic { mutations, .. } => mutations,
       TopicMetadata::UnnamedTopic { .. }
-      | TopicMetadata::TitledTopic { .. } => &[],
+      | TopicMetadata::TitledTopic { .. }
+      | TopicMetadata::CommentTopic { .. } => &[],
     }
   }
 
@@ -825,15 +848,17 @@ impl TopicMetadata {
     match self {
       TopicMetadata::NamedTopic { is_mutable, .. } => *is_mutable,
       TopicMetadata::UnnamedTopic { .. }
-      | TopicMetadata::TitledTopic { .. } => false,
+      | TopicMetadata::TitledTopic { .. }
+      | TopicMetadata::CommentTopic { .. } => false,
     }
   }
 
   pub fn mentions(&self) -> &[ReferenceGroup] {
     match self {
-      TopicMetadata::NamedTopic { mentions, .. } => mentions,
-      TopicMetadata::UnnamedTopic { .. }
-      | TopicMetadata::TitledTopic { .. } => &[],
+      TopicMetadata::NamedTopic { mentions, .. }
+      | TopicMetadata::UnnamedTopic { mentions, .. }
+      | TopicMetadata::TitledTopic { mentions, .. }
+      | TopicMetadata::CommentTopic { mentions, .. } => mentions,
     }
   }
 

@@ -62,8 +62,8 @@ async fn main() {
   // Load and parse all comments
   println!("Loading comments...");
   let comment_store = {
-    let ctx = data_context.lock().unwrap();
-    collab_db::load_and_parse_all_comments(&pool, &ctx)
+    let mut ctx = data_context.lock().unwrap();
+    collab_db::load_and_parse_all_comments(&pool, &mut ctx)
       .await
       .unwrap_or_else(|e| {
         eprintln!("Warning: Failed to load comments: {}", e);
