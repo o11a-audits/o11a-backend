@@ -822,11 +822,6 @@ pub struct OptionalUserIdQuery {
   pub user_id: Option<i64>,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct BatchStatusQuery {
-  pub ids: String, // Comma-separated: "C1,C2,C3"
-}
-
 // ============================================================================
 // Comment handlers
 // ============================================================================
@@ -852,17 +847,37 @@ pub async fn get_topic_comments(
   Ok(Json(CommentListResponse { comment_topic_ids }))
 }
 
-/// GET /api/v1/audits/:audit_id/comments/:comment_type
-/// Returns topic IDs of comments of the specified type.
-pub async fn list_comments_by_type(
+/// GET /api/v1/audits/:audit_id/comments/:comment_type/:status
+/// Returns topic IDs of comments matching both the specified type and status.
+pub async fn list_comments_by_type_and_status(
   State(state): State<AppState>,
-  Path((audit_id, comment_type)): Path<(String, String)>,
+  Path((audit_id, comment_type, status)): Path<(String, String, String)>,
 ) -> Result<Json<CommentListResponse>, StatusCode> {
-  println!("GET /api/v1/audits/{}/comments/{}", audit_id, comment_type);
-  let comments =
-    db::get_comments_for_audit_raw(&state.db, &audit_id, &comment_type)
-      .await
-      .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+  println!(
+    "GET /api/v1/audits/{}/comments/{}/{}",
+    audit_id, comment_type, status
+  );
+
+  // Validate comment_type
+  if CommentType::from_str(&comment_type).is_none() {
+    return Err(StatusCode::BAD_REQUEST);
+  }
+
+  // Validate status (CommentStatus::from_str has a catch-all fallback, so check explicitly)
+  match status.as_str() {
+    "active" | "hidden" | "resolved" | "unanswered" | "answered"
+    | "unconfirmed" | "confirmed" | "rejected" => {}
+    _ => return Err(StatusCode::BAD_REQUEST),
+  }
+
+  let comments = db::get_comments_by_type_and_status(
+    &state.db,
+    &audit_id,
+    &comment_type,
+    &status,
+  )
+  .await
+  .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
   let comment_topic_ids =
     comments.iter().map(|c| c.comment_topic_id()).collect();
@@ -1036,30 +1051,6 @@ pub async fn get_comment_status(
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
   Ok(Json(response))
-}
-
-/// GET /api/v1/audits/:audit_id/comments/status?ids=C1,C2,C3
-/// Returns status for multiple comments.
-pub async fn get_batch_status(
-  State(state): State<AppState>,
-  Path(audit_id): Path<String>,
-  Query(params): Query<BatchStatusQuery>,
-) -> Result<Json<Vec<CommentStatusResponse>>, StatusCode> {
-  println!(
-    "GET /api/v1/audits/{}/comments/status?ids={}",
-    audit_id, params.ids
-  );
-  let comment_ids: Vec<i64> = params
-    .ids
-    .split(',')
-    .filter_map(|s| s.trim().trim_start_matches('C').parse().ok())
-    .collect();
-
-  let statuses = db::get_comment_statuses(&state.db, &comment_ids)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-  Ok(Json(statuses))
 }
 
 /// PUT /api/v1/audits/:audit_id/comments/:comment_id/status

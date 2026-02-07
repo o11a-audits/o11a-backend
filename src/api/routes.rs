@@ -51,16 +51,12 @@ pub fn create_router(state: AppState) -> Router {
     // Collaborator comment routes
     // ============================================
     .route(
-      "/api/v1/audits/:audit_id/comments/:comment_type",
-      get(handlers::list_comments_by_type),
+      "/api/v1/audits/:audit_id/comments/:comment_type/:status",
+      get(handlers::list_comments_by_type_and_status),
     )
     .route(
       "/api/v1/audits/:audit_id/comments",
       post(handlers::create_comment),
-    )
-    .route(
-      "/api/v1/audits/:audit_id/comments/status",
-      get(handlers::get_batch_status),
     )
     .route(
       "/api/v1/audits/:audit_id/comments/:comment_id/status",

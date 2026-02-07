@@ -179,17 +179,19 @@ pub async fn get_comments_for_topic_raw(
     .await
 }
 
-/// Gets all comments for an audit filtered by type
-pub async fn get_comments_for_audit_raw(
+/// Gets all comments for an audit filtered by type and status
+pub async fn get_comments_by_type_and_status(
   pool: &SqlitePool,
   audit_id: &str,
   comment_type: &str,
+  status: &str,
 ) -> Result<Vec<Comment>, sqlx::Error> {
   sqlx::query_as::<_, Comment>(
-        "SELECT * FROM comments WHERE audit_id = ? AND comment_type = ? AND status != 'hidden' ORDER BY created_at DESC",
+        "SELECT * FROM comments WHERE audit_id = ? AND comment_type = ? AND status = ? ORDER BY created_at DESC",
     )
     .bind(audit_id)
     .bind(comment_type)
+    .bind(status)
     .fetch_all(pool)
     .await
 }
@@ -252,20 +254,6 @@ pub async fn get_comment_status(
     comment_topic_id: comment.comment_topic_id(),
     status: comment.get_status(),
   })
-}
-
-/// Gets status for multiple comments
-pub async fn get_comment_statuses(
-  pool: &SqlitePool,
-  comment_ids: &[i64],
-) -> Result<Vec<CommentStatusResponse>, sqlx::Error> {
-  let mut statuses = Vec::new();
-  for &id in comment_ids {
-    if let Ok(status) = get_comment_status(pool, id).await {
-      statuses.push(status);
-    }
-  }
-  Ok(statuses)
 }
 
 // ============================================================================
