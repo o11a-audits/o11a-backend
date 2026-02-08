@@ -15,14 +15,16 @@ pub fn analyze(
   project_root: &Path,
   audit_id: &str,
   data_context: &mut DataContext,
+  document_files: &[core::ProjectPath],
 ) -> Result<(), String> {
   // Get the audit data
   let audit_data = data_context
     .get_audit_mut(audit_id)
     .ok_or_else(|| format!("Audit '{}' not found", audit_id))?;
 
-  // Parse all markdown files (passing audit_data for inline code resolution)
-  let ast_map = parser::process(project_root, &audit_data)?;
+  // Parse document files in the order specified by documents.txt
+  let ast_map =
+    parser::process_files(project_root, document_files, &audit_data)?;
 
   // Collect mentions during processing: referenced_topic -> [scope]
   // The scope tells us the container (file), component (section), and member (paragraph)
@@ -557,7 +559,12 @@ Protocol Solvency
     let audit_data = create_test_audit_data();
     let project_path = create_test_project_path();
 
-    let result = ast_from_markdown(TEST_MARKDOWN, &project_path, &audit_data);
+    let result = ast_from_markdown(
+      TEST_MARKDOWN,
+      &project_path,
+      &audit_data,
+      &parser::next_node_id,
+    );
     assert!(
       result.is_ok(),
       "Failed to parse markdown: {:?}",
@@ -635,8 +642,13 @@ Protocol Solvency
     let project_path = create_test_project_path();
 
     // Parse the markdown
-    let ast =
-      ast_from_markdown(TEST_MARKDOWN, &project_path, &audit_data).unwrap();
+    let ast = ast_from_markdown(
+      TEST_MARKDOWN,
+      &project_path,
+      &audit_data,
+      &parser::next_node_id,
+    )
+    .unwrap();
 
     // Process the AST manually (simulating what analyze() does)
     let mut mentions_by_topic: BTreeMap<topic::Topic, Vec<Scope>> =
@@ -714,8 +726,13 @@ Protocol Solvency
     let mut audit_data = create_test_audit_data();
     let project_path = create_test_project_path();
 
-    let ast =
-      ast_from_markdown(TEST_MARKDOWN, &project_path, &audit_data).unwrap();
+    let ast = ast_from_markdown(
+      TEST_MARKDOWN,
+      &project_path,
+      &audit_data,
+      &parser::next_node_id,
+    )
+    .unwrap();
 
     let mut mentions_by_topic: BTreeMap<topic::Topic, Vec<Scope>> =
       BTreeMap::new();
@@ -800,8 +817,13 @@ Protocol Solvency
     let mut audit_data = create_test_audit_data();
     let project_path = create_test_project_path();
 
-    let ast =
-      ast_from_markdown(TEST_MARKDOWN, &project_path, &audit_data).unwrap();
+    let ast = ast_from_markdown(
+      TEST_MARKDOWN,
+      &project_path,
+      &audit_data,
+      &parser::next_node_id,
+    )
+    .unwrap();
 
     let mut mentions_by_topic: BTreeMap<topic::Topic, Vec<Scope>> =
       BTreeMap::new();
@@ -866,8 +888,13 @@ Protocol Solvency
     let mut audit_data = create_test_audit_data();
     let project_path = create_test_project_path();
 
-    let ast =
-      ast_from_markdown(TEST_MARKDOWN, &project_path, &audit_data).unwrap();
+    let ast = ast_from_markdown(
+      TEST_MARKDOWN,
+      &project_path,
+      &audit_data,
+      &parser::next_node_id,
+    )
+    .unwrap();
 
     let mut mentions_by_topic: BTreeMap<topic::Topic, Vec<Scope>> =
       BTreeMap::new();

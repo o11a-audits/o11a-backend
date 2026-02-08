@@ -1022,6 +1022,33 @@ pub fn load_in_scope_files(
   Ok(in_scope_files)
 }
 
+/// Reads "documents.txt" from the project root and returns an ordered list
+/// of document file paths. Order matters — documents are parsed in this order
+/// to produce deterministic node IDs. New documents should be appended to the
+/// end of the file to preserve existing IDs.
+pub fn load_document_files(
+  project_root: &Path,
+) -> Result<Vec<ProjectPath>, String> {
+  let doc_file = project_root.join("documents.txt");
+  if !doc_file.exists() {
+    return Err("documents.txt file not found in project root".to_string());
+  }
+
+  let content = std::fs::read_to_string(&doc_file)
+    .map_err(|e| format!("Failed to read documents.txt: {}", e))?;
+
+  let mut document_files = Vec::new();
+  for line in content.lines() {
+    let line = line.trim();
+    if !line.is_empty() {
+      let project_path = new_project_path(&line.to_string(), project_root);
+      document_files.push(project_path);
+    }
+  }
+
+  Ok(document_files)
+}
+
 /// Reads the first line of the "name.txt" file in the project root
 pub fn load_audit_name(project_root: &Path) -> Result<String, String> {
   let name_file = project_root.join("name.txt");

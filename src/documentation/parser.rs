@@ -167,6 +167,7 @@ fn match_operator(s: &str) -> Option<&'static str> {
 fn tokenize_code(
   code: &str,
   audit_data: &core::AuditData,
+  next_id: &dyn Fn() -> i32,
 ) -> Vec<DocumentationNode> {
   let mut tokens = Vec::new();
   let mut chars = code.char_indices().peekable();
@@ -179,14 +180,14 @@ fn tokenize_code(
       // Flush text buffer
       if !text_buffer.is_empty() {
         tokens.push(DocumentationNode::CodeText {
-          node_id: next_node_id(),
+          node_id: next_id(),
           value: text_buffer.clone(),
         });
         text_buffer.clear();
       }
 
       tokens.push(DocumentationNode::CodeOperator {
-        node_id: next_node_id(),
+        node_id: next_id(),
         value: op.to_string(),
       });
 
@@ -202,7 +203,7 @@ fn tokenize_code(
       // Flush text buffer
       if !text_buffer.is_empty() {
         tokens.push(DocumentationNode::CodeText {
-          node_id: next_node_id(),
+          node_id: next_id(),
           value: text_buffer.clone(),
         });
         text_buffer.clear();
@@ -222,7 +223,7 @@ fn tokenize_code(
 
       if is_keyword(&ident) {
         tokens.push(DocumentationNode::CodeKeyword {
-          node_id: next_node_id(),
+          node_id: next_id(),
           value: ident,
         });
       } else {
@@ -239,7 +240,7 @@ fn tokenize_code(
         };
 
         tokens.push(DocumentationNode::CodeIdentifier {
-          node_id: next_node_id(),
+          node_id: next_id(),
           value: ident,
           referenced_topic,
           kind,
@@ -255,7 +256,7 @@ fn tokenize_code(
   // Flush remaining text buffer
   if !text_buffer.is_empty() {
     tokens.push(DocumentationNode::CodeText {
-      node_id: next_node_id(),
+      node_id: next_id(),
       value: text_buffer,
     });
   }
@@ -264,8 +265,9 @@ fn tokenize_code(
 }
 
 /// Processes markdown files from src/ and docs/ directories
-pub fn process(
-  project_path: &Path,
+pub fn process_files(
+  project_root: &Path,
+  document_files: &[core::ProjectPath],
   audit_data: &core::AuditData,
 ) -> Result<
   std::collections::BTreeMap<core::ProjectPath, Vec<DocumentationAST>>,
@@ -273,76 +275,44 @@ pub fn process(
 > {
   let mut ast_map = std::collections::BTreeMap::new();
 
-  // Process both src/ and docs/ directories
-  let src_dir = project_path.join("src");
-  let docs_dir = project_path.join("docs");
+  for project_path in document_files {
+    let file_path = project_root.join(&project_path.file_path);
 
-  if src_dir.exists() && src_dir.is_dir() {
-    traverse_directory(&src_dir, &project_path, &mut ast_map, audit_data)?;
-  }
+    if !file_path.exists() || !file_path.is_file() {
+      return Err(format!(
+        "Document file not found: {} (listed in documents.txt)",
+        project_path.file_path
+      ));
+    }
 
-  if docs_dir.exists() && docs_dir.is_dir() {
-    traverse_directory(&docs_dir, &project_path, &mut ast_map, audit_data)?;
+    let content = std::fs::read_to_string(&file_path).map_err(|e| {
+      format!("Failed to read document file {:?}: {}", file_path, e)
+    })?;
+
+    let ast =
+      ast_from_markdown(&content, project_path, audit_data, &next_node_id)?;
+
+    ast_map
+      .entry(project_path.clone())
+      .or_insert_with(Vec::new)
+      .push(ast);
   }
 
   Ok(ast_map)
-}
-
-fn traverse_directory(
-  dir: &Path,
-  project_root: &Path,
-  ast_map: &mut std::collections::BTreeMap<
-    core::ProjectPath,
-    Vec<DocumentationAST>,
-  >,
-  audit_data: &core::AuditData,
-) -> Result<(), String> {
-  let entries = std::fs::read_dir(dir)
-    .map_err(|e| format!("Failed to read directory {:?}: {}", dir, e))?;
-
-  for entry in entries {
-    let entry =
-      entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
-    let path = entry.path();
-
-    if path.is_dir() {
-      // Recursively traverse subdirectories
-      traverse_directory(&path, &project_root, ast_map, audit_data)?;
-    } else if path.is_file() {
-      if let Some(extension) = path.extension() {
-        if extension == "md" {
-          let content = std::fs::read_to_string(&path).map_err(|e| {
-            format!("Failed to read markdown file {:?}: {}", path, e)
-          })?;
-
-          let project_path =
-            core::new_project_path_from_path(&path, project_root);
-
-          let ast = ast_from_markdown(&content, &project_path, audit_data)?;
-
-          ast_map
-            .entry(project_path)
-            .or_insert_with(Vec::new)
-            .push(ast);
-        }
-      }
-    }
-  }
-
-  Ok(())
 }
 
 pub fn ast_from_markdown(
   content: &str,
   project_path: &core::ProjectPath,
   audit_data: &core::AuditData,
+  next_id: &dyn Fn() -> i32,
 ) -> Result<DocumentationAST, String> {
   // Parse markdown to mdast
   let md_ast = markdown::to_mdast(content, &ParseOptions::default())
     .map_err(|e| format!("Failed to parse markdown: {}", e))?;
 
   // Convert mdast to our DocumentationNode format
-  let nodes = convert_mdast_node(&md_ast, audit_data)?;
+  let nodes = convert_mdast_node(&md_ast, audit_data, next_id)?;
 
   Ok(DocumentationAST {
     nodes: vec![nodes],
@@ -625,6 +595,7 @@ impl DocumentationNode {
 /// Each sentence contains all inline nodes (Text, InlineCode, Emphasis, Strong, Link) until a period
 fn split_into_sentences(
   children: Vec<DocumentationNode>,
+  next_id: &dyn Fn() -> i32,
 ) -> Vec<DocumentationNode> {
   let mut sentences = Vec::new();
   let mut current_sentence_nodes = Vec::new();
@@ -643,7 +614,7 @@ fn split_into_sentences(
             if !before_period.trim().is_empty() {
               // Add text up to and including the period
               current_sentence_nodes.push(DocumentationNode::Text {
-                node_id: next_node_id(),
+                node_id: next_id(),
                 position: None, // Created by parser, no mdast position
                 value: before_period.to_string(),
               });
@@ -651,7 +622,7 @@ fn split_into_sentences(
               // Complete this sentence
               if !current_sentence_nodes.is_empty() {
                 sentences.push(DocumentationNode::Sentence {
-                  node_id: next_node_id(),
+                  node_id: next_id(),
                   children: current_sentence_nodes.drain(..).collect(),
                 });
               }
@@ -663,7 +634,7 @@ fn split_into_sentences(
             // No more periods in this text node
             if !remaining_text.trim().is_empty() {
               current_sentence_nodes.push(DocumentationNode::Text {
-                node_id: next_node_id(),
+                node_id: next_id(),
                 position: None, // Created by parser, no mdast position
                 value: remaining_text.to_string(),
               });
@@ -687,7 +658,7 @@ fn split_into_sentences(
         // End the current sentence if there is one
         if !current_sentence_nodes.is_empty() {
           sentences.push(DocumentationNode::Sentence {
-            node_id: next_node_id(),
+            node_id: next_id(),
             children: current_sentence_nodes.drain(..).collect(),
           });
         }
@@ -699,7 +670,7 @@ fn split_into_sentences(
   // Add any remaining nodes as the final sentence
   if !current_sentence_nodes.is_empty() {
     sentences.push(DocumentationNode::Sentence {
-      node_id: next_node_id(),
+      node_id: next_id(),
       children: current_sentence_nodes,
     });
   }
@@ -712,6 +683,7 @@ fn split_into_sentences(
 /// of the same or higher level (lower number). Deeper headings become nested sections.
 fn group_into_sections(
   nodes: Vec<DocumentationNode>,
+  next_id: &dyn Fn() -> i32,
 ) -> Vec<DocumentationNode> {
   // Find the minimum heading level in the nodes to start grouping from there
   let min_level = nodes
@@ -723,7 +695,7 @@ fn group_into_sections(
     .min()
     .unwrap_or(1);
 
-  group_into_sections_at_level(nodes, min_level)
+  group_into_sections_at_level(nodes, min_level, next_id)
 }
 
 /// Recursively groups nodes into sections at the specified heading level
@@ -732,6 +704,7 @@ fn group_into_sections(
 fn group_into_sections_at_level(
   nodes: Vec<DocumentationNode>,
   level: u8,
+  next_id: &dyn Fn() -> i32,
 ) -> Vec<DocumentationNode> {
   // Find the minimum heading level in these nodes
   let min_level = nodes
@@ -763,9 +736,14 @@ fn group_into_sections_at_level(
             let nested_children = group_into_sections_at_level(
               current_content.drain(..).collect(),
               effective_level + 1,
+              next_id,
             );
             // Create heading with section as child
-            result.push(create_heading_with_section(heading, nested_children));
+            result.push(create_heading_with_section(
+              heading,
+              nested_children,
+              next_id,
+            ));
           }
           // Start a new section at this level
           current_heading = Some(node);
@@ -784,9 +762,14 @@ fn group_into_sections_at_level(
             let nested_children = group_into_sections_at_level(
               current_content.drain(..).collect(),
               effective_level + 1,
+              next_id,
             );
             // Create heading with section as child
-            result.push(create_heading_with_section(heading, nested_children));
+            result.push(create_heading_with_section(
+              heading,
+              nested_children,
+              next_id,
+            ));
           }
           result.push(node);
         }
@@ -804,10 +787,17 @@ fn group_into_sections_at_level(
 
   // Handle the last section if there is one
   if let Some(heading) = current_heading {
-    let nested_children =
-      group_into_sections_at_level(current_content, effective_level + 1);
+    let nested_children = group_into_sections_at_level(
+      current_content,
+      effective_level + 1,
+      next_id,
+    );
     // Create heading with section as child
-    result.push(create_heading_with_section(heading, nested_children));
+    result.push(create_heading_with_section(
+      heading,
+      nested_children,
+      next_id,
+    ));
   }
 
   result
@@ -819,6 +809,7 @@ fn group_into_sections_at_level(
 fn create_heading_with_section(
   heading: DocumentationNode,
   section_children: Vec<DocumentationNode>,
+  next_id: &dyn Fn() -> i32,
 ) -> DocumentationNode {
   match heading {
     DocumentationNode::Heading {
@@ -833,7 +824,7 @@ fn create_heading_with_section(
         .map(|c| c.extract_text())
         .collect::<Vec<_>>()
         .join("");
-      let section_node_id = next_node_id();
+      let section_node_id = next_id();
       let section = DocumentationNode::Section {
         node_id: section_node_id,
         title: section_title,
@@ -860,8 +851,9 @@ fn get_mdast_position(node: &MdNode) -> Option<usize> {
 fn convert_mdast_node(
   node: &MdNode,
   audit_data: &core::AuditData,
+  next_id: &dyn Fn() -> i32,
 ) -> Result<DocumentationNode, String> {
-  let node_id = next_node_id();
+  let node_id = next_id();
   let position = get_mdast_position(node);
 
   match node {
@@ -870,11 +862,11 @@ fn convert_mdast_node(
       let children = root
         .children
         .iter()
-        .map(|child| convert_mdast_node(child, audit_data))
+        .map(|child| convert_mdast_node(child, audit_data, next_id))
         .collect::<Result<Vec<_>, _>>()?;
 
       // Group children into sections
-      let sections = group_into_sections(children);
+      let sections = group_into_sections(children, next_id);
 
       Ok(DocumentationNode::Root {
         node_id,
@@ -887,7 +879,7 @@ fn convert_mdast_node(
       let children = heading
         .children
         .iter()
-        .map(|child| convert_mdast_node(child, audit_data))
+        .map(|child| convert_mdast_node(child, audit_data, next_id))
         .collect::<Result<Vec<_>, _>>()?;
 
       Ok(DocumentationNode::Heading {
@@ -903,11 +895,11 @@ fn convert_mdast_node(
       let children = paragraph
         .children
         .iter()
-        .map(|child| convert_mdast_node(child, audit_data))
+        .map(|child| convert_mdast_node(child, audit_data, next_id))
         .collect::<Result<Vec<_>, _>>()?;
 
       // Split the paragraph's children into sentences
-      let sentences = split_into_sentences(children);
+      let sentences = split_into_sentences(children, next_id);
 
       if sentences.len() == 1 {
         // If there is only one sentence, return it directly as a sentence
@@ -929,7 +921,7 @@ fn convert_mdast_node(
     }),
 
     MdNode::InlineCode(code) => {
-      let children = tokenize_code(&code.value, audit_data);
+      let children = tokenize_code(&code.value, audit_data, next_id);
 
       Ok(DocumentationNode::InlineCode {
         node_id,
@@ -940,7 +932,7 @@ fn convert_mdast_node(
     }
 
     MdNode::Code(code) => {
-      let children = tokenize_code(&code.value, audit_data);
+      let children = tokenize_code(&code.value, audit_data, next_id);
 
       Ok(DocumentationNode::CodeBlock {
         node_id,
@@ -955,7 +947,7 @@ fn convert_mdast_node(
       let children = list
         .children
         .iter()
-        .map(|child| convert_mdast_node(child, audit_data))
+        .map(|child| convert_mdast_node(child, audit_data, next_id))
         .collect::<Result<Vec<_>, _>>()?;
 
       Ok(DocumentationNode::List {
@@ -970,7 +962,7 @@ fn convert_mdast_node(
       let children = item
         .children
         .iter()
-        .map(|child| convert_mdast_node(child, audit_data))
+        .map(|child| convert_mdast_node(child, audit_data, next_id))
         .collect::<Result<Vec<_>, _>>()?;
 
       Ok(DocumentationNode::ListItem {
@@ -984,7 +976,7 @@ fn convert_mdast_node(
       let children = emphasis
         .children
         .iter()
-        .map(|child| convert_mdast_node(child, audit_data))
+        .map(|child| convert_mdast_node(child, audit_data, next_id))
         .collect::<Result<Vec<_>, _>>()?;
 
       Ok(DocumentationNode::Emphasis {
@@ -998,7 +990,7 @@ fn convert_mdast_node(
       let children = strong
         .children
         .iter()
-        .map(|child| convert_mdast_node(child, audit_data))
+        .map(|child| convert_mdast_node(child, audit_data, next_id))
         .collect::<Result<Vec<_>, _>>()?;
 
       Ok(DocumentationNode::Strong {
@@ -1012,7 +1004,7 @@ fn convert_mdast_node(
       let children = link
         .children
         .iter()
-        .map(|child| convert_mdast_node(child, audit_data))
+        .map(|child| convert_mdast_node(child, audit_data, next_id))
         .collect::<Result<Vec<_>, _>>()?;
 
       Ok(DocumentationNode::Link {
@@ -1028,7 +1020,7 @@ fn convert_mdast_node(
       let children = quote
         .children
         .iter()
-        .map(|child| convert_mdast_node(child, audit_data))
+        .map(|child| convert_mdast_node(child, audit_data, next_id))
         .collect::<Result<Vec<_>, _>>()?;
 
       Ok(DocumentationNode::BlockQuote {

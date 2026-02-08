@@ -19,6 +19,12 @@ pub fn load_project(
   let audit_name = core::load_audit_name(project_root)
     .map_err(|e| format!("Failed to load audit name from name.txt: {}", e))?;
 
+  // Load ordered document file list from documents.txt
+  let document_files =
+    core::load_document_files(project_root).map_err(|e| {
+      format!("Failed to load document files from documents.txt: {}", e)
+    })?;
+
   // Create the audit if it doesn't exist
   {
     let mut ctx = data_context
@@ -47,7 +53,7 @@ pub fn load_project(
     let mut ctx = data_context.lock().map_err(|e| {
       format!("Mutex poisoned while analyzing documentation: {}", e)
     })?;
-    documentation::analyze(project_root, audit_id, &mut ctx)
+    documentation::analyze(project_root, audit_id, &mut ctx, &document_files)
       .map_err(|e| format!("Failed to analyze documentation files: {}", e))?;
   }
 

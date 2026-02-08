@@ -2,6 +2,7 @@ use crate::core::topic::Topic;
 use crate::core::{self, ProjectPath};
 use crate::documentation::parser as doc_parser;
 use crate::documentation::parser::DocumentationNode;
+use std::sync::atomic::{AtomicI32, Ordering};
 
 /// Parses comment markdown and extracts mentions.
 /// Uses the documentation parser to parse markdown into an AST, then
@@ -16,11 +17,20 @@ pub fn parse_comment(
     file_path: String::new(),
   };
 
-  let ast =
-    match doc_parser::ast_from_markdown(content, &dummy_path, audit_data) {
-      Ok(ast) => ast,
-      Err(_) => return vec![],
-    };
+  // Use a local throwaway counter — comment AST node IDs are ephemeral
+  // and must not consume IDs from the global documentation counter
+  let counter = AtomicI32::new(0);
+  let next_id = || counter.fetch_add(1, Ordering::SeqCst);
+
+  let ast = match doc_parser::ast_from_markdown(
+    content,
+    &dummy_path,
+    audit_data,
+    &next_id,
+  ) {
+    Ok(ast) => ast,
+    Err(_) => return vec![],
+  };
 
   let mut mentions = Vec::new();
   for node in &ast.nodes {
