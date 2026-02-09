@@ -256,6 +256,7 @@ pub enum CommentEvent {
   Created {
     audit_id: String,
     comment_topic_id: String,
+    target_topic: String,
   },
   /// Status updated - includes new status directly (no need to refetch)
   StatusUpdated {

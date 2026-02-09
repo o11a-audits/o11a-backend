@@ -969,6 +969,7 @@ pub async fn create_comment(
   let _ = state.comment_broadcast.send(CommentEvent::Created {
     audit_id: audit_id.clone(),
     comment_topic_id: comment_topic_id.clone(),
+    target_topic: payload.topic_id.clone(),
   });
 
   for (topic_id, updated_mentions) in mentions_updates {
