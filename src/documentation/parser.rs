@@ -228,15 +228,16 @@ fn tokenize_code(
         });
       } else {
         // Try to find a matching declaration
-        let (referenced_topic, kind) = if let Some(metadata) =
+        let (referenced_topic, kind, referenced_name) = if let Some(metadata) =
           find_declaration_by_name(audit_data, &ident)
         {
           (
             Some(metadata.topic().clone()),
             get_named_topic_kind(metadata),
+            Some(metadata.name().to_string()),
           )
         } else {
-          (None, None)
+          (None, None, None)
         };
 
         tokens.push(DocumentationNode::CodeIdentifier {
@@ -244,6 +245,7 @@ fn tokenize_code(
           value: ident,
           referenced_topic,
           kind,
+          referenced_name,
         });
       }
       continue;
@@ -404,6 +406,7 @@ pub enum DocumentationNode {
     value: String,
     referenced_topic: Option<topic::Topic>,
     kind: Option<core::NamedTopicKind>,
+    referenced_name: Option<String>,
   },
 
   CodeText {

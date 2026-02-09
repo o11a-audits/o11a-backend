@@ -173,8 +173,10 @@ fn do_node_to_html(
       value,
       referenced_topic,
       kind,
+      referenced_name,
       ..
     } => {
+      let display_value = referenced_name.as_deref().unwrap_or(value);
       let class = kind
         .as_ref()
         .map(formatting::named_topic_kind_to_class)
@@ -186,14 +188,15 @@ fn do_node_to_html(
           let node_topic = topic::new_documentation_topic(*node_id);
           formatting::format_topic_token(
             &node_topic,
-            &formatting::html_escape(value),
+            &formatting::html_escape(display_value),
             class,
             ref_topic,
           )
         }
-        None => {
-          formatting::format_token(&formatting::html_escape(value), class)
-        }
+        None => formatting::format_token(
+          &formatting::html_escape(display_value),
+          class,
+        ),
       }
     }
 
