@@ -42,6 +42,7 @@ pub fn register_comment_in_audit_data(
     insert_comment_mention(
       audit_data,
       scope,
+      &comment.topic_id,
       &mention.id,
       comment_topic.clone(),
     );
@@ -51,21 +52,18 @@ pub fn register_comment_in_audit_data(
 /// Inserts a CommentMention reference into the mentioned topic's
 /// `TopicMetadata.mentions` ReferenceGroups.
 ///
-/// Uses the comment's scope to determine the correct group (component) and
-/// nested group (member), and the reference_topic (lowest scope topic).
+/// Uses the comment's target topic as the reference_topic and
+/// the comment's scope to determine the correct group (component) and
+/// nested group (member).
 fn insert_comment_mention(
   audit_data: &mut core::AuditData,
   scope: &ScopeInfo,
+  target_topic_id: &str,
   mentioned_topic_id: &str,
   mention_topic: Topic,
 ) {
-  // Determine reference_topic from the comment's scope (lowest scope level)
-  let reference_topic_id = match scope.lowest_scope_topic_id() {
-    Some(id) => id.to_string(),
-    None => return, // Global/Container scope — can't place in a ReferenceGroup
-  };
-
-  let reference_topic = new_topic(&reference_topic_id);
+  // Use the comment's target topic as the reference_topic
+  let reference_topic = new_topic(target_topic_id);
   let ref_sort_key = audit_data
     .nodes
     .get(&reference_topic)
