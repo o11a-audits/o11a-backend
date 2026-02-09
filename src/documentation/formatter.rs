@@ -36,7 +36,12 @@ fn do_node_to_html(
         .join("\n");
 
       if ctx.comment_formatting {
-        formatting::format_block(&content, "comment-root")
+        formatting::format_topic_block(
+          &ctx.target_topic,
+          &content,
+          "comment-root target-topic",
+          &ctx.target_topic,
+        )
       } else {
         formatting::format_block(&content, "documentation-root")
       }

@@ -756,14 +756,22 @@ fn do_node_to_source_text(
 
       let topic = topic::new_node_topic(node_id);
 
-      if ctx.target_topic == topic || statements.len() == 1 {
-        // When the semantic block is the target topic, we don't need to
-        // render it, as it is redundant with its container. This is especially
-        // impactful for the references panel, where it can be annoying to have
-        // to pass over each semantic block containing each reference.
-        // Similarly, if there is only one statement, we don't need to render
-        // the semantic block, as it is again redundant with the statement.
+      if statements.len() == 1 {
+        // If there is only one statement, we don't need to render the
+        // semantic block, as it is redundant with the statement.
         statements
+      } else if ctx.target_topic == topic {
+        // When the semantic block is the target topic, render it as the
+        // target topic, so that the UI can not render it, when it is redundant
+        // with its container. This is especially impactful for the references
+        // panel, where it can be annoying to have to pass over each semantic
+        // block containing each reference.
+        formatting::format_topic_block(
+          &new_node_topic(node_id),
+          &statements,
+          "semantic-block target-topic",
+          &topic,
+        )
       } else {
         formatting::format_topic_block(
           &new_node_topic(node_id),
