@@ -203,7 +203,12 @@ pub fn inline_indent(content: &str, indent_level: usize) -> String {
 // ============================================================================
 
 /// Formats a heading element with the specified level
-pub fn format_heading(
+pub fn format_heading(level: u8, content: &str) -> String {
+  format!("<h{}>{}</h{}>", level, content, level)
+}
+
+/// Formats a heading element with topic association
+pub fn format_topic_heading(
   level: u8,
   topic: &topic::Topic,
   content: &str,
@@ -218,7 +223,16 @@ pub fn format_inline_code(content: &str) -> String {
 }
 
 /// Formats a code block with optional language class
-pub fn format_code_block(
+pub fn format_code_block(lang: Option<&str>, content: &str) -> String {
+  let lang_class = lang.map(|l| format!(" language-{}", l)).unwrap_or_default();
+  format!(
+    "<pre class=\"code-block{}\"><code>{}</code></pre>",
+    lang_class, content
+  )
+}
+
+/// Formats a code block with topic association
+pub fn format_topic_code_block(
   topic: &topic::Topic,
   lang: Option<&str>,
   content: &str,
@@ -234,7 +248,20 @@ pub fn format_code_block(
 }
 
 /// Formats an ordered or unordered list
-pub fn format_list(topic: &topic::Topic, ordered: bool, items: &str) -> String {
+pub fn format_list(ordered: bool, items: &str) -> String {
+  if ordered {
+    format!("<ol class=\"list ordered\">\n{}\n</ol>", items)
+  } else {
+    format!("<ul class=\"list unordered\">\n{}\n</ul>", items)
+  }
+}
+
+/// Formats an ordered or unordered list with topic association
+pub fn format_topic_list(
+  topic: &topic::Topic,
+  ordered: bool,
+  items: &str,
+) -> String {
   if ordered {
     format!(
       "<ol class=\"topic-token list ordered\" data-topic=\"{}\" tabindex=\"0\">\n{}\n</ol>",

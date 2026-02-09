@@ -7,9 +7,9 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
-use crate::api::AppState;
 use crate::collaborator::{db, formatter, models::*, parser, store};
 use crate::core::{self, Node, project, topic::new_topic};
+use crate::{api::AppState, documentation::FormatContext};
 
 // Health check handler
 pub async fn health_check() -> StatusCode {
@@ -335,24 +335,15 @@ pub async fn get_source_text(
 ) -> Result<impl IntoResponse, StatusCode> {
   println!("GET /api/v1/audits/{}/source_text/{}", audit_id, topic_id);
 
-  // Serve comment HTML from the in-memory store
-  if topic_id.starts_with('C') {
-    let comment_id: i64 = topic_id
-      .trim_start_matches('C')
-      .parse()
-      .map_err(|_| StatusCode::BAD_REQUEST)?;
-    let store = state
-      .comment_store
-      .read()
-      .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let html = store.get_html(comment_id).ok_or(StatusCode::NOT_FOUND)?;
-    return Ok(Html(html.clone()));
-  }
-
   let ctx = state.data_context.lock().map_err(|e| {
     eprintln!("Mutex poisoned in get_source_text: {}", e);
     StatusCode::INTERNAL_SERVER_ERROR
   })?;
+
+  // Check source text cache first
+  if let Some(html) = ctx.get_cached_source_text(&audit_id, &topic_id) {
+    return Ok(Html(html.clone()));
+  }
 
   let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
 
@@ -382,7 +373,14 @@ pub async fn get_source_text(
       )
     }
     Node::Documentation(doc_node) => {
-      crate::documentation::formatter::node_to_html(doc_node, &audit_data.nodes)
+      crate::documentation::formatter::node_to_html(
+        doc_node,
+        &audit_data.nodes,
+        &FormatContext {
+          comment_formatting: false,
+          target_topic: topic.clone(),
+        },
+      )
     }
   };
 
@@ -923,22 +921,10 @@ pub async fn create_comment(
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-  // Parse mentions and render HTML
-  let (html, mentions) = {
-    let ctx = state
-      .data_context
-      .lock()
-      .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
-
-    let mentions = parser::parse_comment(&payload.content, audit_data);
-    let html = formatter::render_comment_html(&payload.content);
-    (html, mentions)
-  };
-
   let comment_topic_id = comment.comment_topic_id();
+  let comment_topic = comment.comment_topic();
 
-  // Register comment in topic_metadata and wire up mentions
+  // Parse mentions, render HTML, register in audit_data, and cache source text
   let mut mentions_updates: Vec<(String, Vec<ReferenceGroupResponse>)> =
     Vec::new();
   {
@@ -948,6 +934,10 @@ pub async fn create_comment(
       .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let audit_data =
       ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+
+    let (mentions, ast) = parser::parse_comment(&payload.content, audit_data);
+    let html =
+      formatter::render_comment_html(&ast, &comment_topic, &audit_data.nodes);
 
     store::register_comment_in_audit_data(
       audit_data, &comment, &scope, &mentions,
@@ -970,15 +960,9 @@ pub async fn create_comment(
         }
       }
     }
-  }
 
-  // Update in-memory store
-  {
-    let mut store = state
-      .comment_store
-      .write()
-      .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    store.insert(comment.id, html, mentions);
+    // Cache rendered HTML
+    ctx.cache_source_text(&audit_id, &comment_topic_id, html);
   }
 
   // Broadcast via WebSocket
@@ -1008,26 +992,42 @@ pub async fn get_comments_mentioning_topic(
     "GET /api/v1/audits/{}/mentions/{}",
     audit_id, mentioned_topic_id
   );
-  // Look up comment IDs from in-memory store
-  let comment_ids = {
-    let store = state
-      .comment_store
-      .read()
-      .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    store.get_comments_mentioning(&mentioned_topic_id)
-  };
 
-  // Fetch raw comments from database to filter by audit_id
-  let comments = db::get_comments_by_ids(&state.db, &comment_ids)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+  let ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in get_comments_mentioning_topic: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+  let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
 
-  // Filter by audit_id and collect topic IDs
-  let comment_topic_ids = comments
-    .iter()
-    .filter(|c| c.audit_id == audit_id)
-    .map(|c| c.comment_topic_id())
-    .collect();
+  let mentioned_topic = new_topic(&mentioned_topic_id);
+  let topic_meta = audit_data
+    .topic_metadata
+    .get(&mentioned_topic)
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+  // Collect comment topic IDs from the mentions reference groups
+  let mut comment_topic_ids: Vec<String> = Vec::new();
+  for group in topic_meta.mentions() {
+    for reference in group.scope_references() {
+      if let Some(mention_topics) = reference.mention_topics() {
+        for t in mention_topics {
+          comment_topic_ids.push(t.id.clone());
+        }
+      }
+    }
+    for nested in group.nested_references() {
+      for reference in nested.references() {
+        if let Some(mention_topics) = reference.mention_topics() {
+          for t in mention_topics {
+            comment_topic_ids.push(t.id.clone());
+          }
+        }
+      }
+    }
+  }
+
+  comment_topic_ids.sort_unstable();
+  comment_topic_ids.dedup();
 
   Ok(Json(CommentListResponse { comment_topic_ids }))
 }

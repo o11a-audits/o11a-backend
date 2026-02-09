@@ -37,3 +37,21 @@ pub fn new_documentation_topic(doc_id: i32) -> Topic {
     id: format!("D{}", doc_id),
   }
 }
+
+pub fn new_comment_topic(comment_id: i32) -> Topic {
+  Topic {
+    id: format!("C{}", comment_id),
+  }
+}
+
+pub fn new_invariant_topic(invariant_id: i32) -> Topic {
+  Topic {
+    id: format!("I{}", invariant_id),
+  }
+}
+
+pub fn new_attack_vector_topic(id: i32) -> Topic {
+  Topic {
+    id: format!("A{}", id),
+  }
+}

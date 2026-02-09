@@ -6,4 +6,3 @@ pub mod store;
 pub mod websocket;
 
 pub use models::{CommentEvent, CommentStatus, CommentType};
-pub use store::CommentStore;

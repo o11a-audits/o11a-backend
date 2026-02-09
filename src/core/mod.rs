@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 pub mod project;
 pub mod topic;
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 // ============================================================================
 // Solidity Type System (for checker module)
@@ -159,6 +159,8 @@ pub struct AuditData {
 pub struct DataContext {
   // Map of audit_id to audit data
   pub audits: BTreeMap<String, AuditData>,
+  /// Cached rendered HTML keyed by (audit_id, topic_id)
+  pub source_text_cache: HashMap<String, HashMap<String, String>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1162,6 +1164,7 @@ pub fn new_audit_data(
 pub fn new_data_context() -> DataContext {
   DataContext {
     audits: BTreeMap::new(),
+    source_text_cache: HashMap::new(),
   }
 }
 
@@ -1200,6 +1203,32 @@ impl DataContext {
   /// Lists all audit IDs
   pub fn list_audits(&self) -> Vec<String> {
     self.audits.keys().cloned().collect()
+  }
+
+  /// Cache rendered source text HTML for a topic
+  pub fn cache_source_text(
+    &mut self,
+    audit_id: &str,
+    topic_id: &str,
+    html: String,
+  ) {
+    self
+      .source_text_cache
+      .entry(audit_id.to_string())
+      .or_default()
+      .insert(topic_id.to_string(), html);
+  }
+
+  /// Get cached source text HTML for a topic
+  pub fn get_cached_source_text(
+    &self,
+    audit_id: &str,
+    topic_id: &str,
+  ) -> Option<&String> {
+    self
+      .source_text_cache
+      .get(audit_id)
+      .and_then(|m| m.get(topic_id))
   }
 }
 

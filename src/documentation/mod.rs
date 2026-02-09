@@ -1,4 +1,4 @@
-pub use formatter::node_to_html;
+pub use formatter::{FormatContext, node_to_html};
 pub use parser::{DocumentationAST, DocumentationNode};
 
 pub mod analyzer;

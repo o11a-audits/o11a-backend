@@ -15,5 +15,4 @@ tower = "0.5"
 tower-http = { version = "0.6", features = ["cors"] }
 markdown = "1.0.0-alpha.20"
 regex = "1.10"
-pulldown-cmark = "0.12"
 futures = "0.3"

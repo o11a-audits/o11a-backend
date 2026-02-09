@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
 pub use crate::api::{ReferenceGroupResponse, ScopeInfo};
+use crate::core::topic;
 
 /// Reserved author IDs
 pub const AUTHOR_SYSTEM: i64 = 1;
@@ -155,6 +156,10 @@ impl Comment {
   /// Returns this comment's topic ID (e.g., "C42" for id=42)
   pub fn comment_topic_id(&self) -> String {
     format!("C{}", self.id)
+  }
+
+  pub fn comment_topic(&self) -> topic::Topic {
+    topic::new_comment_topic(self.id.try_into().unwrap())
   }
 
   /// Returns the parsed comment type

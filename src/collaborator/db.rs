@@ -1,5 +1,4 @@
 use crate::collaborator::models::*;
-use crate::collaborator::store::CommentStore;
 use crate::collaborator::{formatter, parser};
 use crate::core::DataContext;
 use sqlx::SqlitePool;
@@ -79,14 +78,13 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 // ============================================================================
 
 /// Load and parse all comments on server startup.
-/// Populates the CommentStore and registers each comment in
-/// audit_data.topic_metadata (including mention wiring).
+/// Registers each comment in audit_data.topic_metadata (including mention
+/// wiring) and caches rendered HTML in data_context.source_text_cache.
+/// Returns the number of comments loaded.
 pub async fn load_and_parse_all_comments(
   pool: &SqlitePool,
   data_context: &mut DataContext,
-) -> Result<CommentStore, sqlx::Error> {
-  let mut store = CommentStore::new();
-
+) -> Result<usize, sqlx::Error> {
   // Fetch all non-hidden comments from database
   let comments = sqlx::query_as::<_, Comment>(
     "SELECT * FROM comments WHERE status != 'hidden'",
@@ -94,12 +92,18 @@ pub async fn load_and_parse_all_comments(
   .fetch_all(pool)
   .await?;
 
+  let count = comments.len();
+
   // Parse each comment with its audit's data
-  for comment in comments {
+  for comment in &comments {
     if let Some(audit_data) = data_context.get_audit_mut(&comment.audit_id) {
-      let mentions =
+      let (mentions, ast) =
         parser::parse_comment(&comment.content_markdown, audit_data);
-      let html = formatter::render_comment_html(&comment.content_markdown);
+      let html = formatter::render_comment_html(
+        &ast,
+        &comment.comment_topic(),
+        &audit_data.nodes,
+      );
 
       // Parse scope from stored JSON
       let scope: crate::api::ScopeInfo =
@@ -110,11 +114,16 @@ pub async fn load_and_parse_all_comments(
         audit_data, &comment, &scope, &mentions,
       );
 
-      store.insert(comment.id, html, mentions);
+      // Cache rendered HTML
+      data_context.cache_source_text(
+        &comment.audit_id,
+        &comment.comment_topic_id(),
+        html,
+      );
     }
   }
 
-  Ok(store)
+  Ok(count)
 }
 
 // ============================================================================

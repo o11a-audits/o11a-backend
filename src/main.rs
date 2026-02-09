@@ -1,5 +1,5 @@
 use o11a_backend::api::{AppState, routes};
-use o11a_backend::collaborator::{CommentStore, db as collab_db};
+use o11a_backend::collaborator::db as collab_db;
 use o11a_backend::core::{self, project};
 use o11a_backend::db;
 use std::path::Path;
@@ -61,20 +61,17 @@ async fn main() {
 
   // Load and parse all comments
   println!("Loading comments...");
-  let comment_store = {
+  let comment_count = {
     let mut ctx = data_context.lock().unwrap();
     collab_db::load_and_parse_all_comments(&pool, &mut ctx)
       .await
       .unwrap_or_else(|e| {
         eprintln!("Warning: Failed to load comments: {}", e);
-        CommentStore::new()
+        0
       })
   };
 
-  println!(
-    "Loaded {} comments into store",
-    comment_store.html_cache.len()
-  );
+  println!("Loaded {} comments", comment_count);
 
   // Extract DataContext from Arc<Mutex<>> for AppState
   let data_context = Arc::try_unwrap(data_context)
@@ -84,7 +81,7 @@ async fn main() {
     .expect("Mutex poisoned");
 
   // Create app state with all components
-  let state = AppState::new(pool, data_context, comment_store);
+  let state = AppState::new(pool, data_context);
 
   // Build router
   let app = routes::create_router(state);
