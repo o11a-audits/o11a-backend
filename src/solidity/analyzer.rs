@@ -30,7 +30,7 @@ pub fn analyze(
   // Transform phase: Apply AST transformations before the first pass
   // This wraps function call arguments with Argument nodes and remaps
   // interface member references to their implementation members in the AST.
-  transform::transform_ast(&mut ast_map)?;
+  transform::transform_ast(&mut ast_map, &audit_data.in_scope_files)?;
 
   // First pass: build a comprehensive declaration dictionary
   // This processes every declaration in every file, regardless of scope

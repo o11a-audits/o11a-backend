@@ -15,7 +15,7 @@ use crate::solidity::parser::{
   self, ASTNode, SolidityAST, generate_node_id, get_definition_parameters,
   get_function_return_parameters, get_referenced_function_id,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 // ============================================================================
 // Definition Collection Types
@@ -43,6 +43,8 @@ pub struct StructDefinition {
 pub struct ContractInfo {
   pub node_id: i32,
   pub contract_kind: ContractKind,
+  /// The file this contract is defined in
+  pub container_file: ProjectPath,
   /// Referenced declaration IDs from baseContracts
   pub base_contract_ids: Vec<i32>,
   /// Functions in this contract with their signatures
@@ -99,12 +101,14 @@ pub struct TransformContext {
 /// implementation references without needing a separate reference transfer phase.
 pub fn transform_ast(
   ast_map: &mut BTreeMap<ProjectPath, Vec<SolidityAST>>,
+  in_scope_files: &HashSet<ProjectPath>,
 ) -> Result<(), String> {
   // Phase 1: Collect all definitions and contract info
   let (callables, structs, contracts) = collect_definitions(ast_map);
 
-  // Phase 2: Build interface-to-implementation mapping
-  let interface_to_implementation = build_interface_member_map(&contracts);
+  // Phase 2: Build interface-to-implementation mapping (only for in-scope implementations)
+  let interface_to_implementation =
+    build_interface_member_map(&contracts, in_scope_files);
 
   // Create transform context
   let context = TransformContext {
@@ -142,11 +146,12 @@ fn collect_definitions(
   let mut structs = BTreeMap::new();
   let mut contracts = Vec::new();
 
-  for (_path, asts) in ast_map {
+  for (path, asts) in ast_map {
     for ast in asts {
       for node in &ast.nodes {
         collect_definitions_from_node(
           node,
+          path,
           &mut callables,
           &mut structs,
           &mut contracts,
@@ -161,6 +166,7 @@ fn collect_definitions(
 /// Recursively collects definitions from a node and its children.
 fn collect_definitions_from_node(
   node: &ASTNode,
+  container_file: &ProjectPath,
   callables: &mut BTreeMap<i32, CallableDefinition>,
   structs: &mut BTreeMap<i32, StructDefinition>,
   contracts: &mut Vec<ContractInfo>,
@@ -173,15 +179,24 @@ fn collect_definitions_from_node(
       ..
     } => {
       // Extract contract info for interface mapping
-      if let Some(contract_info) =
-        extract_contract_info(*node_id, signature, contract_nodes)
-      {
+      if let Some(contract_info) = extract_contract_info(
+        *node_id,
+        container_file,
+        signature,
+        contract_nodes,
+      ) {
         contracts.push(contract_info);
       }
 
       // Recurse into contract members
       for child in contract_nodes {
-        collect_definitions_from_node(child, callables, structs, contracts);
+        collect_definitions_from_node(
+          child,
+          container_file,
+          callables,
+          structs,
+          contracts,
+        );
       }
     }
 
@@ -272,7 +287,13 @@ fn collect_definitions_from_node(
     // Recurse into source units
     ASTNode::SourceUnit { nodes, .. } => {
       for child in nodes {
-        collect_definitions_from_node(child, callables, structs, contracts);
+        collect_definitions_from_node(
+          child,
+          container_file,
+          callables,
+          structs,
+          contracts,
+        );
       }
     }
 
@@ -283,6 +304,7 @@ fn collect_definitions_from_node(
 /// Extracts contract info from a ContractDefinition for interface mapping.
 fn extract_contract_info(
   node_id: i32,
+  container_file: &ProjectPath,
   signature: &ASTNode,
   contract_nodes: &[ASTNode],
 ) -> Option<ContractInfo> {
@@ -353,6 +375,7 @@ fn extract_contract_info(
   Some(ContractInfo {
     node_id,
     contract_kind: *contract_kind,
+    container_file: container_file.clone(),
     base_contract_ids,
     functions,
     public_state_variables,
@@ -441,16 +464,22 @@ fn extract_type_string(type_name: &ASTNode) -> Option<String> {
 // ============================================================================
 
 /// Builds a mapping from interface member node IDs to implementation member node IDs.
-/// Only interfaces with exactly one implementation in the project are mapped.
+/// Only interfaces with exactly one in-scope implementation are mapped.
 fn build_interface_member_map(
   contracts: &[ContractInfo],
+  in_scope_files: &HashSet<ProjectPath>,
 ) -> BTreeMap<i32, i32> {
-  // Build a map of interface ID -> list of implementation IDs
+  // Build a map of interface ID -> list of in-scope implementation IDs
   let mut interface_implementations: BTreeMap<i32, Vec<i32>> = BTreeMap::new();
 
   for contract in contracts {
     // Skip interfaces - they can't be implementations
     if contract.contract_kind == ContractKind::Interface {
+      continue;
+    }
+
+    // Only consider implementations that are in scope
+    if !in_scope_files.contains(&contract.container_file) {
       continue;
     }
 
