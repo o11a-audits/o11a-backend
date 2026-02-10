@@ -825,11 +825,11 @@ pub struct OptionalUserIdQuery {
 // ============================================================================
 
 /// GET /api/v1/audits/:audit_id/topics/:topic_id/comments
-/// Returns topic IDs of comments on this topic.
+/// Returns comment topic IDs and types for comments on this topic.
 pub async fn get_topic_comments(
   State(state): State<AppState>,
   Path((audit_id, topic_id)): Path<(String, String)>,
-) -> Result<Json<CommentListResponse>, StatusCode> {
+) -> Result<Json<TopicCommentsResponse>, StatusCode> {
   println!(
     "GET /api/v1/audits/{}/topics/{}/comments",
     audit_id, topic_id
@@ -839,10 +839,15 @@ pub async fn get_topic_comments(
       .await
       .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-  let comment_topic_ids =
-    comments.iter().map(|c| c.comment_topic_id()).collect();
+  let comments = comments
+    .iter()
+    .map(|c| TopicCommentEntry {
+      comment_topic_id: c.comment_topic_id(),
+      comment_type: c.comment_type.clone(),
+    })
+    .collect();
 
-  Ok(Json(CommentListResponse { comment_topic_ids }))
+  Ok(Json(TopicCommentsResponse { comments }))
 }
 
 /// GET /api/v1/audits/:audit_id/comments/:comment_type/:status
@@ -970,6 +975,7 @@ pub async fn create_comment(
     audit_id: audit_id.clone(),
     comment_topic_id: comment_topic_id.clone(),
     target_topic: payload.topic_id.clone(),
+    comment_type: payload.comment_type.clone(),
   });
 
   for (topic_id, updated_mentions) in mentions_updates {

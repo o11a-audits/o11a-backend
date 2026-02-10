@@ -226,6 +226,19 @@ pub struct CommentListResponse {
   pub comment_topic_ids: Vec<String>, // ["C1", "C2", "C3"]
 }
 
+/// Entry in topic comments response
+#[derive(Debug, Clone, Serialize)]
+pub struct TopicCommentEntry {
+  pub comment_topic_id: String,
+  pub comment_type: String,
+}
+
+/// Response for listing comments on a topic
+#[derive(Debug, Clone, Serialize)]
+pub struct TopicCommentsResponse {
+  pub comments: Vec<TopicCommentEntry>,
+}
+
 /// Response for status queries
 #[derive(Debug, Clone, Serialize)]
 pub struct CommentStatusResponse {
@@ -257,6 +270,7 @@ pub enum CommentEvent {
     audit_id: String,
     comment_topic_id: String,
     target_topic: String,
+    comment_type: CommentType,
   },
   /// Status updated - includes new status directly (no need to refetch)
   StatusUpdated {
