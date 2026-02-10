@@ -323,6 +323,7 @@ pub enum UnnamedTopicKind {
   TypeConversion,
   StructConstruction,
   NewExpression,
+  Literal,
   SemanticBlock,
   Break,
   Continue,

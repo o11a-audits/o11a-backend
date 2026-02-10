@@ -1617,6 +1617,7 @@ fn process_second_pass_nodes(
           UnnamedTopicKind::StructConstruction
         }
         ASTNode::NewExpression { .. } => UnnamedTopicKind::NewExpression,
+        ASTNode::Literal { .. } => UnnamedTopicKind::Literal,
         ASTNode::SemanticBlock { .. } => UnnamedTopicKind::SemanticBlock,
         ASTNode::Break { .. } => UnnamedTopicKind::Break,
         ASTNode::Continue { .. } => UnnamedTopicKind::Continue,
