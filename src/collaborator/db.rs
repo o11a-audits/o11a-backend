@@ -180,7 +180,7 @@ pub async fn get_comments_for_topic_raw(
   topic_id: &str,
 ) -> Result<Vec<Comment>, sqlx::Error> {
   sqlx::query_as::<_, Comment>(
-        "SELECT * FROM comments WHERE audit_id = ? AND topic_id = ? AND status != 'hidden' ORDER BY created_at ASC",
+        "SELECT * FROM comments WHERE audit_id = ? AND topic_id = ? AND status != 'hidden' ORDER BY created_at DESC",
     )
     .bind(audit_id)
     .bind(topic_id)
