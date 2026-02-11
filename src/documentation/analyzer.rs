@@ -476,21 +476,28 @@ fn populate_mentions(
         core::Scope::ContainingBlock {
           component,
           member,
-          containing_block,
+          containing_blocks,
           ..
         } => {
           // ContainingBlock-level reference - nested under member
-          let component_sort_key = get_source_location_start(&component, nodes);
-          let member_sort_key = get_source_location_start(&member, nodes);
-          let cb_sort_key = get_source_location_start(&containing_block, nodes);
-          insert_reference(
-            &mut mention_groups,
-            component,
-            component_sort_key,
-            true,
-            Some((member, member_sort_key)),
-            core::Reference::project_reference(containing_block, cb_sort_key),
-          );
+          // Use the innermost (last) containing block
+          if let Some(layer) = containing_blocks.last() {
+            let component_sort_key =
+              get_source_location_start(&component, nodes);
+            let member_sort_key = get_source_location_start(&member, nodes);
+            let cb_sort_key = get_source_location_start(&layer.block, nodes);
+            insert_reference(
+              &mut mention_groups,
+              component,
+              component_sort_key,
+              true,
+              Some((member, member_sort_key)),
+              core::Reference::project_reference(
+                layer.block.clone(),
+                cb_sort_key,
+              ),
+            );
+          }
         }
       }
     }
@@ -962,7 +969,7 @@ Protocol Solvency
         container,
         component,
         member,
-        containing_block,
+        containing_blocks,
       } => {
         // Verify container is our test file
         assert_eq!(
@@ -995,6 +1002,10 @@ Protocol Solvency
         );
 
         // Verify containing_block is the "Solvency Invariants" H3 section (third nested)
+        let containing_block = &containing_blocks
+          .last()
+          .expect("Should have at least one containing block layer")
+          .block;
         let containing_block_metadata =
           audit_data.topic_metadata.get(containing_block);
         assert!(

@@ -4,8 +4,8 @@ use crate::core::topic;
 use crate::core::{self, UnnamedTopicKind};
 use crate::core::{
   AST, DataContext, ElementaryType, FunctionModProperties, NamedTopicKind,
-  Node, ReferenceGroup, RevertCondition, RevertConstraint,
-  RevertConstraintKind, Scope, SolidityType, TopicMetadata, insert_reference,
+  Node, ReferenceGroup, RevertConstraintKind, Scope, SolidityType,
+  TopicMetadata, insert_reference,
 };
 use crate::solidity::parser::{
   self, ASTNode, FunctionVisibility, SolidityAST, VariableVisibility,
@@ -73,7 +73,6 @@ pub fn analyze(
     &mut audit_data.topic_metadata,
     &mut audit_data.function_properties,
     &mut audit_data.variable_types,
-    &mut audit_data.variable_constraints,
   )?;
 
   // Insert ASTs with stubbed nodes
@@ -98,38 +97,16 @@ pub fn analyze(
 }
 
 // ============================================================================
-// First Pass Revert Constraint Types
+// First Pass Revert Types
 // ============================================================================
 
-/// Tracks the context of enclosing if statements during AST traversal.
-/// Used to determine which conditions lead to a revert statement.
+/// A revert or require statement found during first pass traversal.
+/// Only the statement node ID and kind are recorded; control flow context
+/// is derived from scope in the second pass.
 #[derive(Debug, Clone)]
-pub struct IfContext {
-  /// The node ID of the condition expression
-  pub condition_node: i32,
-  /// true if we're in the true branch, false if in else branch
-  pub in_true_branch: bool,
-  /// Variable node IDs referenced in this condition (collected during traversal)
-  pub referenced_variable_nodes: Vec<i32>,
-}
-
-/// A single condition in the path to a revert (first pass, using node IDs).
-#[derive(Debug, Clone)]
-pub struct FirstPassRevertCondition {
-  pub condition_node: i32,
-  pub must_be_true: bool,
-}
-
-/// Represents a constraint from a require or revert statement (first pass).
-#[derive(Debug, Clone)]
-pub struct FirstPassRevertConstraint {
+pub struct FirstPassRevert {
   pub statement_node: i32,
-  /// Chain of if-conditions leading to this revert (outermost first)
-  pub conditions: Vec<FirstPassRevertCondition>,
   pub kind: RevertConstraintKind,
-  /// Node IDs of variables referenced in the condition expressions.
-  /// Collected during first pass traversal when we have access to the full AST.
-  pub referenced_variable_nodes: Vec<i32>,
 }
 
 // ============================================================================
@@ -161,7 +138,7 @@ pub enum FirstPassDeclaration {
     visibility: Visibility,
     name: String,
     referenced_nodes: Vec<ReferencedNode>,
-    revert_constraints: Vec<FirstPassRevertConstraint>,
+    reverts: Vec<FirstPassRevert>,
     function_calls: Vec<i32>,
     variable_mutations: Vec<ReferencedNode>,
   },
@@ -339,7 +316,7 @@ pub enum InScopeDeclaration {
     visibility: Visibility,
     name: String,
     references: Vec<ScopedReference>,
-    revert_constraints: Vec<FirstPassRevertConstraint>,
+    reverts: Vec<FirstPassRevert>,
     function_calls: Vec<i32>,
     variable_mutations: Vec<ReferencedNode>,
   },
@@ -726,17 +703,16 @@ fn process_first_pass_ast_nodes(
         };
 
         let mut referenced_nodes = Vec::new();
-        let mut revert_constraints = Vec::new();
+        let mut reverts = Vec::new();
         let mut function_calls = Vec::new();
         let mut variable_mutations = Vec::new();
 
-        // Process entire function node to find references and revert constraints
+        // Process entire function node to find references and reverts
         collect_references_and_statements(
           node,
           None, // No containing block context initially
-          &[],  // No enclosing if statements initially
           &mut referenced_nodes,
-          &mut revert_constraints,
+          &mut reverts,
           &mut function_calls,
           &mut variable_mutations,
         );
@@ -749,7 +725,7 @@ fn process_first_pass_ast_nodes(
             visibility: function_visibility_to_visibility(visibility),
             name: name.clone(),
             referenced_nodes,
-            revert_constraints,
+            reverts,
             function_calls,
             variable_mutations,
           },
@@ -775,17 +751,16 @@ fn process_first_pass_ast_nodes(
         };
 
         let mut referenced_nodes = Vec::new();
-        let mut revert_constraints = Vec::new();
+        let mut reverts = Vec::new();
         let mut function_calls = Vec::new();
         let mut variable_mutations = Vec::new();
 
-        // Process entire modifier node to find references and revert constraints
+        // Process entire modifier node to find references and reverts
         collect_references_and_statements(
           node,
           None, // No containing block context initially
-          &[],  // No enclosing if statements initially
           &mut referenced_nodes,
-          &mut revert_constraints,
+          &mut reverts,
           &mut function_calls,
           &mut variable_mutations,
         );
@@ -799,7 +774,7 @@ fn process_first_pass_ast_nodes(
             visibility: Visibility::Internal,
             name: name.clone(),
             referenced_nodes,
-            revert_constraints,
+            reverts,
             function_calls,
             variable_mutations,
           },
@@ -1058,14 +1033,15 @@ fn scope_to_self_reference(
     Scope::ContainingBlock {
       component,
       member,
-      containing_block,
+      containing_blocks,
       ..
     } => {
-      // Declaration is within a containing block — use the containing block as
-      // the reference node so the group points to the block rather than the
-      // individual declaration.
+      // Declaration is within a containing block — use the innermost containing
+      // block as the referenceeee node so the group points to the block rather
+      // than the individual declaration.
+      let innermost_block = &containing_blocks.last()?.block;
       Some(ScopedReference {
-        reference_node: containing_block.underlying_id().ok()?,
+        reference_node: innermost_block.underlying_id().ok()?,
         containing_component: component.underlying_id().ok()?,
         containing_member: Some(member.underlying_id().ok()?),
       })
@@ -1315,7 +1291,6 @@ fn second_pass(
   topic_metadata: &mut BTreeMap<topic::Topic, TopicMetadata>,
   function_properties: &mut BTreeMap<topic::Topic, FunctionModProperties>,
   variable_types: &mut BTreeMap<topic::Topic, SolidityType>,
-  variable_constraints: &mut BTreeMap<topic::Topic, Vec<topic::Topic>>,
 ) -> Result<(), String> {
   // Process each AST file
   for (file_path, asts) in ast_map {
@@ -1336,7 +1311,6 @@ fn second_pass(
         topic_metadata,
         function_properties,
         variable_types,
-        variable_constraints,
       )?;
     }
   }
@@ -1382,7 +1356,6 @@ fn process_second_pass_nodes(
   topic_metadata: &mut BTreeMap<topic::Topic, TopicMetadata>,
   function_properties: &mut BTreeMap<topic::Topic, FunctionModProperties>,
   variable_types: &mut BTreeMap<topic::Topic, SolidityType>,
-  variable_constraints: &mut BTreeMap<topic::Topic, Vec<topic::Topic>>,
 ) -> Result<(), String> {
   for node in ast_nodes {
     let node_id = node.node_id();
@@ -1472,73 +1445,18 @@ fn process_second_pass_nodes(
 
       match in_scope_topic_declaration {
         InScopeDeclaration::FunctionMod {
-          revert_constraints: first_pass_constraints,
+          reverts: first_pass_reverts,
           function_calls,
           variable_mutations,
           ..
         } => {
-          // Convert first-pass constraints to final RevertConstraint objects
-          // and collect variable references for the variable_constraints map
-          let final_revert_constraints: Vec<RevertConstraint> =
-            first_pass_constraints
-              .iter()
-              .map(|fp_constraint| {
-                let statement_topic =
-                  topic::new_node_topic(&fp_constraint.statement_node);
-
-                // Convert conditions from node IDs to topics
-                let conditions: Vec<RevertCondition> = fp_constraint
-                  .conditions
-                  .iter()
-                  .map(|cond| RevertCondition {
-                    condition_topic: topic::new_node_topic(
-                      &cond.condition_node,
-                    ),
-                    must_be_true: cond.must_be_true,
-                  })
-                  .collect();
-
-                // Convert pre-collected reference node IDs to topics.
-                // Filter to only include in-scope variable declarations
-                // (excluding constants, enums, structs, etc.)
-                let referenced_variables: Vec<topic::Topic> = fp_constraint
-                  .referenced_variable_nodes
-                  .iter()
-                  .filter_map(|&node_id| {
-                    if let Some(decl) = in_scope_source_topics.get(&node_id) {
-                      if matches!(
-                        decl.declaration_kind(),
-                        NamedTopicKind::StateVariable(_)
-                          | NamedTopicKind::LocalVariable
-                      ) {
-                        return Some(topic::new_node_topic(&node_id));
-                      }
-                    }
-                    None
-                  })
-                  .collect();
-
-                // Index this constraint by each referenced variable
-                for var_topic in &referenced_variables {
-                  variable_constraints
-                    .entry(var_topic.clone())
-                    .or_insert_with(Vec::new)
-                    .push(statement_topic.clone());
-                }
-
-                RevertConstraint {
-                  statement_topic,
-                  conditions,
-                  kind: fp_constraint.kind,
-                  referenced_variables,
-                }
-              })
-              .collect();
-
-          // Keep the simple revert topics list for backwards compatibility
-          let revert_topics: Vec<topic::Topic> = first_pass_constraints
+          // Convert first-pass reverts to RevertInfo (topic + kind)
+          let reverts: Vec<core::RevertInfo> = first_pass_reverts
             .iter()
-            .map(|c| topic::new_node_topic(&c.statement_node))
+            .map(|fp| core::RevertInfo {
+              topic: topic::new_node_topic(&fp.statement_node),
+              kind: fp.kind,
+            })
             .collect();
 
           let call_topics: Vec<topic::Topic> = function_calls
@@ -1555,10 +1473,9 @@ fn process_second_pass_nodes(
               function_properties.insert(
                 topic.clone(),
                 FunctionModProperties::FunctionProperties {
-                  reverts: revert_topics,
+                  reverts,
                   calls: call_topics,
                   mutations: mutation_topics,
-                  revert_constraints: final_revert_constraints,
                 },
               );
             }
@@ -1566,10 +1483,9 @@ fn process_second_pass_nodes(
               function_properties.insert(
                 topic.clone(),
                 FunctionModProperties::ModifierProperties {
-                  reverts: revert_topics,
+                  reverts,
                   calls: call_topics,
                   mutations: mutation_topics,
-                  revert_constraints: final_revert_constraints,
                 },
               );
             }
@@ -1678,83 +1594,266 @@ fn process_second_pass_nodes(
     }
 
     // Process children with appropriate context
-    let child_nodes = node.nodes();
-    if !child_nodes.is_empty() {
-      let scope = match node {
-        // Do NOT add signature nodes to scope, it makes traversal annoying.
-        // Signature nodes can still be set to the containing statement
-        // of a reference, and can be rendered alongside the param definitions.
-        ASTNode::SemanticBlock { node_id, .. }
-        | ASTNode::ContractDefinition { node_id, .. }
-        | ASTNode::FunctionDefinition { node_id, .. }
-        | ASTNode::ModifierDefinition { node_id, .. }
-        | ASTNode::StructDefinition { node_id, .. }
-        | ASTNode::EnumDefinition { node_id, .. }
-        | ASTNode::EventDefinition { node_id, .. }
-        | ASTNode::ErrorDefinition { node_id, .. } => {
-          &core::add_to_scope(&scope, topic::new_node_topic(node_id))
-        }
-        _ => scope,
-      };
+    // Control flow nodes add their info to the current scope immediately,
+    // then recurse into their body children with the updated scope.
+    match node {
+      ASTNode::IfStatement {
+        node_id,
+        condition,
+        true_body,
+        false_body,
+        ..
+      } => {
+        let cf_topic = topic::new_node_topic(node_id);
 
-      process_second_pass_nodes(
-        &child_nodes,
-        is_in_scope, // Children inherit parent's in-scope status
-        in_scope_source_topics,
-        in_scope_files,
-        mutations_map,
-        ancestors_map,
-        descendants_map,
-        relatives_map,
-        nodes,
-        scope,
-        topic_metadata,
-        function_properties,
-        variable_types,
-        variable_constraints,
-      )?;
+        // Process condition without control flow context
+        process_second_pass_nodes(
+          &vec![condition.as_ref()],
+          is_in_scope,
+          in_scope_source_topics,
+          in_scope_files,
+          mutations_map,
+          ancestors_map,
+          descendants_map,
+          relatives_map,
+          nodes,
+          scope,
+          topic_metadata,
+          function_properties,
+          variable_types,
+        )?;
+
+        // Process true body with True branch control flow added to scope
+        let true_cf = core::ControlFlowInfo {
+          topic: cf_topic.clone(),
+          kind: core::ControlFlowKind::If(core::ControlFlowBranch::True),
+        };
+        let true_scope = core::add_control_flow_to_scope(scope, true_cf);
+        process_second_pass_nodes(
+          &vec![true_body.as_ref()],
+          is_in_scope,
+          in_scope_source_topics,
+          in_scope_files,
+          mutations_map,
+          ancestors_map,
+          descendants_map,
+          relatives_map,
+          nodes,
+          &true_scope,
+          topic_metadata,
+          function_properties,
+          variable_types,
+        )?;
+
+        // Process false body with False branch control flow added to scope
+        if let Some(false_body) = false_body {
+          let false_cf = core::ControlFlowInfo {
+            topic: cf_topic,
+            kind: core::ControlFlowKind::If(core::ControlFlowBranch::False),
+          };
+          let false_scope = core::add_control_flow_to_scope(scope, false_cf);
+          process_second_pass_nodes(
+            &vec![false_body.as_ref()],
+            is_in_scope,
+            in_scope_source_topics,
+            in_scope_files,
+            mutations_map,
+            ancestors_map,
+            descendants_map,
+            relatives_map,
+            nodes,
+            &false_scope,
+            topic_metadata,
+            function_properties,
+            variable_types,
+          )?;
+        }
+      }
+
+      ASTNode::ForStatement {
+        node_id,
+        body,
+        condition,
+        initialization_expression,
+        loop_expression,
+        ..
+      } => {
+        let cf = core::ControlFlowInfo {
+          topic: topic::new_node_topic(node_id),
+          kind: core::ControlFlowKind::For,
+        };
+
+        // Process body with control flow added to scope
+        let cf_scope = core::add_control_flow_to_scope(scope, cf);
+        process_second_pass_nodes(
+          &vec![body.as_ref()],
+          is_in_scope,
+          in_scope_source_topics,
+          in_scope_files,
+          mutations_map,
+          ancestors_map,
+          descendants_map,
+          relatives_map,
+          nodes,
+          &cf_scope,
+          topic_metadata,
+          function_properties,
+          variable_types,
+        )?;
+
+        // Process non-body children without control flow context
+        let mut non_body: Vec<&ASTNode> = Vec::new();
+        if let Some(init) = initialization_expression {
+          non_body.push(init.as_ref());
+        }
+        if let Some(cond) = condition {
+          non_body.push(cond.as_ref());
+        }
+        if let Some(loop_expr) = loop_expression {
+          non_body.push(loop_expr.as_ref());
+        }
+        if !non_body.is_empty() {
+          process_second_pass_nodes(
+            &non_body,
+            is_in_scope,
+            in_scope_source_topics,
+            in_scope_files,
+            mutations_map,
+            ancestors_map,
+            descendants_map,
+            relatives_map,
+            nodes,
+            scope,
+            topic_metadata,
+            function_properties,
+            variable_types,
+          )?;
+        }
+      }
+
+      ASTNode::WhileStatement {
+        node_id,
+        condition,
+        body,
+        ..
+      } => {
+        let cf = core::ControlFlowInfo {
+          topic: topic::new_node_topic(node_id),
+          kind: core::ControlFlowKind::While,
+        };
+
+        // Process condition without control flow context
+        process_second_pass_nodes(
+          &vec![condition.as_ref()],
+          is_in_scope,
+          in_scope_source_topics,
+          in_scope_files,
+          mutations_map,
+          ancestors_map,
+          descendants_map,
+          relatives_map,
+          nodes,
+          scope,
+          topic_metadata,
+          function_properties,
+          variable_types,
+        )?;
+
+        // Process body with control flow added to scope
+        if let Some(body) = body {
+          let cf_scope = core::add_control_flow_to_scope(scope, cf);
+          process_second_pass_nodes(
+            &vec![body.as_ref()],
+            is_in_scope,
+            in_scope_source_topics,
+            in_scope_files,
+            mutations_map,
+            ancestors_map,
+            descendants_map,
+            relatives_map,
+            nodes,
+            &cf_scope,
+            topic_metadata,
+            function_properties,
+            variable_types,
+          )?;
+        }
+      }
+
+      ASTNode::DoWhileStatement { node_id, body, .. } => {
+        let cf = core::ControlFlowInfo {
+          topic: topic::new_node_topic(node_id),
+          kind: core::ControlFlowKind::DoWhile,
+        };
+
+        // Process body with control flow added to scope
+        if let Some(body) = body {
+          let cf_scope = core::add_control_flow_to_scope(scope, cf);
+          process_second_pass_nodes(
+            &vec![body.as_ref()],
+            is_in_scope,
+            in_scope_source_topics,
+            in_scope_files,
+            mutations_map,
+            ancestors_map,
+            descendants_map,
+            relatives_map,
+            nodes,
+            &cf_scope,
+            topic_metadata,
+            function_properties,
+            variable_types,
+          )?;
+        }
+      }
+
+      // Default: process all children generically
+      _ => {
+        let child_nodes = node.nodes();
+        if !child_nodes.is_empty() {
+          let scope = match node {
+            ASTNode::SemanticBlock { node_id, .. }
+            | ASTNode::ContractDefinition { node_id, .. }
+            | ASTNode::FunctionDefinition { node_id, .. }
+            | ASTNode::ModifierDefinition { node_id, .. }
+            | ASTNode::StructDefinition { node_id, .. }
+            | ASTNode::EnumDefinition { node_id, .. }
+            | ASTNode::EventDefinition { node_id, .. }
+            | ASTNode::ErrorDefinition { node_id, .. } => {
+              core::add_to_scope(scope, topic::new_node_topic(node_id))
+            }
+            // Transparent nodes (e.g. Block) — pass scope through unchanged
+            _ => scope.clone(),
+          };
+
+          process_second_pass_nodes(
+            &child_nodes,
+            is_in_scope,
+            in_scope_source_topics,
+            in_scope_files,
+            mutations_map,
+            ancestors_map,
+            descendants_map,
+            relatives_map,
+            nodes,
+            &scope,
+            topic_metadata,
+            function_properties,
+            variable_types,
+          )?;
+        }
+      }
     }
   }
 
   Ok(())
 }
 
-/// Collects all reference node IDs from an expression during first pass.
-/// This recursively traverses the expression tree to find all Identifier/IdentifierPath
-/// nodes. The actual filtering to variables happens during the second pass when we
-/// have the in-scope declarations.
-fn collect_potential_variable_refs_from_expression(
-  node: &ASTNode,
-  refs: &mut Vec<i32>,
-) {
-  match node {
-    ASTNode::Identifier {
-      referenced_declaration,
-      ..
-    }
-    | ASTNode::IdentifierPath {
-      referenced_declaration,
-      ..
-    } => {
-      if !refs.contains(referenced_declaration) {
-        refs.push(*referenced_declaration);
-      }
-    }
-    _ => {}
-  }
-
-  // Recursively process all children
-  for child in node.nodes() {
-    collect_potential_variable_refs_from_expression(child, refs);
-  }
-}
-
 fn collect_references_and_statements(
   node: &ASTNode,
   current_containing_block: Option<i32>,
-  enclosing_ifs: &[IfContext],
   referenced_nodes: &mut Vec<ReferencedNode>,
-  revert_constraints: &mut Vec<FirstPassRevertConstraint>,
+  reverts: &mut Vec<FirstPassRevert>,
   function_calls: &mut Vec<i32>,
   variable_mutations: &mut Vec<ReferencedNode>,
 ) {
@@ -1796,17 +1895,14 @@ fn collect_references_and_statements(
       }
     }
 
-    // Function calls - check for require() which creates a constraint
+    // Function calls - check for require()/revert()
     ASTNode::FunctionCall {
       node_id,
       expression,
-      arguments,
       referenced_return_declarations,
       ..
     } => {
       // Add references to the function's return parameter declarations
-      // This links the function call to the return variable nodes, enabling
-      // ancestry traversal through the return values
       if let Some(block_id) = containing_block {
         for &return_decl_id in referenced_return_declarations {
           referenced_nodes.push(ReferencedNode {
@@ -1823,72 +1919,14 @@ fn collect_references_and_statements(
       } = expression.as_ref()
       {
         if name == "require" {
-          // require(condition) reverts when condition is false
-          // Create a constraint with the condition and must_be_true=false
-          if !arguments.is_empty() {
-            let condition_node = arguments[0].node_id();
-
-            // Collect variable references from require's condition
-            let mut referenced_variable_nodes: Vec<i32> = Vec::new();
-            collect_potential_variable_refs_from_expression(
-              &arguments[0],
-              &mut referenced_variable_nodes,
-            );
-
-            // Also collect from enclosing if conditions
-            for ctx in enclosing_ifs {
-              for var_ref in &ctx.referenced_variable_nodes {
-                if !referenced_variable_nodes.contains(var_ref) {
-                  referenced_variable_nodes.push(*var_ref);
-                }
-              }
-            }
-
-            let mut conditions: Vec<FirstPassRevertCondition> = enclosing_ifs
-              .iter()
-              .map(|ctx| FirstPassRevertCondition {
-                condition_node: ctx.condition_node,
-                must_be_true: ctx.in_true_branch,
-              })
-              .collect();
-            // Add the require condition itself (reverts when false)
-            conditions.push(FirstPassRevertCondition {
-              condition_node,
-              must_be_true: false,
-            });
-            revert_constraints.push(FirstPassRevertConstraint {
-              statement_node: *node_id,
-              conditions,
-              kind: RevertConstraintKind::Require,
-              referenced_variable_nodes,
-            });
-          }
-        } else if name == "revert" {
-          // revert() as a function call (with optional error)
-          // Capture all enclosing if conditions
-          let conditions: Vec<FirstPassRevertCondition> = enclosing_ifs
-            .iter()
-            .map(|ctx| FirstPassRevertCondition {
-              condition_node: ctx.condition_node,
-              must_be_true: ctx.in_true_branch,
-            })
-            .collect();
-
-          // Collect variable references from enclosing if conditions
-          let mut referenced_variable_nodes: Vec<i32> = Vec::new();
-          for ctx in enclosing_ifs {
-            for var_ref in &ctx.referenced_variable_nodes {
-              if !referenced_variable_nodes.contains(var_ref) {
-                referenced_variable_nodes.push(*var_ref);
-              }
-            }
-          }
-
-          revert_constraints.push(FirstPassRevertConstraint {
+          reverts.push(FirstPassRevert {
             statement_node: *node_id,
-            conditions,
+            kind: RevertConstraintKind::Require,
+          });
+        } else if name == "revert" {
+          reverts.push(FirstPassRevert {
+            statement_node: *node_id,
             kind: RevertConstraintKind::Revert,
-            referenced_variable_nodes,
           });
         } else {
           // For other function calls, extract the function reference
@@ -1897,97 +1935,12 @@ fn collect_references_and_statements(
       }
     }
 
-    // RevertStatement - capture all enclosing if conditions
+    // RevertStatement
     ASTNode::RevertStatement { node_id, .. } => {
-      let conditions: Vec<FirstPassRevertCondition> = enclosing_ifs
-        .iter()
-        .map(|ctx| FirstPassRevertCondition {
-          condition_node: ctx.condition_node,
-          must_be_true: ctx.in_true_branch,
-        })
-        .collect();
-
-      // Collect variable references from enclosing if conditions
-      let mut referenced_variable_nodes: Vec<i32> = Vec::new();
-      for ctx in enclosing_ifs {
-        for var_ref in &ctx.referenced_variable_nodes {
-          if !referenced_variable_nodes.contains(var_ref) {
-            referenced_variable_nodes.push(*var_ref);
-          }
-        }
-      }
-
-      revert_constraints.push(FirstPassRevertConstraint {
+      reverts.push(FirstPassRevert {
         statement_node: *node_id,
-        conditions,
         kind: RevertConstraintKind::Revert,
-        referenced_variable_nodes,
       });
-    }
-
-    // IfStatement - handle true and false branches with different contexts
-    ASTNode::IfStatement {
-      condition,
-      true_body,
-      false_body,
-      ..
-    } => {
-      // First, collect references from the condition itself
-      collect_references_and_statements(
-        condition,
-        containing_block,
-        enclosing_ifs,
-        referenced_nodes,
-        revert_constraints,
-        function_calls,
-        variable_mutations,
-      );
-
-      // Collect variable references from the condition expression
-      let mut condition_var_refs: Vec<i32> = Vec::new();
-      collect_potential_variable_refs_from_expression(
-        condition,
-        &mut condition_var_refs,
-      );
-
-      // Process true branch with condition context (must_be_true = true)
-      let mut true_branch_ifs = enclosing_ifs.to_vec();
-      true_branch_ifs.push(IfContext {
-        condition_node: condition.node_id(),
-        in_true_branch: true,
-        referenced_variable_nodes: condition_var_refs.clone(),
-      });
-      collect_references_and_statements(
-        true_body,
-        containing_block,
-        &true_branch_ifs,
-        referenced_nodes,
-        revert_constraints,
-        function_calls,
-        variable_mutations,
-      );
-
-      // Process false branch (else) with condition context (must_be_true = false)
-      if let Some(false_branch) = false_body {
-        let mut false_branch_ifs = enclosing_ifs.to_vec();
-        false_branch_ifs.push(IfContext {
-          condition_node: condition.node_id(),
-          in_true_branch: false,
-          referenced_variable_nodes: condition_var_refs,
-        });
-        collect_references_and_statements(
-          false_branch,
-          containing_block,
-          &false_branch_ifs,
-          referenced_nodes,
-          revert_constraints,
-          function_calls,
-          variable_mutations,
-        );
-      }
-
-      // Don't process children again - we handled them above
-      return;
     }
 
     // Mutations - Assignments (including compound assignments like +=, -=, etc.)
@@ -1996,7 +1949,6 @@ fn collect_references_and_statements(
       left_hand_side,
       ..
     } => {
-      // Extract the base variable being mutated from the left hand side
       if let Some(referenced_declaration) =
         extract_base_variable_reference(left_hand_side)
       {
@@ -2014,7 +1966,6 @@ fn collect_references_and_statements(
       sub_expression,
       ..
     } => {
-      // Only increment, decrement, and delete are mutating operators
       if matches!(
         operator,
         parser::UnaryOperator::Increment
@@ -2041,9 +1992,8 @@ fn collect_references_and_statements(
     collect_references_and_statements(
       child,
       containing_block,
-      enclosing_ifs,
       referenced_nodes,
-      revert_constraints,
+      reverts,
       function_calls,
       variable_mutations,
     );
@@ -2257,7 +2207,7 @@ fn process_tree_shake_declarations(
       declaration_kind,
       visibility,
       name,
-      revert_constraints,
+      reverts,
       function_calls,
       variable_mutations,
       ..
@@ -2297,7 +2247,7 @@ fn process_tree_shake_declarations(
         visibility: visibility.clone(),
         name: name.clone(),
         references,
-        revert_constraints: revert_constraints.clone(),
+        reverts: reverts.clone(),
         function_calls: filtered_function_calls,
         variable_mutations: variable_mutations.clone(),
       }
@@ -3229,8 +3179,10 @@ fn populate_expanded_references(
               // Check if this declaration is inside a containing block
               let containing_block_id = match scope {
                 Scope::ContainingBlock {
-                  containing_block, ..
-                } => containing_block.underlying_id().ok(),
+                  containing_blocks, ..
+                } => containing_blocks
+                  .last()
+                  .and_then(|layer| layer.block.underlying_id().ok()),
                 _ => None,
               };
 
@@ -3394,8 +3346,10 @@ fn populate_ancestry(
               // Check if this declaration is inside a containing block
               let containing_block_id = match scope {
                 Scope::ContainingBlock {
-                  containing_block, ..
-                } => containing_block.underlying_id().ok(),
+                  containing_blocks, ..
+                } => containing_blocks
+                  .last()
+                  .and_then(|layer| layer.block.underlying_id().ok()),
                 _ => None,
               };
 
@@ -3801,97 +3755,29 @@ mod tests {
   }
 
   // =========================================================================
-  // Constraint Collection Tests
+  // First Pass Revert Tests
   // =========================================================================
 
   #[test]
-  fn test_if_context_tracking() {
-    // Test that IfContext correctly tracks condition node, branch, and variable refs
-    let ctx = IfContext {
-      condition_node: 42,
-      in_true_branch: true,
-      referenced_variable_nodes: vec![100, 101],
-    };
-    assert_eq!(ctx.condition_node, 42);
-    assert!(ctx.in_true_branch);
-    assert_eq!(ctx.referenced_variable_nodes, vec![100, 101]);
-
-    let ctx_false = IfContext {
-      condition_node: 43,
-      in_true_branch: false,
-      referenced_variable_nodes: vec![],
-    };
-    assert_eq!(ctx_false.condition_node, 43);
-    assert!(!ctx_false.in_true_branch);
-    assert!(ctx_false.referenced_variable_nodes.is_empty());
-  }
-
-  #[test]
-  fn test_first_pass_revert_constraint_require() {
-    // Test creating a require constraint with variable references
-    let constraint = FirstPassRevertConstraint {
+  fn test_first_pass_revert_require() {
+    let revert = FirstPassRevert {
       statement_node: 100,
-      conditions: vec![FirstPassRevertCondition {
-        condition_node: 101,
-        must_be_true: false, // require reverts when condition is false
-      }],
       kind: RevertConstraintKind::Require,
-      referenced_variable_nodes: vec![200, 201], // Variables in the condition
     };
 
-    assert_eq!(constraint.statement_node, 100);
-    assert_eq!(constraint.conditions.len(), 1);
-    assert_eq!(constraint.conditions[0].condition_node, 101);
-    assert!(!constraint.conditions[0].must_be_true);
-    assert_eq!(constraint.kind, RevertConstraintKind::Require);
-    assert_eq!(constraint.referenced_variable_nodes, vec![200, 201]);
+    assert_eq!(revert.statement_node, 100);
+    assert_eq!(revert.kind, RevertConstraintKind::Require);
   }
 
   #[test]
-  fn test_first_pass_revert_constraint_nested_if() {
-    // Test creating a revert constraint with nested if conditions
-    // Simulating: if (a > 0) { if (b < 10) { revert(); } }
-    let constraint = FirstPassRevertConstraint {
+  fn test_first_pass_revert_revert() {
+    let revert = FirstPassRevert {
       statement_node: 200,
-      conditions: vec![
-        FirstPassRevertCondition {
-          condition_node: 201, // a > 0
-          must_be_true: true,
-        },
-        FirstPassRevertCondition {
-          condition_node: 202, // b < 10
-          must_be_true: true,
-        },
-      ],
       kind: RevertConstraintKind::Revert,
-      referenced_variable_nodes: vec![300, 301], // a and b
     };
 
-    assert_eq!(constraint.statement_node, 200);
-    assert_eq!(constraint.conditions.len(), 2);
-    assert!(constraint.conditions[0].must_be_true);
-    assert!(constraint.conditions[1].must_be_true);
-    assert_eq!(constraint.kind, RevertConstraintKind::Revert);
-    assert_eq!(constraint.referenced_variable_nodes.len(), 2);
-  }
-
-  #[test]
-  fn test_first_pass_revert_constraint_else_branch() {
-    // Test creating a revert constraint in an else branch
-    // Simulating: if (condition) { ... } else { revert(); }
-    let constraint = FirstPassRevertConstraint {
-      statement_node: 300,
-      conditions: vec![FirstPassRevertCondition {
-        condition_node: 301,
-        must_be_true: false, // In else branch, condition must be false
-      }],
-      kind: RevertConstraintKind::Revert,
-      referenced_variable_nodes: vec![400],
-    };
-
-    assert_eq!(constraint.conditions.len(), 1);
-    assert!(!constraint.conditions[0].must_be_true);
-    assert_eq!(constraint.referenced_variable_nodes, vec![400]);
+    assert_eq!(revert.statement_node, 200);
+    assert_eq!(revert.kind, RevertConstraintKind::Revert);
   }
 
   #[test]

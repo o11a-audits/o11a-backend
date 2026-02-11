@@ -389,6 +389,62 @@ pub async fn get_source_text(
 
 // Topic metadata response
 
+/// Serializable control flow kind for API responses.
+/// Flattens `ControlFlowKind::If(ControlFlowBranch)` into `if_true`/`if_false`
+/// for a clean single-discriminator JSON representation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ControlFlowKindInfo {
+  #[serde(rename = "if_true")]
+  IfTrue,
+  #[serde(rename = "if_false")]
+  IfFalse,
+  For,
+  While,
+  DoWhile,
+}
+
+impl ControlFlowKindInfo {
+  pub fn from_core(kind: &core::ControlFlowKind) -> Self {
+    match kind {
+      core::ControlFlowKind::If(core::ControlFlowBranch::True) => Self::IfTrue,
+      core::ControlFlowKind::If(core::ControlFlowBranch::False) => {
+        Self::IfFalse
+      }
+      core::ControlFlowKind::For => Self::For,
+      core::ControlFlowKind::While => Self::While,
+      core::ControlFlowKind::DoWhile => Self::DoWhile,
+    }
+  }
+
+  pub fn to_core(&self) -> core::ControlFlowKind {
+    match self {
+      Self::IfTrue => core::ControlFlowKind::If(core::ControlFlowBranch::True),
+      Self::IfFalse => {
+        core::ControlFlowKind::If(core::ControlFlowBranch::False)
+      }
+      Self::For => core::ControlFlowKind::For,
+      Self::While => core::ControlFlowKind::While,
+      Self::DoWhile => core::ControlFlowKind::DoWhile,
+    }
+  }
+}
+
+/// Serializable control flow info for API responses.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ControlFlowInfoResponse {
+  pub topic: String,
+  pub kind: ControlFlowKindInfo,
+}
+
+/// One layer in the containing block nesting chain for API responses.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContainingBlockLayerInfo {
+  pub block: String,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub control_flow: Option<ControlFlowInfoResponse>,
+}
+
 /// Serializable scope information for storing in database and API responses
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScopeInfo {
@@ -399,8 +455,8 @@ pub struct ScopeInfo {
   pub component: Option<String>,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub member: Option<String>,
-  #[serde(skip_serializing_if = "Option::is_none")]
-  pub containing_block: Option<String>,
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub containing_blocks: Vec<ContainingBlockLayerInfo>,
 }
 
 impl ScopeInfo {
@@ -412,14 +468,14 @@ impl ScopeInfo {
         container: None,
         component: None,
         member: None,
-        containing_block: None,
+        containing_blocks: vec![],
       },
       core::Scope::Container { container } => ScopeInfo {
         scope_type: "Container".to_string(),
         container: Some(container.file_path.clone()),
         component: None,
         member: None,
-        containing_block: None,
+        containing_blocks: vec![],
       },
       core::Scope::Component {
         container,
@@ -429,7 +485,7 @@ impl ScopeInfo {
         container: Some(container.file_path.clone()),
         component: Some(component.id.clone()),
         member: None,
-        containing_block: None,
+        containing_blocks: vec![],
       },
       core::Scope::Member {
         container,
@@ -440,19 +496,30 @@ impl ScopeInfo {
         container: Some(container.file_path.clone()),
         component: Some(component.id.clone()),
         member: Some(member.id.clone()),
-        containing_block: None,
+        containing_blocks: vec![],
       },
       core::Scope::ContainingBlock {
         container,
         component,
         member,
-        containing_block,
+        containing_blocks,
       } => ScopeInfo {
         scope_type: "ContainingBlock".to_string(),
         container: Some(container.file_path.clone()),
         component: Some(component.id.clone()),
         member: Some(member.id.clone()),
-        containing_block: Some(containing_block.id.clone()),
+        containing_blocks: containing_blocks
+          .iter()
+          .map(|layer| ContainingBlockLayerInfo {
+            block: layer.block.id.clone(),
+            control_flow: layer.control_flow.as_ref().map(|cf| {
+              ControlFlowInfoResponse {
+                topic: cf.topic.id.clone(),
+                kind: ControlFlowKindInfo::from_core(&cf.kind),
+              }
+            }),
+          })
+          .collect(),
       },
     }
   }
@@ -468,11 +535,12 @@ impl ScopeInfo {
   }
 
   /// Returns the lowest (most specific) scope topic ID.
-  /// Returns containing_block > member > component > None for Container/Global.
+  /// Returns innermost containing_block > member > component > None for Container/Global.
   pub fn lowest_scope_topic_id(&self) -> Option<&str> {
     self
-      .containing_block
-      .as_deref()
+      .containing_blocks
+      .last()
+      .map(|l| l.block.as_str())
       .or(self.member.as_deref())
       .or(self.component.as_deref())
   }
@@ -487,7 +555,19 @@ impl ScopeInfo {
         container: container(),
         component: new_topic(self.component.as_ref().unwrap()),
         member: new_topic(self.member.as_ref().unwrap()),
-        containing_block: new_topic(self.containing_block.as_ref().unwrap()),
+        containing_blocks: self
+          .containing_blocks
+          .iter()
+          .map(|layer| core::ContainingBlockLayer {
+            block: new_topic(&layer.block),
+            control_flow: layer.control_flow.as_ref().map(|cf| {
+              core::ControlFlowInfo {
+                topic: new_topic(&cf.topic),
+                kind: cf.kind.to_core(),
+              }
+            }),
+          })
+          .collect(),
       },
       "Member" => core::Scope::Member {
         container: container(),
@@ -513,7 +593,7 @@ impl Default for ScopeInfo {
       container: None,
       component: None,
       member: None,
-      containing_block: None,
+      containing_blocks: vec![],
     }
   }
 }

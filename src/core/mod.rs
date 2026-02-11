@@ -81,33 +81,55 @@ impl ElementaryType {
 // Revert Constraint Types (for checker module)
 // ============================================================================
 
-/// Represents a single condition in the path to a revert.
-/// Multiple conditions form a chain when reverts are nested in if statements.
+// ============================================================================
+// Control Flow Types
+// ============================================================================
+
+/// Describes which control flow statement encloses a containing block layer.
+/// Branch information is encoded directly in the kind — only `If` has branches,
+/// so this avoids a disjoint field that would be meaningless for loops.
 #[derive(Debug, Clone)]
-pub struct RevertCondition {
-  /// The topic of the condition expression (e.g., the if condition)
-  pub condition_topic: topic::Topic,
-  /// Whether the revert happens when this condition is true or false.
-  /// For `if (cond) { revert }` -> must_be_true = true
-  /// For `if (cond) { } else { revert }` -> must_be_true = false
-  pub must_be_true: bool,
+pub struct ControlFlowInfo {
+  /// The topic of the control flow statement node
+  pub topic: topic::Topic,
+  pub kind: ControlFlowKind,
 }
 
-/// Represents a constraint from a require or revert statement.
 #[derive(Debug, Clone)]
-pub struct RevertConstraint {
-  /// The topic of the revert or require statement node
-  pub statement_topic: topic::Topic,
-  /// The chain of conditions leading to this revert.
-  /// Empty for unconditional reverts.
-  /// For require(cond): single entry with cond and must_be_true=false (reverts when false)
-  /// For nested if statements: multiple entries, all must hold for revert to occur
-  pub conditions: Vec<RevertCondition>,
-  /// The kind of revert statement
+pub enum ControlFlowKind {
+  If(ControlFlowBranch),
+  For,
+  While,
+  DoWhile,
+}
+
+#[derive(Debug, Clone)]
+pub enum ControlFlowBranch {
+  True,
+  False,
+}
+
+/// One layer in the containing block nesting chain.
+/// Pairs a semantic block with the optional control flow statement that
+/// it contains.
+#[derive(Debug, Clone)]
+pub struct ContainingBlockLayer {
+  /// The semantic block at this nesting level.
+  pub block: topic::Topic,
+  /// The control flow statement that is contained within this block.
+  /// None if no control flow has been encountered yet at this nesting level.
+  pub control_flow: Option<ControlFlowInfo>,
+}
+
+// ============================================================================
+// Revert Info Types
+// ============================================================================
+
+/// Simple revert/require statement info stored on FunctionModProperties.
+#[derive(Debug, Clone)]
+pub struct RevertInfo {
+  pub topic: topic::Topic,
   pub kind: RevertConstraintKind,
-  /// Variables referenced in the condition expressions.
-  /// Used to index constraints by variable for UI lookup.
-  pub referenced_variables: Vec<topic::Topic>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -151,9 +173,6 @@ pub struct AuditData {
   pub function_properties: BTreeMap<topic::Topic, FunctionModProperties>,
   /// Maps variable topic IDs to their Solidity types (for checker module)
   pub variable_types: BTreeMap<topic::Topic, SolidityType>,
-  /// Maps variable topics to constraint statement topics that reference them.
-  /// Allows UI to show "constraints involving this variable".
-  pub variable_constraints: BTreeMap<topic::Topic, Vec<topic::Topic>>,
 }
 
 pub struct DataContext {
@@ -184,7 +203,7 @@ pub enum AST {
   Documentation(crate::documentation::parser::DocumentationAST),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone)]
 pub enum Scope {
   Global,
   Container {
@@ -203,7 +222,7 @@ pub enum Scope {
     container: ProjectPath,
     component: topic::Topic,
     member: topic::Topic,
-    containing_block: topic::Topic,
+    containing_blocks: Vec<ContainingBlockLayer>,
   },
 }
 
@@ -226,23 +245,78 @@ pub fn add_to_scope(scope: &Scope, topic: topic::Topic) -> Scope {
       container,
       component,
       member,
-    } => Scope::ContainingBlock {
-      container: container.clone(),
-      component: component.clone(),
-      member: member.clone(),
-      containing_block: topic,
-    },
+    } => {
+      let mut containing_blocks = Vec::new();
+      containing_blocks.push(ContainingBlockLayer {
+        block: topic,
+        control_flow: None,
+      });
+      Scope::ContainingBlock {
+        container: container.clone(),
+        component: component.clone(),
+        member: member.clone(),
+        containing_blocks,
+      }
+    }
     Scope::ContainingBlock {
       container,
       component,
       member,
-      ..
-    } => Scope::ContainingBlock {
-      container: container.clone(),
-      component: component.clone(),
-      member: member.clone(),
-      containing_block: topic,
-    },
+      containing_blocks,
+    } => {
+      let mut containing_blocks = containing_blocks.clone();
+      containing_blocks.push(ContainingBlockLayer {
+        block: topic,
+        control_flow: None,
+      });
+      Scope::ContainingBlock {
+        container: container.clone(),
+        component: component.clone(),
+        member: member.clone(),
+        containing_blocks,
+      }
+    }
+  }
+}
+
+/// Attaches control flow information to the innermost containing block layer.
+/// Used when a control flow statement (if/for/while/do-while) is encountered
+/// within a semantic block.
+///
+/// Panics if the scope is not `ContainingBlock` (control flow nodes cannot
+/// exist outside a semantic block) or if the innermost layer already has
+/// control flow info (each block has at most one control flow on a nesting path).
+pub fn add_control_flow_to_scope(
+  scope: &Scope,
+  control_flow: ControlFlowInfo,
+) -> Scope {
+  match scope {
+    Scope::ContainingBlock {
+      container,
+      component,
+      member,
+      containing_blocks,
+    } => {
+      let last = containing_blocks
+        .last()
+        .expect("ContainingBlock scope must have at least one layer");
+      assert!(
+        last.control_flow.is_none(),
+        "Invariant violation: innermost containing block layer already has control flow info"
+      );
+      let mut containing_blocks = containing_blocks.clone();
+      let last_mut = containing_blocks.last_mut().unwrap();
+      last_mut.control_flow = Some(control_flow);
+      Scope::ContainingBlock {
+        container: container.clone(),
+        component: component.clone(),
+        member: member.clone(),
+        containing_blocks,
+      }
+    }
+    _ => panic!(
+      "Invariant violation: control flow node encountered outside a containing block scope"
+    ),
   }
 }
 
@@ -904,28 +978,14 @@ impl TopicMetadata {
 
 pub enum FunctionModProperties {
   FunctionProperties {
-    // Topic IDs of the declarations of the function revert nodes. This is either
-    // the error call for a revert statement, or the literal string node passed
-    // as the second argument to a require call
-    reverts: Vec<topic::Topic>,
-    // Topic IDs of the declarations of the functions called
+    reverts: Vec<RevertInfo>,
     calls: Vec<topic::Topic>,
-    // Topic IDs of the declarations of the state variables mutated
     mutations: Vec<topic::Topic>,
-    /// Full constraint information for the checker module
-    revert_constraints: Vec<RevertConstraint>,
   },
   ModifierProperties {
-    // Topic IDs of the declarations of the modifier revert nodes. This is either
-    // the error call for a revert statement, or the literal string node passed
-    // as the second argument to a require call
-    reverts: Vec<topic::Topic>,
-    // Topic IDs of the declarations of the functions called
+    reverts: Vec<RevertInfo>,
     calls: Vec<topic::Topic>,
-    // Topic IDs of the declarations of the state variables mutated
     mutations: Vec<topic::Topic>,
-    /// Full constraint information for the checker module
-    revert_constraints: Vec<RevertConstraint>,
   },
 }
 
@@ -1158,7 +1218,6 @@ pub fn new_audit_data(
     topic_metadata,
     function_properties: BTreeMap::new(),
     variable_types: BTreeMap::new(),
-    variable_constraints: BTreeMap::new(),
   }
 }
 
