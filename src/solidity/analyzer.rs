@@ -1055,17 +1055,17 @@ fn scope_to_self_reference(
         containing_member: Some(member.underlying_id().ok()?),
       })
     }
-    Scope::SemanticBlock {
+    Scope::ContainingBlock {
       component,
       member,
-      semantic_block,
+      containing_block,
       ..
     } => {
-      // Declaration is within a semantic block — use the semantic block as the
-      // reference node so the group points to the block rather than the
+      // Declaration is within a containing block — use the containing block as
+      // the reference node so the group points to the block rather than the
       // individual declaration.
       Some(ScopedReference {
-        reference_node: semantic_block.underlying_id().ok()?,
+        reference_node: containing_block.underlying_id().ok()?,
         containing_component: component.underlying_id().ok()?,
         containing_member: Some(member.underlying_id().ok()?),
       })
@@ -1162,7 +1162,7 @@ fn build_expanded_reference_groups(
       Scope::Global | Scope::Container { .. } => None,
       Scope::Component { component, .. }
       | Scope::Member { component, .. }
-      | Scope::SemanticBlock { component, .. } => {
+      | Scope::ContainingBlock { component, .. } => {
         component.underlying_id().ok()
       }
     }
@@ -3215,28 +3215,28 @@ fn populate_expanded_references(
           .copied()
           .collect();
 
-        // Collect self-references and track which semantic blocks contain declarations
+        // Collect self-references and track which containing blocks contain declarations
         let mut pending_self_refs: Vec<(ScopedReference, Option<i32>)> =
-          Vec::new(); // (self_ref, containing_semantic_block_id)
+          Vec::new(); // (self_ref, containing_block_id)
 
-        // Map from declaration node_id to its containing semantic block node_id
-        let mut declaration_to_semantic_block: BTreeMap<i32, i32> =
+        // Map from declaration node_id to its containing block node_id
+        let mut declaration_to_containing_block: BTreeMap<i32, i32> =
           BTreeMap::new();
 
         for &rel_id in &all_related {
           if let Some(scope) = scope_map.get(&rel_id) {
             if let Some(self_ref) = scope_to_self_reference(scope, rel_id) {
-              // Check if this declaration is inside a semantic block
+              // Check if this declaration is inside a containing block
               let containing_block_id = match scope {
-                Scope::SemanticBlock { semantic_block, .. } => {
-                  semantic_block.underlying_id().ok()
-                }
+                Scope::ContainingBlock {
+                  containing_block, ..
+                } => containing_block.underlying_id().ok(),
                 _ => None,
               };
 
-              // Track the mapping from declaration to its containing semantic block
+              // Track the mapping from declaration to its containing block
               if let Some(block_id) = containing_block_id {
-                declaration_to_semantic_block.insert(rel_id, block_id);
+                declaration_to_containing_block.insert(rel_id, block_id);
               }
 
               pending_self_refs.push((self_ref, containing_block_id));
@@ -3245,7 +3245,7 @@ fn populate_expanded_references(
         }
 
         // Collect all references to ancestors/descendants first to know which
-        // semantic blocks will appear in the final output
+        // containing blocks will appear in the final output
         let mut all_reference_nodes: HashSet<i32> = HashSet::new();
         for &rel_id in &all_related {
           if let Some(in_scope_decl) = in_scope_source_topics.get(&rel_id) {
@@ -3256,16 +3256,16 @@ fn populate_expanded_references(
         }
 
         // Add self-references, filtering out declarations whose containing
-        // semantic block will also appear (either as another self-reference or
+        // block will also appear (either as another self-reference or
         // as a reference_node from the references)
         for (self_ref, containing_block_id) in pending_self_refs {
           let should_include = match containing_block_id {
             Some(block_id) => {
-              // Skip if the semantic block is in our reference nodes
-              // (meaning the semantic block itself will be displayed)
+              // Skip if the containing block is in our reference nodes
+              // (meaning the containing block itself will be displayed)
               !all_reference_nodes.contains(&block_id)
             }
-            // No containing semantic block, always include
+            // No containing block, always include
             None => true,
           };
 
@@ -3279,14 +3279,15 @@ fn populate_expanded_references(
           if let Some(in_scope_decl) = in_scope_source_topics.get(&rel_id) {
             for reference in in_scope_decl.references() {
               // Skip references whose reference_node is a declaration that's
-              // inside a semantic block that will also appear
-              let dominated_by_semantic_block = declaration_to_semantic_block
-                .get(&reference.reference_node)
-                .map_or(false, |block_id| {
-                  all_reference_nodes.contains(block_id)
-                });
+              // inside a containing block that will also appear
+              let dominated_by_containing_block =
+                declaration_to_containing_block
+                  .get(&reference.reference_node)
+                  .map_or(false, |block_id| {
+                    all_reference_nodes.contains(block_id)
+                  });
 
-              if !dominated_by_semantic_block
+              if !dominated_by_containing_block
                 && seen_refs.insert(reference.reference_node)
               {
                 scoped_refs.push(reference.clone());
@@ -3379,28 +3380,28 @@ fn populate_ancestry(
           .copied()
           .collect();
 
-        // Collect self-references and track which semantic blocks contain declarations
+        // Collect self-references and track which containing blocks contain declarations
         let mut pending_self_refs: Vec<(ScopedReference, Option<i32>)> =
-          Vec::new(); // (self_ref, containing_semantic_block_id)
+          Vec::new(); // (self_ref, containing_block_id)
 
-        // Map from declaration node_id to its containing semantic block node_id
-        let mut declaration_to_semantic_block: BTreeMap<i32, i32> =
+        // Map from declaration node_id to its containing block node_id
+        let mut declaration_to_containing_block: BTreeMap<i32, i32> =
           BTreeMap::new();
 
         for &rel_id in &all_related {
           if let Some(scope) = scope_map.get(&rel_id) {
             if let Some(self_ref) = scope_to_self_reference(scope, rel_id) {
-              // Check if this declaration is inside a semantic block
+              // Check if this declaration is inside a containing block
               let containing_block_id = match scope {
-                Scope::SemanticBlock { semantic_block, .. } => {
-                  semantic_block.underlying_id().ok()
-                }
+                Scope::ContainingBlock {
+                  containing_block, ..
+                } => containing_block.underlying_id().ok(),
                 _ => None,
               };
 
-              // Track the mapping from declaration to its containing semantic block
+              // Track the mapping from declaration to its containing block
               if let Some(block_id) = containing_block_id {
-                declaration_to_semantic_block.insert(rel_id, block_id);
+                declaration_to_containing_block.insert(rel_id, block_id);
               }
 
               pending_self_refs.push((self_ref, containing_block_id));
@@ -3409,7 +3410,7 @@ fn populate_ancestry(
         }
 
         // Collect all references to ancestors/descendants first to know which
-        // semantic blocks will appear in the final output
+        // containing blocks will appear in the final output
         let mut all_reference_nodes: HashSet<i32> = HashSet::new();
         for &rel_id in &all_related {
           if let Some(in_scope_decl) = in_scope_source_topics.get(&rel_id) {
@@ -3420,16 +3421,16 @@ fn populate_ancestry(
         }
 
         // Add self-references, filtering out declarations whose containing
-        // semantic block will also appear (either as another self-reference or
+        // block will also appear (either as another self-reference or
         // as a reference_node from the references)
         for (self_ref, containing_block_id) in pending_self_refs {
           let should_include = match containing_block_id {
             Some(block_id) => {
-              // Skip if the semantic block is in our reference nodes
-              // (meaning the semantic block itself will be displayed)
+              // Skip if the containing block is in our reference nodes
+              // (meaning the containing block itself will be displayed)
               !all_reference_nodes.contains(&block_id)
             }
-            // No containing semantic block, always include
+            // No containing block, always include
             None => true,
           };
 
@@ -3443,14 +3444,15 @@ fn populate_ancestry(
           if let Some(in_scope_decl) = in_scope_source_topics.get(&rel_id) {
             for reference in in_scope_decl.references() {
               // Skip references whose reference_node is a declaration that's
-              // inside a semantic block that will also appear
-              let dominated_by_semantic_block = declaration_to_semantic_block
-                .get(&reference.reference_node)
-                .map_or(false, |block_id| {
-                  all_reference_nodes.contains(block_id)
-                });
+              // inside a containing block that will also appear
+              let dominated_by_containing_block =
+                declaration_to_containing_block
+                  .get(&reference.reference_node)
+                  .map_or(false, |block_id| {
+                    all_reference_nodes.contains(block_id)
+                  });
 
-              if !dominated_by_semantic_block
+              if !dominated_by_containing_block
                 && seen_refs.insert(reference.reference_node)
               {
                 scoped_refs.push(reference.clone());

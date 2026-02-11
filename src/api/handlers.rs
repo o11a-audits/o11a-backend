@@ -400,7 +400,7 @@ pub struct ScopeInfo {
   #[serde(skip_serializing_if = "Option::is_none")]
   pub member: Option<String>,
   #[serde(skip_serializing_if = "Option::is_none")]
-  pub semantic_block: Option<String>,
+  pub containing_block: Option<String>,
 }
 
 impl ScopeInfo {
@@ -412,14 +412,14 @@ impl ScopeInfo {
         container: None,
         component: None,
         member: None,
-        semantic_block: None,
+        containing_block: None,
       },
       core::Scope::Container { container } => ScopeInfo {
         scope_type: "Container".to_string(),
         container: Some(container.file_path.clone()),
         component: None,
         member: None,
-        semantic_block: None,
+        containing_block: None,
       },
       core::Scope::Component {
         container,
@@ -429,7 +429,7 @@ impl ScopeInfo {
         container: Some(container.file_path.clone()),
         component: Some(component.id.clone()),
         member: None,
-        semantic_block: None,
+        containing_block: None,
       },
       core::Scope::Member {
         container,
@@ -440,19 +440,19 @@ impl ScopeInfo {
         container: Some(container.file_path.clone()),
         component: Some(component.id.clone()),
         member: Some(member.id.clone()),
-        semantic_block: None,
+        containing_block: None,
       },
-      core::Scope::SemanticBlock {
+      core::Scope::ContainingBlock {
         container,
         component,
         member,
-        semantic_block,
+        containing_block,
       } => ScopeInfo {
-        scope_type: "SemanticBlock".to_string(),
+        scope_type: "ContainingBlock".to_string(),
         container: Some(container.file_path.clone()),
         component: Some(component.id.clone()),
         member: Some(member.id.clone()),
-        semantic_block: Some(semantic_block.id.clone()),
+        containing_block: Some(containing_block.id.clone()),
       },
     }
   }
@@ -468,10 +468,10 @@ impl ScopeInfo {
   }
 
   /// Returns the lowest (most specific) scope topic ID.
-  /// Returns semantic_block > member > component > None for Container/Global.
+  /// Returns containing_block > member > component > None for Container/Global.
   pub fn lowest_scope_topic_id(&self) -> Option<&str> {
     self
-      .semantic_block
+      .containing_block
       .as_deref()
       .or(self.member.as_deref())
       .or(self.component.as_deref())
@@ -483,11 +483,11 @@ impl ScopeInfo {
       file_path: self.container.clone().unwrap(),
     };
     match self.scope_type.as_str() {
-      "SemanticBlock" => core::Scope::SemanticBlock {
+      "ContainingBlock" => core::Scope::ContainingBlock {
         container: container(),
         component: new_topic(self.component.as_ref().unwrap()),
         member: new_topic(self.member.as_ref().unwrap()),
-        semantic_block: new_topic(self.semantic_block.as_ref().unwrap()),
+        containing_block: new_topic(self.containing_block.as_ref().unwrap()),
       },
       "Member" => core::Scope::Member {
         container: container(),
@@ -513,7 +513,7 @@ impl Default for ScopeInfo {
       container: None,
       component: None,
       member: None,
-      semantic_block: None,
+      containing_block: None,
     }
   }
 }

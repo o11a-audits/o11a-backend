@@ -439,7 +439,7 @@ fn process_documentation_node(
 }
 
 /// Builds ReferenceGroups from collected mentions and updates the referenced topics' mentions field.
-/// Groups mentions by component (H1 section), with member-level (sub-H1) and semantic_block-level (paragraph) sub-groups.
+/// Groups mentions by component (H1 section), with member-level (sub-H1) and containing_block-level (paragraph) sub-groups.
 fn populate_mentions(
   topic_metadata: &mut BTreeMap<topic::Topic, TopicMetadata>,
   mentions_by_topic: BTreeMap<topic::Topic, Vec<core::Scope>>,
@@ -473,23 +473,23 @@ fn populate_mentions(
             core::Reference::project_reference(member, member_sort_key),
           );
         }
-        core::Scope::SemanticBlock {
+        core::Scope::ContainingBlock {
           component,
           member,
-          semantic_block,
+          containing_block,
           ..
         } => {
-          // SemanticBlock-level reference - nested under member
+          // ContainingBlock-level reference - nested under member
           let component_sort_key = get_source_location_start(&component, nodes);
           let member_sort_key = get_source_location_start(&member, nodes);
-          let sb_sort_key = get_source_location_start(&semantic_block, nodes);
+          let cb_sort_key = get_source_location_start(&containing_block, nodes);
           insert_reference(
             &mut mention_groups,
             component,
             component_sort_key,
             true,
             Some((member, member_sort_key)),
-            core::Reference::project_reference(semantic_block, sb_sort_key),
+            core::Reference::project_reference(containing_block, cb_sort_key),
           );
         }
       }
@@ -955,14 +955,14 @@ Protocol Solvency
     // The inline code is inside (with new section-only scope hierarchy):
     // - H1 "Overview" (component - first nested section)
     // - H2 "Main invariants" (member - second nested section)
-    // - H3 "Solvency Invariants" (semantic_block - third nested section)
+    // - H3 "Solvency Invariants" (containing_block - third nested section)
     // Paragraphs no longer add to scope, so inline code inherits section scope.
     match metadata.scope() {
-      Scope::SemanticBlock {
+      Scope::ContainingBlock {
         container,
         component,
         member,
-        semantic_block,
+        containing_block,
       } => {
         // Verify container is our test file
         assert_eq!(
@@ -994,22 +994,22 @@ Protocol Solvency
           "Member should be 'Main invariants' section"
         );
 
-        // Verify semantic_block is the "Solvency Invariants" H3 section (third nested)
-        let semantic_block_metadata =
-          audit_data.topic_metadata.get(semantic_block);
+        // Verify containing_block is the "Solvency Invariants" H3 section (third nested)
+        let containing_block_metadata =
+          audit_data.topic_metadata.get(containing_block);
         assert!(
-          semantic_block_metadata.is_some(),
-          "Semantic block topic should exist in metadata"
+          containing_block_metadata.is_some(),
+          "Containing block topic should exist in metadata"
         );
         assert_eq!(
-          semantic_block_metadata.unwrap().name(),
+          containing_block_metadata.unwrap().name(),
           "Solvency Invariants",
-          "Semantic block should be 'Solvency Invariants' section"
+          "Containing block should be 'Solvency Invariants' section"
         );
       }
       other => {
         panic!(
-          "Inline code should have SemanticBlock scope, got {:?}",
+          "Inline code should have ContainingBlock scope, got {:?}",
           other
         );
       }

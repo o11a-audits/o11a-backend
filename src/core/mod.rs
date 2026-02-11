@@ -199,11 +199,11 @@ pub enum Scope {
     component: topic::Topic,
     member: topic::Topic,
   },
-  SemanticBlock {
+  ContainingBlock {
     container: ProjectPath,
     component: topic::Topic,
     member: topic::Topic,
-    semantic_block: topic::Topic,
+    containing_block: topic::Topic,
   },
 }
 
@@ -226,22 +226,22 @@ pub fn add_to_scope(scope: &Scope, topic: topic::Topic) -> Scope {
       container,
       component,
       member,
-    } => Scope::SemanticBlock {
+    } => Scope::ContainingBlock {
       container: container.clone(),
       component: component.clone(),
       member: member.clone(),
-      semantic_block: topic,
+      containing_block: topic,
     },
-    Scope::SemanticBlock {
+    Scope::ContainingBlock {
       container,
       component,
       member,
       ..
-    } => Scope::SemanticBlock {
+    } => Scope::ContainingBlock {
       container: container.clone(),
       component: component.clone(),
       member: member.clone(),
-      semantic_block: topic,
+      containing_block: topic,
     },
   }
 }
@@ -270,7 +270,7 @@ pub fn set_member(scope: &Scope, topic: topic::Topic) -> Scope {
       component: component.clone(),
       member: topic,
     },
-    Scope::SemanticBlock {
+    Scope::ContainingBlock {
       container,
       component,
       ..
@@ -883,7 +883,7 @@ impl TopicMetadata {
       Scope::Member {
         component, member, ..
       }
-      | Scope::SemanticBlock {
+      | Scope::ContainingBlock {
         component, member, ..
       } => {
         let component_name = audit_data
