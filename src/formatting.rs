@@ -317,3 +317,37 @@ pub fn format_stub(topic: &topic::Topic) -> String {
     topic.id()
   )
 }
+
+// ============================================================================
+// Inline documentation placeholders
+// ============================================================================
+
+/// Formats an invisible placeholder for inline identifier documentation.
+/// The front end can query for elements with the `identifier-inline-comment`
+/// class and inject documentation into them.
+pub fn format_identifier_placeholder(topic: &topic::Topic) -> String {
+  format!(
+    "<div class=\"identifier-inline-comment\" data-placeholder-topic=\"{}\"></div>",
+    topic.id()
+  )
+}
+
+/// Formats an invisible placeholder for inline statement documentation.
+/// The front end can query for elements with the `statement-inline-comment`
+/// class and inject documentation into them.
+pub fn format_statement_placeholder(topic: &topic::Topic) -> String {
+  format!(
+    "<div class=\"statement-inline-comment\" data-placeholder-topic=\"{}\"></div>",
+    topic.id()
+  )
+}
+
+/// Formats an invisible placeholder for inline containing block documentation.
+/// The front end can query for elements with the `containing-block-inline-comment`
+/// class and inject documentation into them.
+pub fn format_containing_block_placeholder(topic: &topic::Topic) -> String {
+  format!(
+    "<div class=\"containing-block-inline-comment\" data-placeholder-topic=\"{}\"></div>",
+    topic.id()
+  )
+}

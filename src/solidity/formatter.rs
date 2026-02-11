@@ -3,8 +3,8 @@ use crate::core::{self, TopicMetadata};
 use crate::core::{ContractKind, FunctionKind, VariableMutability};
 use crate::formatting;
 use crate::solidity::parser::{
-  ASTNode, AssignmentOperator, BinaryOperator, FunctionStateMutability,
-  FunctionVisibility, LiteralKind, StorageLocation, UnaryOperator,
+  self, ASTNode, AssignmentOperator, BinaryOperator, FunctionStateMutability,
+  FunctionVisibility, LiteralKind, StorageLocation, StubKind, UnaryOperator,
   VariableVisibility,
 };
 use std::collections::BTreeMap;
@@ -68,6 +68,71 @@ pub fn node_to_source_text(
   )
 }
 
+/// Extracts the StubKind from an ASTNode. For Stub nodes this is free (the
+/// kind field is already populated). For real nodes this classifies on the fly.
+fn get_stub_kind(node: &ASTNode) -> StubKind {
+  match node {
+    ASTNode::Stub { kind, .. } => kind.clone(),
+    _ => parser::classify_node_stub_kind(node),
+  }
+}
+
+/// Returns the topic to use for an identifier placeholder. For Identifier
+/// nodes, this is the referenced declaration's topic (not the identifier
+/// node's own topic). For TypeConversion nodes, this is the argument's topic.
+/// For all other nodes, this is the node's own topic.
+fn placeholder_topic(node: &ASTNode) -> topic::Topic {
+  match node {
+    ASTNode::Stub { kind, topic, .. } => {
+      // If the stub carries a placeholder topic (Identifier → referenced
+      // declaration, TypeConversion → argument), use it.
+      kind
+        .placeholder_topic()
+        .cloned()
+        .unwrap_or_else(|| topic.clone())
+    }
+    ASTNode::Identifier {
+      referenced_declaration,
+      ..
+    }
+    | ASTNode::IdentifierPath {
+      referenced_declaration,
+      ..
+    } => new_node_topic(referenced_declaration),
+    ASTNode::MemberAccess { expression, .. } => {
+      // Recurse into the base expression
+      placeholder_topic(expression)
+    }
+    ASTNode::TypeConversion { argument, .. } => {
+      // Recurse into the argument to get its referenced declaration topic
+      placeholder_topic(argument)
+    }
+    _ => new_node_topic(&node.node_id()),
+  }
+}
+
+/// If the node is identifier-like, returns an identifier placeholder string
+/// for it. For compound expressions (FunctionCall, StructConstructor), recurses
+/// into the callee expression to find the root identifier placeholder. This
+/// allows callers to hoist the placeholder above operators (e.g. `?`, `:`)
+/// rather than having it appear inside the compound expression's output.
+fn maybe_identifier_placeholder(node: &ASTNode) -> String {
+  let kind = get_stub_kind(node);
+  if kind.is_identifier_like() {
+    formatting::format_identifier_placeholder(&placeholder_topic(node))
+  } else {
+    // Recurse into compound expression wrappers to find the root identifier.
+    match node {
+      ASTNode::FunctionCall { expression, .. }
+      | ASTNode::StructConstructor { expression, .. }
+      | ASTNode::FunctionCallOptions { expression, .. } => {
+        maybe_identifier_placeholder(expression)
+      }
+      _ => String::new(),
+    }
+  }
+}
+
 fn do_node_to_source_text(
   node: &ASTNode,
   indent_level: usize,
@@ -83,6 +148,8 @@ fn do_node_to_source_text(
       right_hand_side,
       ..
     } => {
+      let lhs_placeholder = maybe_identifier_placeholder(left_hand_side);
+      let rhs_placeholder = maybe_identifier_placeholder(right_hand_side);
       let lhs = do_node_to_source_text(
         left_hand_side,
         indent_level,
@@ -101,7 +168,8 @@ fn do_node_to_source_text(
         ctx,
       );
       format!(
-        "{} {} {}{}",
+        "{}{} {} {}{}",
+        lhs_placeholder,
         formatting::format_keyword("mut"),
         lhs,
         formatting::format_topic_operator(
@@ -109,7 +177,10 @@ fn do_node_to_source_text(
           &op,
           &new_node_topic(node_id)
         ),
-        formatting::indent(&rhs, indent_level)
+        formatting::indent(
+          &format!("{}{}", rhs_placeholder, rhs),
+          indent_level,
+        )
       )
     }
 
@@ -120,6 +191,8 @@ fn do_node_to_source_text(
       right_expression,
       ..
     } => {
+      let lhs_placeholder = maybe_identifier_placeholder(left_expression);
+      let rhs_placeholder = maybe_identifier_placeholder(right_expression);
       let lhs = do_node_to_source_text(
         left_expression,
         indent_level,
@@ -141,8 +214,10 @@ fn do_node_to_source_text(
           ctx,
         );
         format!(
-          "{}\n{}",
+          "{}{}\n{}{}",
+          lhs_placeholder,
           lhs,
+          rhs_placeholder,
           format!(
             "{} {}",
             formatting::format_topic_operator(
@@ -163,11 +238,13 @@ fn do_node_to_source_text(
           ctx,
         );
         format!(
-          "{}{}",
+          "{}{}{}",
+          lhs_placeholder,
           lhs,
           formatting::indent(
             &format!(
-              "{} {}",
+              "{}{} {}",
+              rhs_placeholder,
               formatting::format_topic_operator(
                 &new_node_topic(node_id),
                 &op,
@@ -197,9 +274,12 @@ fn do_node_to_source_text(
       );
 
       let indent_level = indent_level + 1;
+      let true_placeholder = maybe_identifier_placeholder(true_expression);
       let part = if let Some(false_expr) = false_expression {
+        let false_placeholder = maybe_identifier_placeholder(false_expr);
         format!(
-          "\n{} {}\n{} {}",
+          "\n{}{} {}\n{}{} {}",
+          true_placeholder,
           formatting::format_topic_operator(
             &new_node_topic(node_id),
             "?",
@@ -212,6 +292,7 @@ fn do_node_to_source_text(
             topic_metadata,
             ctx
           ),
+          false_placeholder,
           formatting::format_operator(":"),
           do_node_to_source_text(
             false_expr,
@@ -223,7 +304,8 @@ fn do_node_to_source_text(
         )
       } else {
         format!(
-          "\n{} {}",
+          "\n{}{} {}",
+          true_placeholder,
           formatting::format_topic_operator(
             &new_node_topic(node_id),
             "?",
@@ -257,6 +339,8 @@ fn do_node_to_source_text(
       arguments,
       ..
     } => {
+      // The caller is responsible for emitting the root identifier placeholder
+      // (via maybe_identifier_placeholder, which recurses into FunctionCall).
       let expression = expression.resolve(nodes_map);
 
       let expr = do_node_to_source_text(
@@ -314,6 +398,7 @@ fn do_node_to_source_text(
       argument,
       ..
     } => {
+      let arg_placeholder = maybe_identifier_placeholder(argument);
       let arg_str = do_node_to_source_text(
         argument,
         indent_level + 1,
@@ -326,7 +411,15 @@ fn do_node_to_source_text(
       match parameter {
         Some(param) => {
           match param.as_ref() {
-            ASTNode::Identifier { name, .. } if name != "" => {
+            ASTNode::Identifier {
+              name,
+              referenced_declaration,
+              ..
+            } if name != "" => {
+              // Placeholder for the parameter name, targeting the referenced declaration
+              let param_placeholder = formatting::format_identifier_placeholder(
+                &new_node_topic(referenced_declaration),
+              );
               // Only include parameter name if it's not empty
               let param_str = do_node_to_source_text(
                 param,
@@ -336,19 +429,23 @@ fn do_node_to_source_text(
                 ctx,
               );
               format!(
-                "{}:{}",
+                "{}{}:{}",
+                param_placeholder,
                 param_str,
-                formatting::indent(&arg_str, indent_level + 1)
+                formatting::indent(
+                  &format!("{}{}", arg_placeholder, arg_str),
+                  indent_level + 1,
+                )
               )
             }
 
             // Fallback: just format the argument without parameter name
-            _ => arg_str,
+            _ => format!("{}{}", arg_placeholder, arg_str),
           }
         }
 
         // Fallback: just format the argument without parameter name
-        _ => arg_str,
+        _ => format!("{}{}", arg_placeholder, arg_str),
       }
     }
 
@@ -476,6 +573,7 @@ fn do_node_to_source_text(
       index_expression,
       ..
     } => {
+      let base_placeholder = maybe_identifier_placeholder(base_expression);
       let base = do_node_to_source_text(
         base_expression,
         indent_level,
@@ -484,9 +582,12 @@ fn do_node_to_source_text(
         ctx,
       );
       if let Some(idx) = index_expression {
+        let idx_placeholder = maybe_identifier_placeholder(idx);
         format!(
-          "{}[{}]",
+          "{}{}[{}{}]",
+          base_placeholder,
           base,
+          idx_placeholder,
           do_node_to_source_text(
             idx,
             indent_level,
@@ -496,7 +597,7 @@ fn do_node_to_source_text(
           )
         )
       } else {
-        base
+        format!("{}{}", base_placeholder, base)
       }
     }
 
@@ -584,8 +685,16 @@ fn do_node_to_source_text(
           );
 
           let indent_level = indent_level + 1;
-          let member_expr =
-            format!("{}{}", formatting::format_operator("."), member);
+          // Placeholder for the member, targeting the referenced declaration
+          let member_placeholder = formatting::format_identifier_placeholder(
+            &new_node_topic(member_node_id),
+          );
+          let member_expr = format!(
+            "{}{}{}",
+            member_placeholder,
+            formatting::format_operator("."),
+            member
+          );
           format!("{}{}", expr, formatting::indent(&member_expr, indent_level),)
         } else {
           let member = formatting::format_member(&member_name);
@@ -622,12 +731,17 @@ fn do_node_to_source_text(
       let comps = components
         .iter()
         .map(|c| {
-          do_node_to_source_text(
-            c,
-            indent_level,
-            nodes_map,
-            topic_metadata,
-            ctx,
+          let comp_placeholder = maybe_identifier_placeholder(c);
+          format!(
+            "{}{}",
+            comp_placeholder,
+            do_node_to_source_text(
+              c,
+              indent_level,
+              nodes_map,
+              topic_metadata,
+              ctx,
+            )
           )
         })
         .collect::<Vec<_>>()
@@ -650,6 +764,7 @@ fn do_node_to_source_text(
       ..
     } => {
       let op = unary_operator_to_string(operator);
+      let sub_placeholder = maybe_identifier_placeholder(sub_expression);
       let expr = do_node_to_source_text(
         sub_expression,
         indent_level,
@@ -675,7 +790,8 @@ fn do_node_to_source_text(
 
       if *prefix {
         format!(
-          "{}{}{}",
+          "{}{}{}{}",
+          sub_placeholder,
           keyword,
           formatting::format_topic_operator(
             &new_node_topic(node_id),
@@ -686,7 +802,8 @@ fn do_node_to_source_text(
         )
       } else {
         format!(
-          "{}{}{}",
+          "{}{}{}{}",
+          sub_placeholder,
           keyword,
           expr,
           formatting::format_topic_operator(
@@ -755,36 +872,58 @@ fn do_node_to_source_text(
         .join("\n");
 
       let topic = topic::new_node_topic(node_id);
+      let block_placeholder =
+        formatting::format_containing_block_placeholder(&topic);
 
       if statements.len() == 1 {
         // If there is only one statement, we don't need to render the
         // semantic block, as it is redundant with the statement.
-        statements
+        format!("{}{}", block_placeholder, statements)
       } else if ctx.target_topic == topic {
         // When the semantic block is the target topic, render it as the
         // target topic, so that the UI can not render it, when it is redundant
         // with its container. This is especially impactful for the references
         // panel, where it can be annoying to have to pass over each semantic
         // block containing each reference.
-        formatting::format_topic_block(
-          &new_node_topic(node_id),
-          &statements,
-          "semantic-block target-topic",
-          &topic,
+        format!(
+          "{}{}",
+          block_placeholder,
+          formatting::format_topic_block(
+            &new_node_topic(node_id),
+            &statements,
+            "semantic-block target-topic",
+            &topic,
+          )
         )
       } else {
-        formatting::format_topic_block(
-          &new_node_topic(node_id),
-          &statements,
-          "semantic-block",
-          &topic,
+        format!(
+          "{}{}",
+          block_placeholder,
+          formatting::format_topic_block(
+            &new_node_topic(node_id),
+            &statements,
+            "semantic-block",
+            &topic,
+          )
         )
       }
     }
 
-    ASTNode::Break { .. } => formatting::format_keyword("break"),
+    ASTNode::Break { node_id, .. } => {
+      format!(
+        "{}{}",
+        formatting::format_statement_placeholder(&new_node_topic(node_id)),
+        formatting::format_keyword("break"),
+      )
+    }
 
-    ASTNode::Continue { .. } => formatting::format_keyword("continue"),
+    ASTNode::Continue { node_id, .. } => {
+      format!(
+        "{}{}",
+        formatting::format_statement_placeholder(&new_node_topic(node_id)),
+        formatting::format_keyword("continue"),
+      )
+    }
 
     ASTNode::DoWhileStatement {
       node_id,
@@ -794,6 +933,11 @@ fn do_node_to_source_text(
     } => {
       let body_str = if let Some(b) = body {
         do_node_to_source_text(b, indent_level, nodes_map, topic_metadata, ctx)
+      } else {
+        String::new()
+      };
+      let cond_placeholder = if !nodes.is_empty() {
+        maybe_identifier_placeholder(&nodes[0])
       } else {
         String::new()
       };
@@ -809,7 +953,8 @@ fn do_node_to_source_text(
         String::new()
       };
       format!(
-        "{} {} {} ({})",
+        "{}{} {} {} ({}{})",
+        formatting::format_statement_placeholder(&new_node_topic(node_id)),
         formatting::format_topic_keyword(
           &new_node_topic(node_id),
           "do",
@@ -817,6 +962,7 @@ fn do_node_to_source_text(
         ),
         body_str,
         formatting::format_keyword("while"),
+        cond_placeholder,
         condition
       )
     }
@@ -826,8 +972,11 @@ fn do_node_to_source_text(
       event_call,
       ..
     } => {
+      let call_placeholder = maybe_identifier_placeholder(event_call);
       format!(
-        "{} {}",
+        "{}{}{} {}",
+        formatting::format_statement_placeholder(&new_node_topic(node_id)),
+        call_placeholder,
         formatting::format_topic_keyword(
           &new_node_topic(node_id),
           "emit",
@@ -843,13 +992,25 @@ fn do_node_to_source_text(
       )
     }
 
-    ASTNode::ExpressionStatement { expression, .. } => do_node_to_source_text(
+    ASTNode::ExpressionStatement {
+      node_id,
       expression,
-      indent_level,
-      nodes_map,
-      topic_metadata,
-      ctx,
-    ),
+      ..
+    } => {
+      let expr_placeholder = maybe_identifier_placeholder(expression);
+      format!(
+        "{}{}{}",
+        formatting::format_statement_placeholder(&new_node_topic(node_id)),
+        expr_placeholder,
+        do_node_to_source_text(
+          expression,
+          indent_level,
+          nodes_map,
+          topic_metadata,
+          ctx,
+        )
+      )
+    }
 
     ASTNode::ForStatement {
       node_id,
@@ -859,6 +1020,10 @@ fn do_node_to_source_text(
       body,
       ..
     } => {
+      let _init_placeholder = initialization_expression
+        .as_ref()
+        .map(|e| maybe_identifier_placeholder(e))
+        .unwrap_or_default();
       let _init = if let Some(init_expr) = initialization_expression {
         do_node_to_source_text(
           init_expr,
@@ -870,6 +1035,10 @@ fn do_node_to_source_text(
       } else {
         String::new()
       };
+      let _cond_placeholder = condition
+        .as_ref()
+        .map(|e| maybe_identifier_placeholder(e))
+        .unwrap_or_default();
       let _cond = if let Some(cond_expr) = condition {
         do_node_to_source_text(
           cond_expr,
@@ -881,6 +1050,10 @@ fn do_node_to_source_text(
       } else {
         String::new()
       };
+      let _loop_placeholder = loop_expression
+        .as_ref()
+        .map(|e| maybe_identifier_placeholder(e))
+        .unwrap_or_default();
       let _loop_expr = if let Some(l_expr) = loop_expression {
         do_node_to_source_text(
           l_expr,
@@ -900,7 +1073,8 @@ fn do_node_to_source_text(
         ctx,
       );
       format!(
-        "{} (LoopExpr) {}",
+        "{}{} (LoopExpr) {}",
+        formatting::format_statement_placeholder(&new_node_topic(node_id)),
         formatting::format_topic_keyword(
           &new_node_topic(node_id),
           "for",
@@ -917,6 +1091,7 @@ fn do_node_to_source_text(
       false_body,
       ..
     } => {
+      let cond_placeholder = maybe_identifier_placeholder(condition);
       let cond = do_node_to_source_text(
         condition,
         indent_level,
@@ -947,12 +1122,14 @@ fn do_node_to_source_text(
         String::new()
       };
       format!(
-        "{} ({}\n) {}{}",
+        "{}{} ({}{}\n) {}{}",
+        formatting::format_statement_placeholder(&new_node_topic(node_id)),
         formatting::format_topic_keyword(
           &new_node_topic(node_id),
           "if",
           &new_node_topic(node_id)
         ),
+        cond_placeholder,
         formatting::indent(&cond, indent_level + 1),
         true_b,
         false_part
@@ -962,10 +1139,14 @@ fn do_node_to_source_text(
     ASTNode::InlineAssembly { .. } => formatting::format_keyword("assembly"),
 
     ASTNode::PlaceholderStatement { node_id, .. } => {
-      formatting::format_topic_keyword(
-        &new_node_topic(node_id),
-        "placeholder",
-        &new_node_topic(node_id),
+      format!(
+        "{}{}",
+        formatting::format_statement_placeholder(&new_node_topic(node_id)),
+        formatting::format_topic_keyword(
+          &new_node_topic(node_id),
+          "placeholder",
+          &new_node_topic(node_id),
+        )
       )
     }
 
@@ -974,9 +1155,14 @@ fn do_node_to_source_text(
       expression,
       ..
     } => {
+      let stmt_placeholder =
+        formatting::format_statement_placeholder(&new_node_topic(node_id));
       if let Some(expr) = expression {
+        let expr_placeholder = maybe_identifier_placeholder(expr);
         format!(
-          "{} {}",
+          "{}{}{} {}",
+          stmt_placeholder,
+          expr_placeholder,
           formatting::format_topic_keyword(
             &new_node_topic(node_id),
             "return",
@@ -991,10 +1177,14 @@ fn do_node_to_source_text(
           )
         )
       } else {
-        formatting::format_topic_keyword(
-          &new_node_topic(node_id),
-          "return",
-          &new_node_topic(node_id),
+        format!(
+          "{}{}",
+          stmt_placeholder,
+          formatting::format_topic_keyword(
+            &new_node_topic(node_id),
+            "return",
+            &new_node_topic(node_id),
+          )
         )
       }
     }
@@ -1004,8 +1194,11 @@ fn do_node_to_source_text(
       error_call,
       ..
     } => {
+      let call_placeholder = maybe_identifier_placeholder(error_call);
       format!(
-        "{} {}",
+        "{}{}{} {}",
+        formatting::format_statement_placeholder(&new_node_topic(node_id)),
+        call_placeholder,
         formatting::format_topic_keyword(
           &new_node_topic(node_id),
           "revert",
@@ -1059,9 +1252,16 @@ fn do_node_to_source_text(
 
       if let Some(initial_val) = initial_value {
         if declarations.len() == 1 {
+          // Identifier placeholder for the declared variable (above the let line)
+          let decl_placeholder = formatting::format_identifier_placeholder(
+            &new_node_topic(&declarations[0].node_id()),
+          );
+          // Identifier placeholder for the initial value (if identifier-like)
+          let val_placeholder = maybe_identifier_placeholder(initial_val);
           // Single declaration: use simple format
           format!(
-            "{} {}{}",
+            "{}{} {}{}",
+            decl_placeholder,
             do_node_to_source_text(
               &declarations[0],
               indent_level,
@@ -1071,12 +1271,16 @@ fn do_node_to_source_text(
             ),
             formatting::format_operator("="),
             formatting::indent(
-              &do_node_to_source_text(
-                initial_val,
-                indent_level,
-                nodes_map,
-                topic_metadata,
-                ctx
+              &format!(
+                "{}{}",
+                val_placeholder,
+                do_node_to_source_text(
+                  initial_val,
+                  indent_level,
+                  nodes_map,
+                  topic_metadata,
+                  ctx
+                )
               ),
               indent_level
             ),
@@ -1292,6 +1496,7 @@ fn do_node_to_source_text(
       body,
       ..
     } => {
+      let cond_placeholder = maybe_identifier_placeholder(condition);
       let cond = do_node_to_source_text(
         condition,
         indent_level,
@@ -1305,12 +1510,14 @@ fn do_node_to_source_text(
         formatting::format_brace("{}", indent_level)
       };
       format!(
-        "{} ({}) {}",
+        "{}{} ({}{}) {}",
+        formatting::format_statement_placeholder(&new_node_topic(node_id)),
         formatting::format_topic_keyword(
           &new_node_topic(node_id),
           "while",
           &new_node_topic(node_id)
         ),
+        cond_placeholder,
         formatting::indent(&cond, indent_level),
         body_str
       )

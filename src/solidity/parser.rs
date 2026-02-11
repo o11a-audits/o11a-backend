@@ -568,6 +568,75 @@ impl TypeDescriptions {
   }
 }
 
+/// Classification of a stub's underlying node type, used by the formatter
+/// to decide whether to emit inline documentation placeholders without
+/// needing to resolve the stub via a nodes_map lookup.
+#[derive(Debug, Clone, PartialEq)]
+pub enum StubKind {
+  /// Identifier or IdentifierPath node. `referenced_topic` is the topic of
+  /// the declaration this identifier references (not the identifier node
+  /// itself), used for placeholder generation.
+  Identifier { referenced_topic: topic::Topic },
+  /// MemberAccess node. `base_kind` describes the kind of the base expression.
+  MemberAccess { base_kind: Box<StubKind> },
+  /// TypeConversion (@ cast) node. `argument_kind` describes the kind of the
+  /// inner argument expression, and `argument_topic` is the topic of the
+  /// argument (used for placeholder generation, since the placeholder should
+  /// target the argument, not the cast itself).
+  TypeConversion {
+    argument_kind: Box<StubKind>,
+    argument_topic: topic::Topic,
+  },
+  /// Literal node (numbers, strings, bools, hex).
+  Literal,
+  /// A declaration node (VariableDeclarationStatement, VariableDeclaration,
+  /// ContractDefinition, FunctionDefinition, etc.). Statement containers use
+  /// this to skip emitting statement-level placeholders for declarations.
+  Declaration,
+  /// A compound expression (FunctionCall, StructConstructor,
+  /// FunctionCallOptions) that wraps an inner expression. The
+  /// `expression_kind` describes the kind of the inner expression, allowing
+  /// placeholder logic to recurse through stubbed compound expressions.
+  CompoundExpression { expression_kind: Box<StubKind> },
+  /// Everything else.
+  Other,
+}
+
+impl StubKind {
+  /// Returns true if this stub kind is "identifier-like" for placeholder
+  /// purposes: an Identifier, a Literal, a TypeConversion whose argument is
+  /// identifier-like, or a MemberAccess whose base is identifier-like.
+  pub fn is_identifier_like(&self) -> bool {
+    match self {
+      StubKind::Identifier { .. } | StubKind::Literal => true,
+      StubKind::TypeConversion { argument_kind, .. } => {
+        argument_kind.is_identifier_like()
+      }
+      StubKind::MemberAccess { base_kind } => base_kind.is_identifier_like(),
+      StubKind::CompoundExpression { expression_kind } => {
+        expression_kind.is_identifier_like()
+      }
+      StubKind::Declaration | StubKind::Other => false,
+    }
+  }
+
+  /// Returns the topic to use for placeholder generation, if the kind carries
+  /// one. For Identifier this is the referenced declaration's topic; for
+  /// TypeConversion this is the argument's topic. Returns None for kinds that
+  /// don't carry a specific placeholder topic.
+  pub fn placeholder_topic(&self) -> Option<&topic::Topic> {
+    match self {
+      StubKind::Identifier { referenced_topic } => Some(referenced_topic),
+      StubKind::MemberAccess { base_kind } => base_kind.placeholder_topic(),
+      StubKind::TypeConversion { argument_topic, .. } => Some(argument_topic),
+      StubKind::CompoundExpression { expression_kind } => {
+        expression_kind.placeholder_topic()
+      }
+      _ => None,
+    }
+  }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ASTNode {
   // Expression nodes
@@ -1108,6 +1177,7 @@ pub enum ASTNode {
     node_id: i32,
     src_location: SourceLocation,
     topic: topic::Topic,
+    kind: StubKind,
   },
 
   // Catch-all for unknown node types
@@ -2009,6 +2079,66 @@ impl ASTNode {
       _ => self,
     }
   }
+
+  /// Returns true if the node is a "containing block" for reference tracking:
+  /// SemanticBlock or FunctionSignature.
+  pub fn is_containing_block(&self) -> bool {
+    matches!(
+      self,
+      ASTNode::SemanticBlock { .. } | ASTNode::FunctionSignature { .. }
+    )
+  }
+}
+
+pub fn classify_node_stub_kind(node: &ASTNode) -> StubKind {
+  match node {
+    ASTNode::Identifier {
+      referenced_declaration,
+      ..
+    }
+    | ASTNode::IdentifierPath {
+      referenced_declaration,
+      ..
+    } => StubKind::Identifier {
+      referenced_topic: topic::new_node_topic(referenced_declaration),
+    },
+    ASTNode::MemberAccess { expression, .. } => StubKind::MemberAccess {
+      base_kind: Box::new(classify_node_stub_kind(expression)),
+    },
+    ASTNode::TypeConversion { argument, .. } => {
+      let argument_kind = Box::new(classify_node_stub_kind(argument));
+      // The argument's placeholder topic is the referenced declaration topic
+      // if the argument is identifier-like, otherwise the argument node's own
+      // topic.
+      let argument_topic = argument_kind
+        .placeholder_topic()
+        .cloned()
+        .unwrap_or_else(|| topic::new_node_topic(&argument.node_id()));
+      StubKind::TypeConversion {
+        argument_kind,
+        argument_topic,
+      }
+    }
+    ASTNode::FunctionCall { expression, .. }
+    | ASTNode::StructConstructor { expression, .. }
+    | ASTNode::FunctionCallOptions { expression, .. } => {
+      StubKind::CompoundExpression {
+        expression_kind: Box::new(classify_node_stub_kind(expression)),
+      }
+    }
+    ASTNode::Literal { .. } => StubKind::Literal,
+    ASTNode::VariableDeclarationStatement { .. }
+    | ASTNode::VariableDeclaration { .. }
+    | ASTNode::ContractDefinition { .. }
+    | ASTNode::FunctionDefinition { .. }
+    | ASTNode::ModifierDefinition { .. }
+    | ASTNode::StructDefinition { .. }
+    | ASTNode::EnumDefinition { .. }
+    | ASTNode::EventDefinition { .. }
+    | ASTNode::ErrorDefinition { .. }
+    | ASTNode::UserDefinedValueTypeDefinition { .. } => StubKind::Declaration,
+    _ => StubKind::Other,
+  }
 }
 
 fn node_to_stub(node: &ASTNode) -> ASTNode {
@@ -2016,6 +2146,7 @@ fn node_to_stub(node: &ASTNode) -> ASTNode {
     node_id: node.node_id(),
     src_location: node.src_location().clone(),
     topic: topic::new_node_topic(&node.node_id()),
+    kind: classify_node_stub_kind(node),
   }
 }
 
@@ -2871,10 +3002,12 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       node_id,
       src_location,
       topic,
+      kind,
     } => ASTNode::Stub {
       node_id: node_id,
       src_location: src_location,
       topic: topic,
+      kind: kind,
     },
     ASTNode::Other {
       node_id,
@@ -3571,7 +3704,7 @@ fn wrap_statement_in_block(statement: Box<ASTNode>) -> Box<ASTNode> {
       }
     }
     // If it's a Block with more than one SemanticBlock, leave as-is.
-    ASTNode::SemanticBlock { .. } => statement,
+    ASTNode::Block { .. } => statement,
     // Otherwise, wrap the single statement in a Block
     _ => {
       // Wrap the SemanticBlock in a Block

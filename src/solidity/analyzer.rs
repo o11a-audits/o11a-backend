@@ -1056,11 +1056,16 @@ fn scope_to_self_reference(
       })
     }
     Scope::SemanticBlock {
-      component, member, ..
+      component,
+      member,
+      semantic_block,
+      ..
     } => {
-      // Declaration is within a semantic block, still scoped to the member
+      // Declaration is within a semantic block — use the semantic block as the
+      // reference node so the group points to the block rather than the
+      // individual declaration.
       Some(ScopedReference {
-        reference_node: node_id,
+        reference_node: semantic_block.underlying_id().ok()?,
         containing_component: component.underlying_id().ok()?,
         containing_member: Some(member.underlying_id().ok()?),
       })
@@ -1754,12 +1759,10 @@ fn collect_references_and_statements(
   variable_mutations: &mut Vec<ReferencedNode>,
 ) {
   // Update current_containing_block when entering a block-like node.
-  // This includes SemanticBlocks, FunctionSignatures, and VariableDeclarationStatements.
-  let containing_block = match node {
-    ASTNode::SemanticBlock { node_id, .. }
-    | ASTNode::FunctionSignature { node_id, .. }
-    | ASTNode::VariableDeclarationStatement { node_id, .. } => Some(*node_id),
-    _ => current_containing_block,
+  let containing_block = if node.is_containing_block() {
+    Some(node.node_id())
+  } else {
+    current_containing_block
   };
 
   match node {
