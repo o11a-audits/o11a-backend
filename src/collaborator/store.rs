@@ -111,6 +111,7 @@ fn insert_comment_mention(
     component_sort_key,
     true,
     subscope,
+    &[],
     reference,
   );
 }

@@ -651,9 +651,19 @@ impl ReferenceResponse {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct ControlFlowReferenceGroupResponse {
+  pub control_flow: ControlFlowInfoResponse,
+  pub references: Vec<ReferenceResponse>,
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub nested: Vec<ControlFlowReferenceGroupResponse>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct NestedReferenceGroupResponse {
   pub subscope: String,
   pub references: Vec<ReferenceResponse>,
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub control_flow_groups: Vec<ControlFlowReferenceGroupResponse>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -730,6 +740,26 @@ pub enum TopicMetadataResponse {
 }
 
 // Helper function to convert ReferenceGroup to ReferenceGroupResponse
+fn convert_cf_groups(
+  groups: &[crate::core::ControlFlowReferenceGroup],
+) -> Vec<ControlFlowReferenceGroupResponse> {
+  groups
+    .iter()
+    .map(|g| ControlFlowReferenceGroupResponse {
+      control_flow: ControlFlowInfoResponse {
+        topic: g.control_flow().topic.id.clone(),
+        kind: ControlFlowKindInfo::from_core(&g.control_flow().kind),
+      },
+      references: g
+        .references()
+        .iter()
+        .map(ReferenceResponse::from_reference)
+        .collect(),
+      nested: convert_cf_groups(g.nested()),
+    })
+    .collect()
+}
+
 fn convert_reference_groups(
   groups: &[crate::core::ReferenceGroup],
 ) -> Vec<ReferenceGroupResponse> {
@@ -753,6 +783,7 @@ fn convert_reference_groups(
             .iter()
             .map(ReferenceResponse::from_reference)
             .collect(),
+          control_flow_groups: convert_cf_groups(m.control_flow_groups()),
         })
         .collect(),
     })

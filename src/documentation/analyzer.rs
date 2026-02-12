@@ -470,6 +470,7 @@ fn populate_mentions(
             component_sort_key,
             true,
             None,
+            &[],
             core::Reference::project_reference(member, member_sort_key),
           );
         }
@@ -492,6 +493,7 @@ fn populate_mentions(
               component_sort_key,
               true,
               Some((member, member_sort_key)),
+              &[],
               core::Reference::project_reference(
                 layer.block.clone(),
                 cb_sort_key,

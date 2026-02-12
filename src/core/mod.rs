@@ -88,14 +88,14 @@ impl ElementaryType {
 /// Describes which control flow statement encloses a containing block layer.
 /// Branch information is encoded directly in the kind — only `If` has branches,
 /// so this avoids a disjoint field that would be meaningless for loops.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ControlFlowInfo {
   /// The topic of the control flow statement node
   pub topic: topic::Topic,
   pub kind: ControlFlowKind,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ControlFlowKind {
   If(ControlFlowBranch),
   For,
@@ -103,7 +103,7 @@ pub enum ControlFlowKind {
   DoWhile,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ControlFlowBranch {
   True,
   False,
@@ -556,6 +556,38 @@ impl ReferenceGroup {
   }
 }
 
+/// Groups references within a control flow statement body.
+/// Recursive to handle nested control flow (if inside for inside while).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ControlFlowReferenceGroup {
+  /// The control flow statement that groups these references
+  control_flow: ControlFlowInfo,
+  /// Source location start for sorting groups relative to each other
+  sort_key: Option<usize>,
+  /// References directly within this control flow body (not nested in deeper control flow)
+  references: Vec<Reference>,
+  /// Nested control flow groups within this one
+  nested: Vec<ControlFlowReferenceGroup>,
+}
+
+impl ControlFlowReferenceGroup {
+  pub fn control_flow(&self) -> &ControlFlowInfo {
+    &self.control_flow
+  }
+
+  pub fn sort_key(&self) -> Option<usize> {
+    self.sort_key
+  }
+
+  pub fn references(&self) -> &[Reference] {
+    &self.references
+  }
+
+  pub fn nested(&self) -> &[ControlFlowReferenceGroup] {
+    &self.nested
+  }
+}
+
 /// Groups references within a nested scope.
 /// For Solidity: represents references within a function/modifier.
 /// For Documentation: represents references within a section (component).
@@ -565,8 +597,10 @@ pub struct NestedReferenceGroup {
   subscope: topic::Topic,
   /// Source location start for sorting nested groups relative to each other
   sort_key: Option<usize>,
-  /// References within this nested scope
+  /// References within this nested scope (outside any control flow)
   references: Vec<Reference>,
+  /// References grouped by control flow statement
+  control_flow_groups: Vec<ControlFlowReferenceGroup>,
 }
 
 impl NestedReferenceGroup {
@@ -580,6 +614,10 @@ impl NestedReferenceGroup {
 
   pub fn references(&self) -> &[Reference] {
     &self.references
+  }
+
+  pub fn control_flow_groups(&self) -> &[ControlFlowReferenceGroup] {
+    &self.control_flow_groups
   }
 }
 
@@ -612,15 +650,19 @@ pub fn ensure_group(
 /// Inserts a reference into a sorted, deduplicated Vec<ReferenceGroup>.
 ///
 /// Finds or creates the appropriate ReferenceGroup (by scope topic) and, if a subscope
-/// is provided, the appropriate NestedReferenceGroup. Inserts the reference at the
-/// correct sorted position. Skips insertion if a reference with the same reference_topic
-/// already exists at that level.
+/// is provided, the appropriate NestedReferenceGroup. If a control flow chain is provided,
+/// the reference is nested within recursive ControlFlowReferenceGroup(s) inside the
+/// NestedReferenceGroup.
+///
+/// Inserts the reference at the correct sorted position. Skips insertion if a reference
+/// with the same reference_topic already exists at that level.
 pub fn insert_reference(
   groups: &mut Vec<ReferenceGroup>,
   scope: topic::Topic,
   scope_sort_key: Option<usize>,
   is_in_scope: bool,
   subscope: Option<(topic::Topic, Option<usize>)>,
+  control_flow_chain: &[ControlFlowInfo],
   reference: Reference,
 ) {
   // Ensure the group exists
@@ -631,7 +673,7 @@ pub fn insert_reference(
 
   match subscope {
     None => {
-      // Insert into scope_references with dedup
+      // Insert into scope_references with dedup (no control flow at scope level)
       insert_ref_sorted(&mut group.scope_references, reference);
     }
     Some((subscope_topic, subscope_sort_key)) => {
@@ -651,6 +693,7 @@ pub fn insert_reference(
             subscope: subscope_topic.clone(),
             sort_key: subscope_sort_key,
             references: Vec::new(),
+            control_flow_groups: Vec::new(),
           },
         );
       }
@@ -661,8 +704,61 @@ pub fn insert_reference(
         .find(|n| n.subscope == subscope_topic)
         .unwrap();
 
-      insert_ref_sorted(&mut nested.references, reference);
+      if control_flow_chain.is_empty() {
+        insert_ref_sorted(&mut nested.references, reference);
+      } else {
+        // Walk the control flow chain, creating/finding groups at each level
+        let target_refs = find_or_create_cf_group(
+          &mut nested.control_flow_groups,
+          control_flow_chain,
+        );
+        insert_ref_sorted(target_refs, reference);
+      }
     }
+  }
+}
+
+/// Walks a control flow chain, creating or finding `ControlFlowReferenceGroup`s at
+/// each level, and returns a mutable reference to the `references` vec at the final level.
+fn find_or_create_cf_group<'a>(
+  groups: &'a mut Vec<ControlFlowReferenceGroup>,
+  chain: &[ControlFlowInfo],
+) -> &'a mut Vec<Reference> {
+  assert!(!chain.is_empty());
+
+  let cf = &chain[0];
+
+  // Find or create the group for this control flow (matched by topic + kind)
+  if !groups
+    .iter()
+    .any(|g| g.control_flow.topic == cf.topic && g.control_flow.kind == cf.kind)
+  {
+    let sort_key = cf.topic.underlying_id().ok().map(|id| id as usize);
+    let pos = groups
+      .binary_search_by(|g| g.sort_key.cmp(&sort_key))
+      .unwrap_or_else(|pos| pos);
+    groups.insert(
+      pos,
+      ControlFlowReferenceGroup {
+        control_flow: cf.clone(),
+        sort_key,
+        references: Vec::new(),
+        nested: Vec::new(),
+      },
+    );
+  }
+
+  let group = groups
+    .iter_mut()
+    .find(|g| {
+      g.control_flow.topic == cf.topic && g.control_flow.kind == cf.kind
+    })
+    .unwrap();
+
+  if chain.len() == 1 {
+    &mut group.references
+  } else {
+    find_or_create_cf_group(&mut group.nested, &chain[1..])
   }
 }
 
