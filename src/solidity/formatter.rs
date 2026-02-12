@@ -927,7 +927,7 @@ fn do_node_to_source_text(
 
     ASTNode::DoWhileStatement {
       node_id,
-      nodes,
+      condition,
       body,
       ..
     } => {
@@ -936,22 +936,14 @@ fn do_node_to_source_text(
       } else {
         String::new()
       };
-      let cond_placeholder = if !nodes.is_empty() {
-        maybe_identifier_placeholder(&nodes[0])
-      } else {
-        String::new()
-      };
-      let condition = if !nodes.is_empty() {
-        do_node_to_source_text(
-          &nodes[0],
-          indent_level,
-          nodes_map,
-          topic_metadata,
-          ctx,
-        )
-      } else {
-        String::new()
-      };
+      let cond_placeholder = maybe_identifier_placeholder(condition);
+      let cond = do_node_to_source_text(
+        condition,
+        indent_level,
+        nodes_map,
+        topic_metadata,
+        ctx,
+      );
       format!(
         "{}{} {} {} ({}{})",
         formatting::format_statement_placeholder(&new_node_topic(node_id)),
@@ -963,7 +955,7 @@ fn do_node_to_source_text(
         body_str,
         formatting::format_keyword("while"),
         cond_placeholder,
-        condition
+        cond
       )
     }
 
@@ -1014,57 +1006,17 @@ fn do_node_to_source_text(
 
     ASTNode::ForStatement {
       node_id,
-      initialization_expression,
       condition,
-      loop_expression,
       body,
       ..
     } => {
-      let _init_placeholder = initialization_expression
-        .as_ref()
-        .map(|e| maybe_identifier_placeholder(e))
-        .unwrap_or_default();
-      let _init = if let Some(init_expr) = initialization_expression {
-        do_node_to_source_text(
-          init_expr,
-          indent_level,
-          nodes_map,
-          topic_metadata,
-          ctx,
-        )
-      } else {
-        String::new()
-      };
-      let _cond_placeholder = condition
-        .as_ref()
-        .map(|e| maybe_identifier_placeholder(e))
-        .unwrap_or_default();
-      let _cond = if let Some(cond_expr) = condition {
-        do_node_to_source_text(
-          cond_expr,
-          indent_level,
-          nodes_map,
-          topic_metadata,
-          ctx,
-        )
-      } else {
-        String::new()
-      };
-      let _loop_placeholder = loop_expression
-        .as_ref()
-        .map(|e| maybe_identifier_placeholder(e))
-        .unwrap_or_default();
-      let _loop_expr = if let Some(l_expr) = loop_expression {
-        do_node_to_source_text(
-          l_expr,
-          indent_level,
-          nodes_map,
-          topic_metadata,
-          ctx,
-        )
-      } else {
-        String::new()
-      };
+      let _loop_expr = do_node_to_source_text(
+        condition,
+        indent_level,
+        nodes_map,
+        topic_metadata,
+        ctx,
+      );
       let body_str = do_node_to_source_text(
         body,
         indent_level,
@@ -1082,6 +1034,48 @@ fn do_node_to_source_text(
         ),
         body_str
       )
+    }
+
+    ASTNode::LoopExpression {
+      initialization_expression,
+      condition,
+      loop_expression,
+      ..
+    } => {
+      let init = if let Some(init_expr) = initialization_expression {
+        do_node_to_source_text(
+          init_expr,
+          indent_level,
+          nodes_map,
+          topic_metadata,
+          ctx,
+        )
+      } else {
+        String::new()
+      };
+      let cond = if let Some(cond_expr) = condition {
+        do_node_to_source_text(
+          cond_expr,
+          indent_level,
+          nodes_map,
+          topic_metadata,
+          ctx,
+        )
+      } else {
+        String::new()
+      };
+      let loop_expr = if let Some(l_expr) = loop_expression {
+        do_node_to_source_text(
+          l_expr,
+          indent_level,
+          nodes_map,
+          topic_metadata,
+          ctx,
+        )
+      } else {
+        String::new()
+      };
+      format!("{}; {}; {}", init, cond, loop_expr)
     }
 
     ASTNode::IfStatement {

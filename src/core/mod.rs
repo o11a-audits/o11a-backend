@@ -103,6 +103,17 @@ pub enum ControlFlowKind {
   DoWhile,
 }
 
+/// Branchless kind for the TopicMetadata::ControlFlow variant.
+/// Unlike ControlFlowKind (which encodes branch info for scope tracking),
+/// this simply identifies the statement type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ControlFlowStatementKind {
+  If,
+  For,
+  While,
+  DoWhile,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ControlFlowBranch {
   True,
@@ -401,17 +412,14 @@ pub enum UnnamedTopicKind {
   SemanticBlock,
   Break,
   Continue,
-  DoWhile,
   Emit,
-  For,
-  If,
   InlineAssembly,
+  LoopExpression,
   Placeholder,
   Return,
   Revert,
   Try,
   UncheckedBlock,
-  While,
   Reference,
   MutableReference,
   Signature,
@@ -568,6 +576,8 @@ pub struct ControlFlowReferenceGroup {
   references: Vec<Reference>,
   /// Nested control flow groups within this one
   nested: Vec<ControlFlowReferenceGroup>,
+  /// Whether this If branch has a sibling branch (true body has false body, or vice versa)
+  has_sibling_branch: bool,
 }
 
 impl ControlFlowReferenceGroup {
@@ -585,6 +595,10 @@ impl ControlFlowReferenceGroup {
 
   pub fn nested(&self) -> &[ControlFlowReferenceGroup] {
     &self.nested
+  }
+
+  pub fn has_sibling_branch(&self) -> bool {
+    self.has_sibling_branch
   }
 }
 
@@ -733,6 +747,12 @@ fn find_or_create_cf_group<'a>(
     .iter()
     .any(|g| g.control_flow.topic == cf.topic && g.control_flow.kind == cf.kind)
   {
+    // When inserting an If branch, check if the sibling branch already exists
+    let has_sibling = matches!(cf.kind, ControlFlowKind::If(_))
+      && groups.iter().any(|g| {
+        g.control_flow.topic == cf.topic && g.control_flow.kind != cf.kind
+      });
+
     let sort_key = cf.topic.underlying_id().ok().map(|id| id as usize);
     let pos = groups
       .binary_search_by(|g| g.sort_key.cmp(&sort_key))
@@ -744,8 +764,18 @@ fn find_or_create_cf_group<'a>(
         sort_key,
         references: Vec::new(),
         nested: Vec::new(),
+        has_sibling_branch: has_sibling,
       },
     );
+
+    // If we found a sibling, mark the existing sibling too
+    if has_sibling {
+      if let Some(sibling) = groups.iter_mut().find(|g| {
+        g.control_flow.topic == cf.topic && g.control_flow.kind != cf.kind
+      }) {
+        sibling.has_sibling_branch = true;
+      }
+    }
   }
 
   let group = groups
@@ -902,6 +932,15 @@ pub enum TopicMetadata {
     kind: UnnamedTopicKind,
     mentions: Vec<ReferenceGroup>,
   },
+  /// A control flow statement (if/for/while/do-while) with its condition topic.
+  ControlFlow {
+    topic: topic::Topic,
+    scope: Scope,
+    kind: ControlFlowStatementKind,
+    /// The condition expression topic.
+    condition: topic::Topic,
+    mentions: Vec<ReferenceGroup>,
+  },
   /// A topic with a title (like documentation sections) but not a full declaration
   TitledTopic {
     topic: topic::Topic,
@@ -928,6 +967,7 @@ impl TopicMetadata {
     match self {
       TopicMetadata::NamedTopic { scope, .. }
       | TopicMetadata::UnnamedTopic { scope, .. }
+      | TopicMetadata::ControlFlow { scope, .. }
       | TopicMetadata::TitledTopic { scope, .. }
       | TopicMetadata::CommentTopic { scope, .. } => scope,
     }
@@ -938,6 +978,7 @@ impl TopicMetadata {
       TopicMetadata::NamedTopic { name, .. } => name,
       TopicMetadata::TitledTopic { title, .. } => title,
       TopicMetadata::UnnamedTopic { topic, .. }
+      | TopicMetadata::ControlFlow { topic, .. }
       | TopicMetadata::CommentTopic { topic, .. } => topic.id(),
     }
   }
@@ -946,6 +987,7 @@ impl TopicMetadata {
     match self {
       TopicMetadata::NamedTopic { topic, .. }
       | TopicMetadata::UnnamedTopic { topic, .. }
+      | TopicMetadata::ControlFlow { topic, .. }
       | TopicMetadata::TitledTopic { topic, .. }
       | TopicMetadata::CommentTopic { topic, .. } => topic,
     }
@@ -955,6 +997,7 @@ impl TopicMetadata {
     match self {
       TopicMetadata::NamedTopic { references, .. } => references,
       TopicMetadata::UnnamedTopic { .. }
+      | TopicMetadata::ControlFlow { .. }
       | TopicMetadata::TitledTopic { .. }
       | TopicMetadata::CommentTopic { .. } => &[],
     }
@@ -967,6 +1010,7 @@ impl TopicMetadata {
         ..
       } => expanded_references,
       TopicMetadata::UnnamedTopic { .. }
+      | TopicMetadata::ControlFlow { .. }
       | TopicMetadata::TitledTopic { .. }
       | TopicMetadata::CommentTopic { .. } => &[],
     }
@@ -976,6 +1020,7 @@ impl TopicMetadata {
     match self {
       TopicMetadata::NamedTopic { ancestry, .. } => ancestry,
       TopicMetadata::UnnamedTopic { .. }
+      | TopicMetadata::ControlFlow { .. }
       | TopicMetadata::TitledTopic { .. }
       | TopicMetadata::CommentTopic { .. } => &[],
     }
@@ -985,6 +1030,7 @@ impl TopicMetadata {
     match self {
       TopicMetadata::NamedTopic { ancestors, .. } => ancestors,
       TopicMetadata::UnnamedTopic { .. }
+      | TopicMetadata::ControlFlow { .. }
       | TopicMetadata::TitledTopic { .. }
       | TopicMetadata::CommentTopic { .. } => &[],
     }
@@ -994,6 +1040,7 @@ impl TopicMetadata {
     match self {
       TopicMetadata::NamedTopic { descendants, .. } => descendants,
       TopicMetadata::UnnamedTopic { .. }
+      | TopicMetadata::ControlFlow { .. }
       | TopicMetadata::TitledTopic { .. }
       | TopicMetadata::CommentTopic { .. } => &[],
     }
@@ -1003,6 +1050,7 @@ impl TopicMetadata {
     match self {
       TopicMetadata::NamedTopic { relatives, .. } => relatives,
       TopicMetadata::UnnamedTopic { .. }
+      | TopicMetadata::ControlFlow { .. }
       | TopicMetadata::TitledTopic { .. }
       | TopicMetadata::CommentTopic { .. } => &[],
     }
@@ -1012,6 +1060,7 @@ impl TopicMetadata {
     match self {
       TopicMetadata::NamedTopic { mutations, .. } => mutations,
       TopicMetadata::UnnamedTopic { .. }
+      | TopicMetadata::ControlFlow { .. }
       | TopicMetadata::TitledTopic { .. }
       | TopicMetadata::CommentTopic { .. } => &[],
     }
@@ -1021,6 +1070,7 @@ impl TopicMetadata {
     match self {
       TopicMetadata::NamedTopic { is_mutable, .. } => *is_mutable,
       TopicMetadata::UnnamedTopic { .. }
+      | TopicMetadata::ControlFlow { .. }
       | TopicMetadata::TitledTopic { .. }
       | TopicMetadata::CommentTopic { .. } => false,
     }
@@ -1030,6 +1080,7 @@ impl TopicMetadata {
     match self {
       TopicMetadata::NamedTopic { mentions, .. }
       | TopicMetadata::UnnamedTopic { mentions, .. }
+      | TopicMetadata::ControlFlow { mentions, .. }
       | TopicMetadata::TitledTopic { mentions, .. }
       | TopicMetadata::CommentTopic { mentions, .. } => mentions,
     }

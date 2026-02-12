@@ -811,7 +811,7 @@ pub enum ASTNode {
   DoWhileStatement {
     node_id: i32,
     src_location: SourceLocation,
-    nodes: Vec<ASTNode>,
+    condition: Box<ASTNode>,
     body: Option<Box<ASTNode>>,
   },
   EmitStatement {
@@ -827,11 +827,18 @@ pub enum ASTNode {
   ForStatement {
     node_id: i32,
     src_location: SourceLocation,
+    condition: Box<ASTNode>,
     body: Box<ASTNode>,
-    condition: Option<Box<ASTNode>>,
+  },
+  /// Synthetic node wrapping ForStatement's loop clauses (init, condition, loop expression).
+  /// Generated during parsing, not from the Solidity compiler AST.
+  LoopExpression {
+    node_id: i32,
+    src_location: SourceLocation,
     initialization_expression: Option<Box<ASTNode>>,
-    is_simple_counter_loop: bool,
+    condition: Option<Box<ASTNode>>,
     loop_expression: Option<Box<ASTNode>>,
+    is_simple_counter_loop: bool,
   },
   IfStatement {
     node_id: i32,
@@ -1219,6 +1226,7 @@ impl ASTNode {
       ASTNode::EmitStatement { node_id, .. } => *node_id,
       ASTNode::ExpressionStatement { node_id, .. } => *node_id,
       ASTNode::ForStatement { node_id, .. } => *node_id,
+      ASTNode::LoopExpression { node_id, .. } => *node_id,
       ASTNode::IfStatement { node_id, .. } => *node_id,
       ASTNode::InlineAssembly { node_id, .. } => *node_id,
       ASTNode::PlaceholderStatement { node_id, .. } => *node_id,
@@ -1290,6 +1298,7 @@ impl ASTNode {
       ASTNode::EmitStatement { src_location, .. } => src_location,
       ASTNode::ExpressionStatement { src_location, .. } => src_location,
       ASTNode::ForStatement { src_location, .. } => src_location,
+      ASTNode::LoopExpression { src_location, .. } => src_location,
       ASTNode::IfStatement { src_location, .. } => src_location,
       ASTNode::InlineAssembly { src_location, .. } => src_location,
       ASTNode::PlaceholderStatement { src_location, .. } => src_location,
@@ -1441,27 +1450,32 @@ impl ASTNode {
       }
       ASTNode::Break { .. } => vec![],
       ASTNode::Continue { .. } => vec![],
-      ASTNode::DoWhileStatement { .. } => {
-        panic!("DoWhileStatement not implemented")
-      }
+      ASTNode::DoWhileStatement {
+        condition, body, ..
+      } => match body {
+        Some(body) => vec![condition, body],
+        None => vec![condition],
+      },
       ASTNode::EmitStatement { event_call, .. } => vec![event_call],
       ASTNode::ExpressionStatement { expression, .. } => vec![expression],
       ASTNode::ForStatement {
-        body,
-        condition,
+        condition, body, ..
+      } => vec![condition, body],
+      ASTNode::LoopExpression {
         initialization_expression,
+        condition,
         loop_expression,
         ..
       } => {
-        let mut result = vec![&**body];
-        if let Some(initialization_expression) = initialization_expression {
-          result.push(initialization_expression);
+        let mut result = vec![];
+        if let Some(init) = initialization_expression {
+          result.push(&**init);
         }
-        if let Some(condition) = condition {
-          result.push(condition);
+        if let Some(cond) = condition {
+          result.push(&**cond);
         }
-        if let Some(loop_expression) = loop_expression {
-          result.push(loop_expression);
+        if let Some(loop_expr) = loop_expression {
+          result.push(&**loop_expr);
         }
         result
       }
@@ -1806,19 +1820,29 @@ impl ASTNode {
       }
       ASTNode::Break { .. } => vec![],
       ASTNode::Continue { .. } => vec![],
-      ASTNode::DoWhileStatement { .. } => vec![],
+      ASTNode::DoWhileStatement {
+        condition, body, ..
+      } => {
+        let mut result = vec![condition.as_mut()];
+        if let Some(b) = body {
+          result.push(b.as_mut());
+        }
+        result
+      }
       ASTNode::EmitStatement { event_call, .. } => vec![event_call.as_mut()],
       ASTNode::ExpressionStatement { expression, .. } => {
         vec![expression.as_mut()]
       }
       ASTNode::ForStatement {
-        body,
-        condition,
+        condition, body, ..
+      } => vec![condition.as_mut(), body.as_mut()],
+      ASTNode::LoopExpression {
         initialization_expression,
+        condition,
         loop_expression,
         ..
       } => {
-        let mut result: Vec<&mut ASTNode> = vec![body.as_mut()];
+        let mut result: Vec<&mut ASTNode> = vec![];
         if let Some(init) = initialization_expression {
           result.push(init.as_mut());
         }
@@ -2442,12 +2466,12 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     ASTNode::DoWhileStatement {
       node_id,
       src_location,
-      nodes,
+      condition,
       body,
     } => ASTNode::DoWhileStatement {
       node_id: node_id,
       src_location: src_location,
-      nodes: nodes.iter().map(|n| node_to_stub(n)).collect(),
+      condition: Box::new(node_to_stub(&condition)),
       body: match body {
         Some(b) => Some(Box::new(node_to_stub(&b))),
         None => None,
@@ -2474,28 +2498,37 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
     ASTNode::ForStatement {
       node_id,
       src_location,
-      body,
       condition,
-      initialization_expression,
-      is_simple_counter_loop,
-      loop_expression,
+      body,
     } => ASTNode::ForStatement {
       node_id: node_id,
       src_location: src_location,
+      condition: Box::new(node_to_stub(&condition)),
       body: Box::new(node_to_stub(&body)),
-      condition: match condition {
-        Some(c) => Some(Box::new(node_to_stub(&c))),
-        None => None,
-      },
+    },
+    ASTNode::LoopExpression {
+      node_id,
+      src_location,
+      initialization_expression,
+      condition,
+      loop_expression,
+      is_simple_counter_loop,
+    } => ASTNode::LoopExpression {
+      node_id: node_id,
+      src_location: src_location,
       initialization_expression: match initialization_expression {
         Some(ie) => Some(Box::new(node_to_stub(&ie))),
         None => None,
       },
-      is_simple_counter_loop: is_simple_counter_loop,
+      condition: match condition {
+        Some(c) => Some(Box::new(node_to_stub(&c))),
+        None => None,
+      },
       loop_expression: match loop_expression {
         Some(le) => Some(Box::new(node_to_stub(&le))),
         None => None,
       },
+      is_simple_counter_loop: is_simple_counter_loop,
     },
     ASTNode::IfStatement {
       node_id,
@@ -4339,9 +4372,9 @@ fn node_from_json(
       src_location,
     }),
     "DoWhileStatement" => {
-      let nodes = get_required_node_vec_with_context(
+      let condition = get_required_node_with_context(
         val,
-        "nodes",
+        "condition",
         node_type_str,
         context,
       )?;
@@ -4354,7 +4387,7 @@ fn node_from_json(
       Ok(ASTNode::DoWhileStatement {
         node_id,
         src_location,
-        nodes,
+        condition,
         body,
       })
     }
@@ -4416,14 +4449,21 @@ fn node_from_json(
       // Wrap braceless for-loop bodies in a Block, like IfStatement
       let body = wrap_statement_in_block(body);
 
+      // Create a synthetic LoopExpression node wrapping the loop clauses
+      let loop_expr_node = ASTNode::LoopExpression {
+        node_id: generate_node_id(),
+        src_location: src_location.clone(),
+        initialization_expression,
+        condition,
+        loop_expression,
+        is_simple_counter_loop,
+      };
+
       Ok(ASTNode::ForStatement {
         node_id,
         src_location,
+        condition: Box::new(loop_expr_node),
         body,
-        condition,
-        initialization_expression,
-        is_simple_counter_loop,
-        loop_expression,
       })
     }
     "IfStatement" => {

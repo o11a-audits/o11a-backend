@@ -303,6 +303,7 @@ pub async fn get_contracts(
         matches!(kind, crate::core::NamedTopicKind::Contract(_))
       }
       crate::core::TopicMetadata::UnnamedTopic { .. }
+      | crate::core::TopicMetadata::ControlFlow { .. }
       | crate::core::TopicMetadata::TitledTopic { .. }
       | crate::core::TopicMetadata::CommentTopic { .. } => false,
     };
@@ -656,6 +657,8 @@ pub struct ControlFlowReferenceGroupResponse {
   pub references: Vec<ReferenceResponse>,
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub nested: Vec<ControlFlowReferenceGroupResponse>,
+  #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+  pub has_sibling_branch: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -712,6 +715,16 @@ pub struct UnnamedTopicResponse {
   pub scope: ScopeInfo,
 }
 
+/// Response for ControlFlow metadata
+#[derive(Debug, Serialize)]
+pub struct ControlFlowTopicResponse {
+  pub topic_id: String,
+  pub kind: String,
+  pub scope: ScopeInfo,
+  pub condition: String,
+  pub mentions: Vec<ReferenceGroupResponse>,
+}
+
 /// Response for CommentTopic metadata
 #[derive(Debug, Serialize)]
 pub struct CommentTopicResponse {
@@ -735,6 +748,8 @@ pub enum TopicMetadataResponse {
   Titled(TitledTopicResponse),
   #[serde(rename = "unnamed")]
   Unnamed(UnnamedTopicResponse),
+  #[serde(rename = "control_flow")]
+  ControlFlow(ControlFlowTopicResponse),
   #[serde(rename = "CommentTopic")]
   CommentTopic(CommentTopicResponse),
 }
@@ -756,6 +771,7 @@ fn convert_cf_groups(
         .map(ReferenceResponse::from_reference)
         .collect(),
       nested: convert_cf_groups(g.nested()),
+      has_sibling_branch: g.has_sibling_branch(),
     })
     .collect()
 }
@@ -867,6 +883,16 @@ fn topic_metadata_to_response(
         scope: scope_info,
       })
     }
+
+    crate::core::TopicMetadata::ControlFlow {
+      kind, condition, ..
+    } => TopicMetadataResponse::ControlFlow(ControlFlowTopicResponse {
+      topic_id: topic.id.clone(),
+      kind: format!("{:?}", kind),
+      scope: scope_info,
+      condition: condition.id.clone(),
+      mentions: convert_reference_groups(metadata.mentions()),
+    }),
 
     crate::core::TopicMetadata::CommentTopic {
       author_id,

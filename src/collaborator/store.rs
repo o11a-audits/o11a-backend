@@ -102,6 +102,7 @@ fn insert_comment_mention(
     Some(core::TopicMetadata::NamedTopic { mentions, .. })
     | Some(core::TopicMetadata::UnnamedTopic { mentions, .. })
     | Some(core::TopicMetadata::TitledTopic { mentions, .. })
+    | Some(core::TopicMetadata::ControlFlow { mentions, .. })
     | Some(core::TopicMetadata::CommentTopic { mentions, .. }) => mentions,
     None => return,
   };

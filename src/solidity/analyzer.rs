@@ -1532,93 +1532,124 @@ fn process_second_pass_nodes(
         }
       }
     } else {
-      let kind = match node {
-        ASTNode::Assignment { .. } => UnnamedTopicKind::VariableMutation,
-        ASTNode::BinaryOperation { operator, .. } => match operator {
-          parser::BinaryOperator::Add => UnnamedTopicKind::Arithmetic,
-          parser::BinaryOperator::Subtract => UnnamedTopicKind::Arithmetic,
-          parser::BinaryOperator::Multiply => UnnamedTopicKind::Arithmetic,
-          parser::BinaryOperator::Divide => UnnamedTopicKind::Arithmetic,
-          parser::BinaryOperator::Modulo => UnnamedTopicKind::Arithmetic,
-          parser::BinaryOperator::Power => UnnamedTopicKind::Arithmetic,
-          parser::BinaryOperator::Equal => UnnamedTopicKind::Comparison,
-          parser::BinaryOperator::NotEqual => UnnamedTopicKind::Comparison,
-          parser::BinaryOperator::LessThan => UnnamedTopicKind::Comparison,
-          parser::BinaryOperator::LessThanOrEqual => {
-            UnnamedTopicKind::Comparison
-          }
-          parser::BinaryOperator::GreaterThan => UnnamedTopicKind::Comparison,
-          parser::BinaryOperator::GreaterThanOrEqual => {
-            UnnamedTopicKind::Comparison
-          }
-          parser::BinaryOperator::And => UnnamedTopicKind::Logical,
-          parser::BinaryOperator::Or => UnnamedTopicKind::Logical,
-          parser::BinaryOperator::BitwiseAnd => UnnamedTopicKind::Bitwise,
-          parser::BinaryOperator::BitwiseOr => UnnamedTopicKind::Bitwise,
-          parser::BinaryOperator::BitwiseXor => UnnamedTopicKind::Bitwise,
-          parser::BinaryOperator::LeftShift => UnnamedTopicKind::Bitwise,
-          parser::BinaryOperator::RightShift => UnnamedTopicKind::Bitwise,
-        },
-        ASTNode::Conditional { .. } => UnnamedTopicKind::Conditional,
-        ASTNode::FunctionCall { .. } => UnnamedTopicKind::FunctionCall,
-        ASTNode::TypeConversion { .. } => UnnamedTopicKind::TypeConversion,
-        ASTNode::StructConstructor { .. } => {
-          UnnamedTopicKind::StructConstruction
-        }
-        ASTNode::NewExpression { .. } => UnnamedTopicKind::NewExpression,
-        ASTNode::Literal { .. } => UnnamedTopicKind::Literal,
-        ASTNode::SemanticBlock { .. } => UnnamedTopicKind::SemanticBlock,
-        ASTNode::Break { .. } => UnnamedTopicKind::Break,
-        ASTNode::Continue { .. } => UnnamedTopicKind::Continue,
-        ASTNode::DoWhileStatement { .. } => UnnamedTopicKind::DoWhile,
-        ASTNode::EmitStatement { .. } => UnnamedTopicKind::Emit,
-        ASTNode::ForStatement { .. } => UnnamedTopicKind::For,
-        ASTNode::IfStatement { .. } => UnnamedTopicKind::If,
-        ASTNode::InlineAssembly { .. } => UnnamedTopicKind::InlineAssembly,
-        ASTNode::PlaceholderStatement { .. } => UnnamedTopicKind::Placeholder,
-        ASTNode::Return { .. } => UnnamedTopicKind::Return,
-        ASTNode::RevertStatement { .. } => UnnamedTopicKind::Revert,
-        ASTNode::TryStatement { .. } => UnnamedTopicKind::Try,
-        ASTNode::UncheckedBlock { .. } => UnnamedTopicKind::UncheckedBlock,
-        ASTNode::WhileStatement { .. } => UnnamedTopicKind::While,
-        ASTNode::MemberAccess {
-          referenced_declaration: None,
-          ..
-        } => UnnamedTopicKind::Reference,
-        ASTNode::Identifier {
-          referenced_declaration,
-          ..
-        }
-        | ASTNode::IdentifierPath {
-          referenced_declaration,
-          ..
-        }
-        | ASTNode::MemberAccess {
-          referenced_declaration: Some(referenced_declaration),
-          ..
-        } => {
-          // Check if the referenced variable has any mutations in scope
-          if mutations_map.contains_key(referenced_declaration) {
-            UnnamedTopicKind::MutableReference
-          } else {
-            UnnamedTopicKind::Reference
-          }
-        }
-        ASTNode::FunctionSignature { .. }
-        | ASTNode::ModifierSignature { .. }
-        | ASTNode::ContractSignature { .. } => UnnamedTopicKind::Signature,
-        _ => UnnamedTopicKind::Other,
+      // Control flow nodes get their own TopicMetadata variant
+      let control_flow_metadata = match node {
+        ASTNode::IfStatement { condition, .. } => Some((
+          core::ControlFlowStatementKind::If,
+          topic::new_node_topic(&condition.node_id()),
+        )),
+        ASTNode::ForStatement { condition, .. } => Some((
+          core::ControlFlowStatementKind::For,
+          topic::new_node_topic(&condition.node_id()),
+        )),
+        ASTNode::WhileStatement { condition, .. } => Some((
+          core::ControlFlowStatementKind::While,
+          topic::new_node_topic(&condition.node_id()),
+        )),
+        ASTNode::DoWhileStatement { condition, .. } => Some((
+          core::ControlFlowStatementKind::DoWhile,
+          topic::new_node_topic(&condition.node_id()),
+        )),
+        _ => None,
       };
 
-      topic_metadata.insert(
-        topic.clone(),
-        TopicMetadata::UnnamedTopic {
-          topic,
-          scope: scope.clone(),
-          kind,
-          mentions: vec![],
-        },
-      );
+      if let Some((kind, condition)) = control_flow_metadata {
+        topic_metadata.insert(
+          topic.clone(),
+          TopicMetadata::ControlFlow {
+            topic,
+            scope: scope.clone(),
+            kind,
+            condition,
+            mentions: vec![],
+          },
+        );
+      } else {
+        let kind = match node {
+          ASTNode::Assignment { .. } => UnnamedTopicKind::VariableMutation,
+          ASTNode::BinaryOperation { operator, .. } => match operator {
+            parser::BinaryOperator::Add => UnnamedTopicKind::Arithmetic,
+            parser::BinaryOperator::Subtract => UnnamedTopicKind::Arithmetic,
+            parser::BinaryOperator::Multiply => UnnamedTopicKind::Arithmetic,
+            parser::BinaryOperator::Divide => UnnamedTopicKind::Arithmetic,
+            parser::BinaryOperator::Modulo => UnnamedTopicKind::Arithmetic,
+            parser::BinaryOperator::Power => UnnamedTopicKind::Arithmetic,
+            parser::BinaryOperator::Equal => UnnamedTopicKind::Comparison,
+            parser::BinaryOperator::NotEqual => UnnamedTopicKind::Comparison,
+            parser::BinaryOperator::LessThan => UnnamedTopicKind::Comparison,
+            parser::BinaryOperator::LessThanOrEqual => {
+              UnnamedTopicKind::Comparison
+            }
+            parser::BinaryOperator::GreaterThan => UnnamedTopicKind::Comparison,
+            parser::BinaryOperator::GreaterThanOrEqual => {
+              UnnamedTopicKind::Comparison
+            }
+            parser::BinaryOperator::And => UnnamedTopicKind::Logical,
+            parser::BinaryOperator::Or => UnnamedTopicKind::Logical,
+            parser::BinaryOperator::BitwiseAnd => UnnamedTopicKind::Bitwise,
+            parser::BinaryOperator::BitwiseOr => UnnamedTopicKind::Bitwise,
+            parser::BinaryOperator::BitwiseXor => UnnamedTopicKind::Bitwise,
+            parser::BinaryOperator::LeftShift => UnnamedTopicKind::Bitwise,
+            parser::BinaryOperator::RightShift => UnnamedTopicKind::Bitwise,
+          },
+          ASTNode::Conditional { .. } => UnnamedTopicKind::Conditional,
+          ASTNode::FunctionCall { .. } => UnnamedTopicKind::FunctionCall,
+          ASTNode::TypeConversion { .. } => UnnamedTopicKind::TypeConversion,
+          ASTNode::StructConstructor { .. } => {
+            UnnamedTopicKind::StructConstruction
+          }
+          ASTNode::NewExpression { .. } => UnnamedTopicKind::NewExpression,
+          ASTNode::Literal { .. } => UnnamedTopicKind::Literal,
+          ASTNode::SemanticBlock { .. } => UnnamedTopicKind::SemanticBlock,
+          ASTNode::Break { .. } => UnnamedTopicKind::Break,
+          ASTNode::Continue { .. } => UnnamedTopicKind::Continue,
+          ASTNode::EmitStatement { .. } => UnnamedTopicKind::Emit,
+          ASTNode::InlineAssembly { .. } => UnnamedTopicKind::InlineAssembly,
+          ASTNode::LoopExpression { .. } => UnnamedTopicKind::LoopExpression,
+          ASTNode::PlaceholderStatement { .. } => UnnamedTopicKind::Placeholder,
+          ASTNode::Return { .. } => UnnamedTopicKind::Return,
+          ASTNode::RevertStatement { .. } => UnnamedTopicKind::Revert,
+          ASTNode::TryStatement { .. } => UnnamedTopicKind::Try,
+          ASTNode::UncheckedBlock { .. } => UnnamedTopicKind::UncheckedBlock,
+          ASTNode::MemberAccess {
+            referenced_declaration: None,
+            ..
+          } => UnnamedTopicKind::Reference,
+          ASTNode::Identifier {
+            referenced_declaration,
+            ..
+          }
+          | ASTNode::IdentifierPath {
+            referenced_declaration,
+            ..
+          }
+          | ASTNode::MemberAccess {
+            referenced_declaration: Some(referenced_declaration),
+            ..
+          } => {
+            // Check if the referenced variable has any mutations in scope
+            if mutations_map.contains_key(referenced_declaration) {
+              UnnamedTopicKind::MutableReference
+            } else {
+              UnnamedTopicKind::Reference
+            }
+          }
+          ASTNode::FunctionSignature { .. }
+          | ASTNode::ModifierSignature { .. }
+          | ASTNode::ContractSignature { .. } => UnnamedTopicKind::Signature,
+          _ => UnnamedTopicKind::Other,
+        };
+
+        topic_metadata.insert(
+          topic.clone(),
+          TopicMetadata::UnnamedTopic {
+            topic,
+            scope: scope.clone(),
+            kind,
+            mentions: vec![],
+          },
+        );
+      }
     }
 
     // Process children with appropriate context
@@ -1700,16 +1731,31 @@ fn process_second_pass_nodes(
 
       ASTNode::ForStatement {
         node_id,
-        body,
         condition,
-        initialization_expression,
-        loop_expression,
+        body,
         ..
       } => {
         let cf = core::ControlFlowInfo {
           topic: topic::new_node_topic(node_id),
           kind: core::ControlFlowKind::For,
         };
+
+        // Process condition (LoopExpression) without control flow context
+        process_second_pass_nodes(
+          &vec![condition.as_ref()],
+          is_in_scope,
+          in_scope_source_topics,
+          in_scope_files,
+          mutations_map,
+          ancestors_map,
+          descendants_map,
+          relatives_map,
+          nodes,
+          scope,
+          topic_metadata,
+          function_properties,
+          variable_types,
+        )?;
 
         // Process body with control flow added to scope
         let cf_scope = core::add_control_flow_to_scope(scope, cf);
@@ -1728,35 +1774,6 @@ fn process_second_pass_nodes(
           function_properties,
           variable_types,
         )?;
-
-        // Process non-body children without control flow context
-        let mut non_body: Vec<&ASTNode> = Vec::new();
-        if let Some(init) = initialization_expression {
-          non_body.push(init.as_ref());
-        }
-        if let Some(cond) = condition {
-          non_body.push(cond.as_ref());
-        }
-        if let Some(loop_expr) = loop_expression {
-          non_body.push(loop_expr.as_ref());
-        }
-        if !non_body.is_empty() {
-          process_second_pass_nodes(
-            &non_body,
-            is_in_scope,
-            in_scope_source_topics,
-            in_scope_files,
-            mutations_map,
-            ancestors_map,
-            descendants_map,
-            relatives_map,
-            nodes,
-            scope,
-            topic_metadata,
-            function_properties,
-            variable_types,
-          )?;
-        }
       }
 
       ASTNode::WhileStatement {
@@ -1808,11 +1825,33 @@ fn process_second_pass_nodes(
         }
       }
 
-      ASTNode::DoWhileStatement { node_id, body, .. } => {
+      ASTNode::DoWhileStatement {
+        node_id,
+        condition,
+        body,
+        ..
+      } => {
         let cf = core::ControlFlowInfo {
           topic: topic::new_node_topic(node_id),
           kind: core::ControlFlowKind::DoWhile,
         };
+
+        // Process condition without control flow context
+        process_second_pass_nodes(
+          &vec![condition.as_ref()],
+          is_in_scope,
+          in_scope_source_topics,
+          in_scope_files,
+          mutations_map,
+          ancestors_map,
+          descendants_map,
+          relatives_map,
+          nodes,
+          scope,
+          topic_metadata,
+          function_properties,
+          variable_types,
+        )?;
 
         // Process body with control flow added to scope
         if let Some(body) = body {
@@ -3353,6 +3392,7 @@ fn populate_expanded_references(
           *expanded_references = expanded_refs.clone();
         }
         TopicMetadata::UnnamedTopic { .. }
+        | TopicMetadata::ControlFlow { .. }
         | TopicMetadata::TitledTopic { .. }
         | TopicMetadata::CommentTopic { .. } => {
           // No expanded_references for unnamed/titled/comment topics
@@ -3518,6 +3558,7 @@ fn populate_ancestry(
           *ancestry = ancestry_refs.clone();
         }
         TopicMetadata::UnnamedTopic { .. }
+        | TopicMetadata::ControlFlow { .. }
         | TopicMetadata::TitledTopic { .. }
         | TopicMetadata::CommentTopic { .. } => {
           // No ancestry for unnamed/titled/comment topics
