@@ -1082,6 +1082,7 @@ pub async fn create_comment(
   // Parse mentions, render HTML, register in audit_data, and cache source text
   let mut mentions_updates: Vec<(String, Vec<SourceContextResponse>)> =
     Vec::new();
+  let mut comment_metadata_json = serde_json::Value::Null;
   {
     let mut ctx = state
       .data_context
@@ -1097,6 +1098,13 @@ pub async fn create_comment(
     store::register_comment_in_audit_data(
       audit_data, &comment, &scope, &mentions,
     );
+
+    // Build full metadata response for the new comment (for WebSocket broadcast)
+    if let Some(metadata) = audit_data.topic_metadata.get(&comment_topic) {
+      let response = topic_metadata_to_response(&comment_topic, metadata);
+      comment_metadata_json =
+        serde_json::to_value(&response).unwrap_or(serde_json::Value::Null);
+    }
 
     // Read back updated mentions for broadcasting
     if !mentions.is_empty() {
@@ -1126,6 +1134,7 @@ pub async fn create_comment(
     comment_topic_id: comment_topic_id.clone(),
     target_topic: payload.topic_id.clone(),
     comment_type: payload.comment_type.clone(),
+    metadata: comment_metadata_json,
   });
 
   for (topic_id, updated_mentions) in mentions_updates {

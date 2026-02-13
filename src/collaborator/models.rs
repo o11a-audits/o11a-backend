@@ -258,12 +258,13 @@ pub struct CommentVoteSummary {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type")]
 pub enum CommentEvent {
-  /// New comment created - fetch /metadata/:topic_id and /source_text/:topic_id
+  /// New comment created — includes full topic metadata (same shape as /metadata/:topic_id)
   Created {
     audit_id: String,
     comment_topic_id: String,
     target_topic: String,
     comment_type: CommentType,
+    metadata: serde_json::Value,
   },
   /// Status updated - includes new status directly (no need to refetch)
   StatusUpdated {
