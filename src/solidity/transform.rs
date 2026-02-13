@@ -669,9 +669,7 @@ fn transform_node(node: &mut ASTNode, context: &TransformContext) {
       // Recurse into children
       transform_node(parameters.as_mut(), context);
       transform_node(return_parameters.as_mut(), context);
-      for modifier in modifiers.iter_mut() {
-        transform_node(modifier, context);
-      }
+      transform_node(modifiers.as_mut(), context);
       if let Some(doc) = documentation {
         transform_node(doc.as_mut(), context);
       }

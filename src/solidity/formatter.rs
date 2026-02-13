@@ -1740,30 +1740,15 @@ fn do_node_to_source_text(
           ctx
         )
       );
-      let modifiers_str = if !modifiers.is_empty() {
-        let indent_level = indent_level + 1;
-        let mods = modifiers
-          .iter()
-          .map(|m| {
-            do_node_to_source_text(
-              m,
-              indent_level,
-              nodes_map,
-              topic_metadata,
-              ctx,
-            )
-          })
-          .collect::<Vec<_>>()
-          .join("\n");
-        let trailing_newline = if !mods.is_empty() { "\n" } else { "" };
-
-        format!(
-          "{}{}",
-          formatting::indent(&mods, indent_level),
-          trailing_newline
-        )
-      } else {
-        String::new()
+      let modifiers_str = {
+        let s = do_node_to_source_text(
+          modifiers,
+          indent_level,
+          nodes_map,
+          topic_metadata,
+          ctx,
+        );
+        if s.is_empty() { s } else { format!("{}\n", s) }
       };
       let returns = format!(
         "{} {} ",
@@ -2277,6 +2262,32 @@ fn do_node_to_source_text(
     ASTNode::StructuredDocumentation { .. } => String::new(),
 
     ASTNode::Stub { topic, .. } => format!("NodeStub-{}", topic.id),
+
+    ASTNode::ModifierList { modifiers, .. } => {
+      if modifiers.is_empty() {
+        String::new()
+      } else {
+        let indent_level = indent_level + 1;
+        let mods = modifiers
+          .iter()
+          .map(|m| {
+            do_node_to_source_text(
+              m,
+              indent_level,
+              nodes_map,
+              topic_metadata,
+              ctx,
+            )
+          })
+          .collect::<Vec<_>>()
+          .join("\n");
+        format!(
+          "{}\n{}",
+          formatting::format_keyword("mods"),
+          formatting::indent(&mods, indent_level)
+        )
+      }
+    }
 
     ASTNode::Other { .. } => formatting::format_comment("Unknown"),
   };

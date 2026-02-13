@@ -907,7 +907,7 @@ pub enum ASTNode {
     src_location: SourceLocation,
     documentation: Option<Box<ASTNode>>,
     kind: FunctionKind,
-    modifiers: Vec<ASTNode>,
+    modifiers: Box<ASTNode>,
     name: String,
     name_location: SourceLocation,
     referenced_id: i32,
@@ -1137,6 +1137,11 @@ pub enum ASTNode {
     parameters: Vec<ASTNode>,
     is_return_parameters: bool,
   },
+  ModifierList {
+    node_id: i32,
+    src_location: SourceLocation,
+    modifiers: Vec<ASTNode>,
+  },
   TryCatchClause {
     node_id: i32,
     src_location: SourceLocation,
@@ -1257,6 +1262,7 @@ impl ASTNode {
       ASTNode::ElementaryTypeName { node_id, .. } => *node_id,
       ASTNode::FunctionTypeName { node_id, .. } => *node_id,
       ASTNode::ParameterList { node_id, .. } => *node_id,
+      ASTNode::ModifierList { node_id, .. } => *node_id,
       ASTNode::TryCatchClause { node_id, .. } => *node_id,
       ASTNode::ModifierInvocation { node_id, .. } => *node_id,
       ASTNode::UserDefinedTypeName { node_id, .. } => *node_id,
@@ -1333,6 +1339,7 @@ impl ASTNode {
       ASTNode::ElementaryTypeName { src_location, .. } => src_location,
       ASTNode::FunctionTypeName { src_location, .. } => src_location,
       ASTNode::ParameterList { src_location, .. } => src_location,
+      ASTNode::ModifierList { src_location, .. } => src_location,
       ASTNode::TryCatchClause { src_location, .. } => src_location,
       ASTNode::ModifierInvocation { src_location, .. } => src_location,
       ASTNode::UserDefinedTypeName { src_location, .. } => src_location,
@@ -1575,9 +1582,7 @@ impl ASTNode {
         if let Some(doc) = documentation {
           result.push(&**doc);
         }
-        for item in modifiers {
-          result.push(item);
-        }
+        result.push(&**modifiers);
         result.push(&**parameters);
         result.push(&**return_parameters);
         result
@@ -1669,6 +1674,7 @@ impl ASTNode {
         }
         result
       }
+      ASTNode::ModifierList { modifiers, .. } => modifiers.iter().collect(),
       ASTNode::TryCatchClause {
         block, parameters, ..
       } => match parameters {
@@ -1944,7 +1950,7 @@ impl ASTNode {
         if let Some(doc) = documentation {
           result.push(doc.as_mut());
         }
-        result.extend(modifiers.iter_mut());
+        result.push(modifiers.as_mut());
         result.push(parameters.as_mut());
         result.push(return_parameters.as_mut());
         result
@@ -2013,6 +2019,7 @@ impl ASTNode {
       ASTNode::ParameterList { parameters, .. } => {
         parameters.iter_mut().collect()
       }
+      ASTNode::ModifierList { modifiers, .. } => modifiers.iter_mut().collect(),
       ASTNode::TryCatchClause {
         block, parameters, ..
       } => {
@@ -2728,7 +2735,7 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
         None => None,
       },
       kind: kind,
-      modifiers: modifiers.iter().map(|n| node_to_stub(n)).collect(),
+      modifiers: Box::new(node_to_stub(&modifiers)),
       name: name,
       name_location: name_location,
       referenced_id: referenced_id,
@@ -2955,6 +2962,15 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       src_location: src_location,
       parameters: parameters.iter().map(|n| node_to_stub(n)).collect(),
       is_return_parameters: is_return_parameters,
+    },
+    ASTNode::ModifierList {
+      node_id,
+      src_location,
+      modifiers,
+    } => ASTNode::ModifierList {
+      node_id: node_id,
+      src_location: src_location,
+      modifiers: modifiers.iter().map(|n| node_to_stub(n)).collect(),
     },
     ASTNode::TryCatchClause {
       node_id,
@@ -4811,12 +4827,18 @@ fn node_from_json(
       // Restore the previous signature parent node
       context.signature_parent_node.set(previous_signature_parent);
 
+      let modifier_list = ASTNode::ModifierList {
+        node_id: generate_node_id(),
+        src_location: src_location.clone(),
+        modifiers,
+      };
+
       let signature = ASTNode::FunctionSignature {
         node_id: signature_node_id,
         src_location: src_location.clone(),
         documentation,
         kind,
-        modifiers,
+        modifiers: Box::new(modifier_list),
         name,
         name_location,
         // Interface-to-implementation mapping is now applied during transform phase
