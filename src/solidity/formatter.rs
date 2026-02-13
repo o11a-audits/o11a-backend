@@ -125,9 +125,12 @@ fn maybe_identifier_placeholder(node: &ASTNode) -> String {
     match node {
       ASTNode::FunctionCall { expression, .. }
       | ASTNode::StructConstructor { expression, .. }
-      | ASTNode::FunctionCallOptions { expression, .. } => {
-        maybe_identifier_placeholder(expression)
-      }
+      | ASTNode::FunctionCallOptions { expression, .. }
+      | ASTNode::MemberAccess { expression, .. }
+      | ASTNode::IndexAccess {
+        base_expression: expression,
+        ..
+      } => maybe_identifier_placeholder(expression),
       _ => String::new(),
     }
   }
@@ -573,7 +576,8 @@ fn do_node_to_source_text(
       index_expression,
       ..
     } => {
-      let base_placeholder = maybe_identifier_placeholder(base_expression);
+      // The caller is responsible for emitting the root identifier placeholder
+      // (via maybe_identifier_placeholder, which recurses into IndexAccess).
       let base = do_node_to_source_text(
         base_expression,
         indent_level,
@@ -582,11 +586,23 @@ fn do_node_to_source_text(
         ctx,
       );
       if let Some(idx) = index_expression {
+        // If the base is a MemberAccess, the last line of its output is
+        // indented one level deeper (MemberAccess adds indent_level + 1).
+        // The brackets should match that level.
+        let bracket_indent = if matches!(
+          base_expression.resolve(nodes_map),
+          ASTNode::MemberAccess {
+            referenced_declaration: Some(_),
+            ..
+          }
+        ) {
+          indent_level + 1
+        } else {
+          indent_level
+        };
         let idx_placeholder = maybe_identifier_placeholder(idx);
-        format!(
-          "{}{}[{}{}]",
-          base_placeholder,
-          base,
+        let idx_content = format!(
+          "{}{}",
           idx_placeholder,
           do_node_to_source_text(
             idx,
@@ -595,9 +611,15 @@ fn do_node_to_source_text(
             topic_metadata,
             ctx
           )
+        );
+        format!(
+          "{}[{}{}",
+          base,
+          formatting::indent(&idx_content, bracket_indent + 1),
+          formatting::indent("]", bracket_indent),
         )
       } else {
-        format!("{}{}", base_placeholder, base)
+        base
       }
     }
 
