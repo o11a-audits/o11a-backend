@@ -525,11 +525,11 @@ impl Reference {
   }
 }
 
-/// Groups references to a declaration by the scope where they occur.
+/// Organizes topics hierarchically by their source scope.
 /// For Solidity: scope is a contract, scope_references are contract-level refs, nested_references are function-level refs.
 /// For Documentation: scope is a file, scope_references are file-level refs, nested_references are section-level refs.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ReferenceGroup {
+pub struct SourceContext {
   /// The grouping scope where these references occur (contract for Solidity, file for documentation)
   scope: topic::Topic,
   /// Source location start for sorting groups relative to each other
@@ -539,10 +539,10 @@ pub struct ReferenceGroup {
   /// References at the scope level (inheritance/using-for for Solidity, file-level for documentation)
   scope_references: Vec<Reference>,
   /// References within nested scopes (functions for Solidity, sections for documentation)
-  nested_references: Vec<NestedReferenceGroup>,
+  nested_references: Vec<NestedSourceContext>,
 }
 
-impl ReferenceGroup {
+impl SourceContext {
   pub fn scope(&self) -> &topic::Topic {
     &self.scope
   }
@@ -559,7 +559,7 @@ impl ReferenceGroup {
     &self.scope_references
   }
 
-  pub fn nested_references(&self) -> &[NestedReferenceGroup] {
+  pub fn nested_references(&self) -> &[NestedSourceContext] {
     &self.nested_references
   }
 }
@@ -567,7 +567,7 @@ impl ReferenceGroup {
 /// Groups references within a control flow statement body.
 /// Recursive to handle nested control flow (if inside for inside while).
 #[derive(Debug, Clone, PartialEq)]
-pub struct ControlFlowReferenceGroup {
+pub struct ControlFlowSourceContext {
   /// The control flow statement that groups these references
   control_flow: ControlFlowInfo,
   /// Source location start for sorting groups relative to each other
@@ -575,12 +575,12 @@ pub struct ControlFlowReferenceGroup {
   /// References directly within this control flow body (not nested in deeper control flow)
   references: Vec<Reference>,
   /// Nested control flow groups within this one
-  nested: Vec<ControlFlowReferenceGroup>,
+  nested: Vec<ControlFlowSourceContext>,
   /// Whether this If branch has a sibling branch (true body has false body, or vice versa)
   has_sibling_branch: bool,
 }
 
-impl ControlFlowReferenceGroup {
+impl ControlFlowSourceContext {
   pub fn control_flow(&self) -> &ControlFlowInfo {
     &self.control_flow
   }
@@ -593,7 +593,7 @@ impl ControlFlowReferenceGroup {
     &self.references
   }
 
-  pub fn nested(&self) -> &[ControlFlowReferenceGroup] {
+  pub fn nested(&self) -> &[ControlFlowSourceContext] {
     &self.nested
   }
 
@@ -606,7 +606,7 @@ impl ControlFlowReferenceGroup {
 /// For Solidity: represents references within a function/modifier.
 /// For Documentation: represents references within a section (component).
 #[derive(Debug, Clone, PartialEq)]
-pub struct NestedReferenceGroup {
+pub struct NestedSourceContext {
   /// The nested scope containing these references (function for Solidity, section for documentation)
   subscope: topic::Topic,
   /// Source location start for sorting nested groups relative to each other
@@ -614,10 +614,10 @@ pub struct NestedReferenceGroup {
   /// References within this nested scope (outside any control flow)
   references: Vec<Reference>,
   /// References grouped by control flow statement
-  control_flow_groups: Vec<ControlFlowReferenceGroup>,
+  control_flow_groups: Vec<ControlFlowSourceContext>,
 }
 
-impl NestedReferenceGroup {
+impl NestedSourceContext {
   pub fn subscope(&self) -> &topic::Topic {
     &self.subscope
   }
@@ -630,15 +630,15 @@ impl NestedReferenceGroup {
     &self.references
   }
 
-  pub fn control_flow_groups(&self) -> &[ControlFlowReferenceGroup] {
+  pub fn control_flow_groups(&self) -> &[ControlFlowSourceContext] {
     &self.control_flow_groups
   }
 }
 
-/// Ensures a ReferenceGroup exists for the given scope, creating one at the
+/// Ensures a SourceContext exists for the given scope, creating one at the
 /// correct sorted position if absent. Does not add any references.
-pub fn ensure_group(
-  groups: &mut Vec<ReferenceGroup>,
+pub fn ensure_context(
+  groups: &mut Vec<SourceContext>,
   scope: topic::Topic,
   scope_sort_key: Option<usize>,
   is_in_scope: bool,
@@ -651,7 +651,7 @@ pub fn ensure_group(
     .unwrap_or_else(|pos| pos);
   groups.insert(
     pos,
-    ReferenceGroup {
+    SourceContext {
       scope,
       sort_key: scope_sort_key,
       is_in_scope,
@@ -661,17 +661,17 @@ pub fn ensure_group(
   );
 }
 
-/// Inserts a reference into a sorted, deduplicated Vec<ReferenceGroup>.
+/// Inserts a reference into a sorted, deduplicated Vec<SourceContext>.
 ///
-/// Finds or creates the appropriate ReferenceGroup (by scope topic) and, if a subscope
-/// is provided, the appropriate NestedReferenceGroup. If a control flow chain is provided,
-/// the reference is nested within recursive ControlFlowReferenceGroup(s) inside the
-/// NestedReferenceGroup.
+/// Finds or creates the appropriate SourceContext (by scope topic) and, if a subscope
+/// is provided, the appropriate NestedSourceContext. If a control flow chain is provided,
+/// the reference is nested within recursive ControlFlowSourceContext(s) inside the
+/// NestedSourceContext.
 ///
 /// Inserts the reference at the correct sorted position. Skips insertion if a reference
 /// with the same reference_topic already exists at that level.
-pub fn insert_reference(
-  groups: &mut Vec<ReferenceGroup>,
+pub fn insert_into_context(
+  groups: &mut Vec<SourceContext>,
   scope: topic::Topic,
   scope_sort_key: Option<usize>,
   is_in_scope: bool,
@@ -679,8 +679,8 @@ pub fn insert_reference(
   control_flow_chain: &[ControlFlowInfo],
   reference: Reference,
 ) {
-  // Ensure the group exists
-  ensure_group(groups, scope.clone(), scope_sort_key, is_in_scope);
+  // Ensure the context exists
+  ensure_context(groups, scope.clone(), scope_sort_key, is_in_scope);
 
   // We know the group exists now — find it
   let group = groups.iter_mut().find(|g| g.scope == scope).unwrap();
@@ -691,7 +691,7 @@ pub fn insert_reference(
       insert_ref_sorted(&mut group.scope_references, reference);
     }
     Some((subscope_topic, subscope_sort_key)) => {
-      // Find or create the NestedReferenceGroup for this subscope
+      // Find or create the NestedSourceContext for this subscope
       if !group
         .nested_references
         .iter()
@@ -703,7 +703,7 @@ pub fn insert_reference(
           .unwrap_or_else(|pos| pos);
         group.nested_references.insert(
           pos,
-          NestedReferenceGroup {
+          NestedSourceContext {
             subscope: subscope_topic.clone(),
             sort_key: subscope_sort_key,
             references: Vec::new(),
@@ -722,7 +722,7 @@ pub fn insert_reference(
         insert_ref_sorted(&mut nested.references, reference);
       } else {
         // Walk the control flow chain, creating/finding groups at each level
-        let target_refs = find_or_create_cf_group(
+        let target_refs = find_or_create_cf_context(
           &mut nested.control_flow_groups,
           control_flow_chain,
         );
@@ -732,10 +732,10 @@ pub fn insert_reference(
   }
 }
 
-/// Walks a control flow chain, creating or finding `ControlFlowReferenceGroup`s at
+/// Walks a control flow chain, creating or finding `ControlFlowSourceContext`s at
 /// each level, and returns a mutable reference to the `references` vec at the final level.
-fn find_or_create_cf_group<'a>(
-  groups: &'a mut Vec<ControlFlowReferenceGroup>,
+fn find_or_create_cf_context<'a>(
+  groups: &'a mut Vec<ControlFlowSourceContext>,
   chain: &[ControlFlowInfo],
 ) -> &'a mut Vec<Reference> {
   assert!(!chain.is_empty());
@@ -759,7 +759,7 @@ fn find_or_create_cf_group<'a>(
       .unwrap_or_else(|pos| pos);
     groups.insert(
       pos,
-      ControlFlowReferenceGroup {
+      ControlFlowSourceContext {
         control_flow: cf.clone(),
         sort_key,
         references: Vec::new(),
@@ -788,7 +788,7 @@ fn find_or_create_cf_group<'a>(
   if chain.len() == 1 {
     &mut group.references
   } else {
-    find_or_create_cf_group(&mut group.nested, &chain[1..])
+    find_or_create_cf_context(&mut group.nested, &chain[1..])
   }
 }
 
@@ -897,14 +897,14 @@ pub enum TopicMetadata {
     kind: NamedTopicKind,
     name: String,
     visibility: NamedTopicVisibility,
-    references: Vec<ReferenceGroup>,
-    /// References derived from recursively traversing all ancestors, descendants, and relatives.
-    /// Contains grouped references showing where all transitive ancestry-related
+    context: Vec<SourceContext>,
+    /// Context derived from recursively traversing all ancestors, descendants, and relatives.
+    /// Contains grouped source context showing where all transitive ancestry-related
     /// variables are declared/referenced.
-    expanded_references: Vec<ReferenceGroup>,
-    /// References derived from recursively traversing ancestors and descendants only.
-    /// Similar to expanded_references but excludes relatives.
-    ancestry: Vec<ReferenceGroup>,
+    expanded_context: Vec<SourceContext>,
+    /// Context derived from recursively traversing ancestors and descendants only.
+    /// Similar to expanded_context but excludes relatives.
+    ancestry: Vec<SourceContext>,
     /// Whether this topic has mutations (was previously NamedMutableTopic)
     is_mutable: bool,
     /// The assignment or unary operation nodes that mutate this variable.
@@ -924,13 +924,14 @@ pub enum TopicMetadata {
     relatives: Vec<topic::Topic>,
     /// Documentation sections that mention this topic via code identifiers.
     /// Grouped by file (container), with section-level and paragraph-level sub-groups.
-    mentions: Vec<ReferenceGroup>,
+    mentions: Vec<SourceContext>,
   },
   UnnamedTopic {
     topic: topic::Topic,
     scope: Scope,
     kind: UnnamedTopicKind,
-    mentions: Vec<ReferenceGroup>,
+    context: Vec<SourceContext>,
+    mentions: Vec<SourceContext>,
   },
   /// A control flow statement (if/for/while/do-while) with its condition topic.
   ControlFlow {
@@ -939,7 +940,8 @@ pub enum TopicMetadata {
     kind: ControlFlowStatementKind,
     /// The condition expression topic.
     condition: topic::Topic,
-    mentions: Vec<ReferenceGroup>,
+    context: Vec<SourceContext>,
+    mentions: Vec<SourceContext>,
   },
   /// A topic with a title (like documentation sections) but not a full declaration
   TitledTopic {
@@ -947,7 +949,8 @@ pub enum TopicMetadata {
     scope: Scope,
     kind: TitledTopicKind,
     title: String,
-    mentions: Vec<ReferenceGroup>,
+    context: Vec<SourceContext>,
+    mentions: Vec<SourceContext>,
   },
   /// A comment topic with immutable metadata
   CommentTopic {
@@ -958,7 +961,8 @@ pub enum TopicMetadata {
     created_at: String,
     scope: Scope,
     mentioned_topics: Vec<topic::Topic>,
-    mentions: Vec<ReferenceGroup>,
+    context: Vec<SourceContext>,
+    mentions: Vec<SourceContext>,
   },
 }
 
@@ -993,22 +997,21 @@ impl TopicMetadata {
     }
   }
 
-  pub fn references(&self) -> &[ReferenceGroup] {
+  pub fn context(&self) -> &[SourceContext] {
     match self {
-      TopicMetadata::NamedTopic { references, .. } => references,
-      TopicMetadata::UnnamedTopic { .. }
-      | TopicMetadata::ControlFlow { .. }
-      | TopicMetadata::TitledTopic { .. }
-      | TopicMetadata::CommentTopic { .. } => &[],
+      TopicMetadata::NamedTopic { context, .. }
+      | TopicMetadata::UnnamedTopic { context, .. }
+      | TopicMetadata::ControlFlow { context, .. }
+      | TopicMetadata::TitledTopic { context, .. }
+      | TopicMetadata::CommentTopic { context, .. } => context,
     }
   }
 
-  pub fn expanded_references(&self) -> &[ReferenceGroup] {
+  pub fn expanded_context(&self) -> &[SourceContext] {
     match self {
       TopicMetadata::NamedTopic {
-        expanded_references,
-        ..
-      } => expanded_references,
+        expanded_context, ..
+      } => expanded_context,
       TopicMetadata::UnnamedTopic { .. }
       | TopicMetadata::ControlFlow { .. }
       | TopicMetadata::TitledTopic { .. }
@@ -1016,7 +1019,7 @@ impl TopicMetadata {
     }
   }
 
-  pub fn ancestry(&self) -> &[ReferenceGroup] {
+  pub fn ancestry(&self) -> &[SourceContext] {
     match self {
       TopicMetadata::NamedTopic { ancestry, .. } => ancestry,
       TopicMetadata::UnnamedTopic { .. }
@@ -1076,7 +1079,7 @@ impl TopicMetadata {
     }
   }
 
-  pub fn mentions(&self) -> &[ReferenceGroup] {
+  pub fn mentions(&self) -> &[SourceContext] {
     match self {
       TopicMetadata::NamedTopic { mentions, .. }
       | TopicMetadata::UnnamedTopic { mentions, .. }
@@ -1301,8 +1304,8 @@ pub fn new_audit_data(
       kind: NamedTopicKind::Builtin,
       visibility: NamedTopicVisibility::Public,
       name: "keccak256".to_string(),
-      references: Vec::new(),
-      expanded_references: Vec::new(),
+      context: Vec::new(),
+      expanded_context: Vec::new(),
       ancestry: Vec::new(),
       is_mutable: false,
       mutations: Vec::new(),
@@ -1323,8 +1326,8 @@ pub fn new_audit_data(
       kind: NamedTopicKind::Builtin,
       visibility: NamedTopicVisibility::Public,
       name: "type".to_string(),
-      references: Vec::new(),
-      expanded_references: Vec::new(),
+      context: Vec::new(),
+      expanded_context: Vec::new(),
       ancestry: Vec::new(),
       is_mutable: false,
       mutations: Vec::new(),
@@ -1345,8 +1348,8 @@ pub fn new_audit_data(
       kind: NamedTopicKind::Builtin,
       visibility: NamedTopicVisibility::Public,
       name: "this".to_string(),
-      references: Vec::new(),
-      expanded_references: Vec::new(),
+      context: Vec::new(),
+      expanded_context: Vec::new(),
       ancestry: Vec::new(),
       is_mutable: false,
       mutations: Vec::new(),

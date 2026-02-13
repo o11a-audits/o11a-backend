@@ -2,7 +2,7 @@ use crate::core;
 use crate::core::topic;
 use crate::core::{
   AST, AuditData, DataContext, Node, Scope, TitledTopicKind, TopicMetadata,
-  UnnamedTopicKind, ensure_group, insert_reference,
+  UnnamedTopicKind, ensure_context, insert_into_context,
 };
 use crate::documentation::parser::{self, DocumentationAST, DocumentationNode};
 use std::collections::BTreeMap;
@@ -60,7 +60,7 @@ pub fn analyze(
     }
   }
 
-  // Build ReferenceGroups for each referenced topic and update their mentions field
+  // Build SourceContexts for each referenced topic and update their mentions field
   populate_mentions(
     &mut audit_data.topic_metadata,
     mentions_by_topic,
@@ -104,6 +104,7 @@ fn process_documentation_node(
           topic: topic.clone(),
           kind: UnnamedTopicKind::DocumentationRoot,
           scope: scope.clone(),
+          context: vec![],
           mentions: vec![],
         },
       );
@@ -138,6 +139,7 @@ fn process_documentation_node(
           topic: topic.clone(),
           kind: UnnamedTopicKind::DocumentationHeading,
           scope: scope.clone(),
+          context: vec![],
           mentions: vec![],
         },
       );
@@ -177,6 +179,7 @@ fn process_documentation_node(
           scope: scope.clone(),
           kind: TitledTopicKind::DocumentationSection,
           title: title.clone(),
+          context: vec![],
           mentions: vec![],
         },
       );
@@ -213,6 +216,7 @@ fn process_documentation_node(
           topic: topic.clone(),
           kind: UnnamedTopicKind::DocumentationParagraph,
           scope: scope.clone(),
+          context: vec![],
           mentions: vec![],
         },
       );
@@ -242,6 +246,7 @@ fn process_documentation_node(
           topic: topic.clone(),
           kind: UnnamedTopicKind::DocumentationSentence,
           scope: scope.clone(),
+          context: vec![],
           mentions: vec![],
         },
       );
@@ -271,6 +276,7 @@ fn process_documentation_node(
           topic: topic.clone(),
           kind: UnnamedTopicKind::DocumentationCodeBlock,
           scope: scope.clone(),
+          context: vec![],
           mentions: vec![],
         },
       );
@@ -299,6 +305,7 @@ fn process_documentation_node(
           topic: topic.clone(),
           kind: UnnamedTopicKind::DocumentationList,
           scope: scope.clone(),
+          context: vec![],
           mentions: vec![],
         },
       );
@@ -327,6 +334,7 @@ fn process_documentation_node(
           topic: topic.clone(),
           kind: UnnamedTopicKind::DocumentationBlockQuote,
           scope: scope.clone(),
+          context: vec![],
           mentions: vec![],
         },
       );
@@ -356,6 +364,7 @@ fn process_documentation_node(
           topic: topic.clone(),
           kind: UnnamedTopicKind::DocumentationInlineCode,
           scope: scope.clone(),
+          context: vec![],
           mentions: vec![],
         },
       );
@@ -438,7 +447,7 @@ fn process_documentation_node(
   Ok(())
 }
 
-/// Builds ReferenceGroups from collected mentions and updates the referenced topics' mentions field.
+/// Builds SourceContexts from collected mentions and updates the referenced topics' mentions field.
 /// Groups mentions by component (H1 section), with member-level (sub-H1) and containing_block-level (paragraph) sub-groups.
 fn populate_mentions(
   topic_metadata: &mut BTreeMap<topic::Topic, TopicMetadata>,
@@ -446,7 +455,7 @@ fn populate_mentions(
   nodes: &BTreeMap<topic::Topic, Node>,
 ) {
   for (referenced_topic, scopes) in mentions_by_topic {
-    let mut mention_groups: Vec<core::ReferenceGroup> = Vec::new();
+    let mut mention_groups: Vec<core::SourceContext> = Vec::new();
 
     for scope in scopes {
       match scope {
@@ -456,7 +465,7 @@ fn populate_mentions(
         core::Scope::Component { component, .. } => {
           // Component-level reference - ensure group exists (no reference to add)
           let scope_sort_key = get_source_location_start(&component, nodes);
-          ensure_group(&mut mention_groups, component, scope_sort_key, true);
+          ensure_context(&mut mention_groups, component, scope_sort_key, true);
         }
         core::Scope::Member {
           component, member, ..
@@ -464,7 +473,7 @@ fn populate_mentions(
           // Member-level reference - add member as a scope-level reference
           let component_sort_key = get_source_location_start(&component, nodes);
           let member_sort_key = get_source_location_start(&member, nodes);
-          insert_reference(
+          insert_into_context(
             &mut mention_groups,
             component,
             component_sort_key,
@@ -487,7 +496,7 @@ fn populate_mentions(
               get_source_location_start(&component, nodes);
             let member_sort_key = get_source_location_start(&member, nodes);
             let cb_sort_key = get_source_location_start(&layer.block, nodes);
-            insert_reference(
+            insert_into_context(
               &mut mention_groups,
               component,
               component_sort_key,

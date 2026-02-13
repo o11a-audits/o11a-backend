@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
-pub use crate::api::{ReferenceGroupResponse, ScopeInfo};
+pub use crate::api::{ScopeInfo, SourceContextResponse};
 use crate::core::topic;
 
 /// Reserved author IDs
@@ -291,7 +291,7 @@ pub enum CommentEvent {
   MentionsUpdated {
     audit_id: String,
     topic_id: String,
-    mentions: Vec<ReferenceGroupResponse>,
+    mentions: Vec<SourceContextResponse>,
   },
 }
 

@@ -652,29 +652,29 @@ impl ReferenceResponse {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct ControlFlowReferenceGroupResponse {
+pub struct ControlFlowSourceContextResponse {
   pub control_flow: ControlFlowInfoResponse,
   pub references: Vec<ReferenceResponse>,
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
-  pub nested: Vec<ControlFlowReferenceGroupResponse>,
+  pub nested: Vec<ControlFlowSourceContextResponse>,
   #[serde(default, skip_serializing_if = "std::ops::Not::not")]
   pub has_sibling_branch: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct NestedReferenceGroupResponse {
+pub struct NestedSourceContextResponse {
   pub subscope: String,
   pub references: Vec<ReferenceResponse>,
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
-  pub control_flow_groups: Vec<ControlFlowReferenceGroupResponse>,
+  pub control_flow_groups: Vec<ControlFlowSourceContextResponse>,
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct ReferenceGroupResponse {
+pub struct SourceContextResponse {
   pub scope: String,
   pub is_in_scope: bool,
   pub scope_references: Vec<ReferenceResponse>,
-  pub nested_references: Vec<NestedReferenceGroupResponse>,
+  pub nested_references: Vec<NestedSourceContextResponse>,
 }
 
 /// Response for NamedTopic metadata
@@ -687,10 +687,10 @@ pub struct NamedTopicResponse {
   pub sub_kind: Option<String>,
   pub visibility: String,
   pub scope: ScopeInfo,
-  pub references: Vec<ReferenceGroupResponse>,
-  pub expanded_references: Vec<ReferenceGroupResponse>,
-  pub ancestry: Vec<ReferenceGroupResponse>,
-  pub mentions: Vec<ReferenceGroupResponse>,
+  pub context: Vec<SourceContextResponse>,
+  pub expanded_context: Vec<SourceContextResponse>,
+  pub ancestry: Vec<SourceContextResponse>,
+  pub mentions: Vec<SourceContextResponse>,
   pub ancestors: Vec<String>,
   pub descendants: Vec<String>,
   pub relatives: Vec<String>,
@@ -705,6 +705,7 @@ pub struct TitledTopicResponse {
   pub title: String,
   pub kind: String,
   pub scope: ScopeInfo,
+  pub context: Vec<SourceContextResponse>,
 }
 
 /// Response for UnnamedTopic metadata
@@ -713,6 +714,7 @@ pub struct UnnamedTopicResponse {
   pub topic_id: String,
   pub kind: String,
   pub scope: ScopeInfo,
+  pub context: Vec<SourceContextResponse>,
 }
 
 /// Response for ControlFlow metadata
@@ -722,7 +724,8 @@ pub struct ControlFlowTopicResponse {
   pub kind: String,
   pub scope: ScopeInfo,
   pub condition: String,
-  pub mentions: Vec<ReferenceGroupResponse>,
+  pub context: Vec<SourceContextResponse>,
+  pub mentions: Vec<SourceContextResponse>,
 }
 
 /// Response for CommentTopic metadata
@@ -735,7 +738,8 @@ pub struct CommentTopicResponse {
   pub created_at: String,
   pub scope: ScopeInfo,
   pub mentioned_topics: Vec<String>,
-  pub mentions: Vec<ReferenceGroupResponse>,
+  pub context: Vec<SourceContextResponse>,
+  pub mentions: Vec<SourceContextResponse>,
 }
 
 /// Enum for different topic metadata response types
@@ -754,13 +758,13 @@ pub enum TopicMetadataResponse {
   CommentTopic(CommentTopicResponse),
 }
 
-// Helper function to convert ReferenceGroup to ReferenceGroupResponse
-fn convert_cf_groups(
-  groups: &[crate::core::ControlFlowReferenceGroup],
-) -> Vec<ControlFlowReferenceGroupResponse> {
+// Helper function to convert SourceContext to SourceContextResponse
+fn convert_cf_context(
+  groups: &[crate::core::ControlFlowSourceContext],
+) -> Vec<ControlFlowSourceContextResponse> {
   groups
     .iter()
-    .map(|g| ControlFlowReferenceGroupResponse {
+    .map(|g| ControlFlowSourceContextResponse {
       control_flow: ControlFlowInfoResponse {
         topic: g.control_flow().topic.id.clone(),
         kind: ControlFlowKindInfo::from_core(&g.control_flow().kind),
@@ -770,18 +774,18 @@ fn convert_cf_groups(
         .iter()
         .map(ReferenceResponse::from_reference)
         .collect(),
-      nested: convert_cf_groups(g.nested()),
+      nested: convert_cf_context(g.nested()),
       has_sibling_branch: g.has_sibling_branch(),
     })
     .collect()
 }
 
-fn convert_reference_groups(
-  groups: &[crate::core::ReferenceGroup],
-) -> Vec<ReferenceGroupResponse> {
+fn convert_source_context(
+  groups: &[crate::core::SourceContext],
+) -> Vec<SourceContextResponse> {
   groups
     .iter()
-    .map(|group| ReferenceGroupResponse {
+    .map(|group| SourceContextResponse {
       scope: group.scope().id().to_string(),
       is_in_scope: group.is_in_scope(),
       scope_references: group
@@ -792,14 +796,14 @@ fn convert_reference_groups(
       nested_references: group
         .nested_references()
         .iter()
-        .map(|m| NestedReferenceGroupResponse {
+        .map(|m| NestedSourceContextResponse {
           subscope: m.subscope().id().to_string(),
           references: m
             .references()
             .iter()
             .map(ReferenceResponse::from_reference)
             .collect(),
-          control_flow_groups: convert_cf_groups(m.control_flow_groups()),
+          control_flow_groups: convert_cf_context(m.control_flow_groups()),
         })
         .collect(),
     })
@@ -850,11 +854,9 @@ fn topic_metadata_to_response(
         sub_kind,
         visibility: format!("{:?}", visibility),
         scope: scope_info,
-        references: convert_reference_groups(metadata.references()),
-        expanded_references: convert_reference_groups(
-          metadata.expanded_references(),
-        ),
-        ancestry: convert_reference_groups(metadata.ancestry()),
+        context: convert_source_context(metadata.context()),
+        expanded_context: convert_source_context(metadata.expanded_context()),
+        ancestry: convert_source_context(metadata.ancestry()),
         ancestors: metadata.ancestors().iter().map(|t| t.id.clone()).collect(),
         descendants: metadata
           .descendants()
@@ -863,7 +865,7 @@ fn topic_metadata_to_response(
           .collect(),
         relatives: metadata.relatives().iter().map(|t| t.id.clone()).collect(),
         mutations: mutations_response,
-        mentions: convert_reference_groups(metadata.mentions()),
+        mentions: convert_source_context(metadata.mentions()),
       })
     }
 
@@ -873,6 +875,7 @@ fn topic_metadata_to_response(
         title: title.clone(),
         kind: format!("{:?}", kind),
         scope: scope_info,
+        context: convert_source_context(metadata.context()),
       })
     }
 
@@ -881,6 +884,7 @@ fn topic_metadata_to_response(
         topic_id: topic.id.clone(),
         kind: format!("{:?}", kind),
         scope: scope_info,
+        context: convert_source_context(metadata.context()),
       })
     }
 
@@ -891,7 +895,8 @@ fn topic_metadata_to_response(
       kind: format!("{:?}", kind),
       scope: scope_info,
       condition: condition.id.clone(),
-      mentions: convert_reference_groups(metadata.mentions()),
+      context: convert_source_context(metadata.context()),
+      mentions: convert_source_context(metadata.mentions()),
     }),
 
     crate::core::TopicMetadata::CommentTopic {
@@ -909,7 +914,8 @@ fn topic_metadata_to_response(
       created_at: created_at.clone(),
       scope: scope_info,
       mentioned_topics: mentioned_topics.iter().map(|t| t.id.clone()).collect(),
-      mentions: convert_reference_groups(metadata.mentions()),
+      context: convert_source_context(metadata.context()),
+      mentions: convert_source_context(metadata.mentions()),
     }),
   }
 }
@@ -1067,7 +1073,7 @@ pub async fn create_comment(
   let comment_topic = comment.comment_topic();
 
   // Parse mentions, render HTML, register in audit_data, and cache source text
-  let mut mentions_updates: Vec<(String, Vec<ReferenceGroupResponse>)> =
+  let mut mentions_updates: Vec<(String, Vec<SourceContextResponse>)> =
     Vec::new();
   {
     let mut ctx = state
@@ -1097,7 +1103,7 @@ pub async fn create_comment(
         if let Some(topic_meta) = audit_data.topic_metadata.get(&topic) {
           mentions_updates.push((
             topic_id.to_string(),
-            convert_reference_groups(topic_meta.mentions()),
+            convert_source_context(topic_meta.mentions()),
           ));
         }
       }

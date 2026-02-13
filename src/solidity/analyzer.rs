@@ -4,8 +4,8 @@ use crate::core::topic;
 use crate::core::{self, UnnamedTopicKind};
 use crate::core::{
   AST, DataContext, ElementaryType, FunctionModProperties, NamedTopicKind,
-  Node, ReferenceGroup, RevertConstraintKind, Scope, SolidityType,
-  TopicMetadata, insert_reference,
+  Node, RevertConstraintKind, Scope, SolidityType, SourceContext,
+  TopicMetadata, insert_into_context,
 };
 use crate::solidity::parser::{
   self, ASTNode, FunctionVisibility, SolidityAST, VariableVisibility,
@@ -991,7 +991,7 @@ fn populate_nodes_recursive(
   }
 }
 
-/// Builds ReferenceGroup structs from ScopedReferences.
+/// Builds SourceContext structs from ScopedReferences.
 /// Groups references by their scope, sorts references within groups by source location,
 /// and sorts groups by component name then member source location.
 ///
@@ -1068,15 +1068,15 @@ fn extract_control_flow_chain(scope: &Scope) -> Vec<core::ControlFlowInfo> {
 /// with control flow sub-grouping derived from the scope_map.
 /// The self_reference, if provided, is included in the appropriate group.
 /// Groups are post-sorted: subject's contract first, then by contract name.
-fn build_reference_groups(
+fn build_source_context(
   scoped_refs: &[ScopedReference],
   self_reference: Option<ScopedReference>,
   scope_map: &BTreeMap<i32, Scope>,
   nodes: &BTreeMap<topic::Topic, Node>,
   in_scope_source_topics: &BTreeMap<i32, InScopeDeclaration>,
   in_scope_files: &HashSet<core::ProjectPath>,
-) -> Vec<ReferenceGroup> {
-  let mut groups: Vec<ReferenceGroup> = Vec::new();
+) -> Vec<SourceContext> {
+  let mut groups: Vec<SourceContext> = Vec::new();
 
   let mut insert_scoped_ref = |scoped_ref: &ScopedReference| {
     let ref_topic = topic::new_node_topic(&scoped_ref.reference_node);
@@ -1101,7 +1101,7 @@ fn build_reference_groups(
       .map(extract_control_flow_chain)
       .unwrap_or_default();
 
-    insert_reference(
+    insert_into_context(
       &mut groups,
       contract_topic,
       contract_sort_key,
@@ -1140,9 +1140,9 @@ fn build_reference_groups(
   groups
 }
 
-/// Builds reference groups for expanded_references, sorted by ancestor/descendant counts.
+/// Builds reference groups for expanded_context, sorted by ancestor/descendant counts.
 /// Groups are post-sorted: in-scope first, then by ancestry counts.
-fn build_expanded_reference_groups(
+fn build_expanded_source_context(
   scoped_refs: &[ScopedReference],
   ancestors: &HashSet<i32>,
   descendants: &HashSet<i32>,
@@ -1151,7 +1151,7 @@ fn build_expanded_reference_groups(
   nodes: &BTreeMap<topic::Topic, Node>,
   in_scope_source_topics: &BTreeMap<i32, InScopeDeclaration>,
   in_scope_files: &HashSet<core::ProjectPath>,
-) -> Vec<ReferenceGroup> {
+) -> Vec<SourceContext> {
   // Track ancestor/descendant counts per contract
   let mut contract_ancestry_counts: BTreeMap<i32, (usize, usize)> =
     BTreeMap::new();
@@ -1182,7 +1182,7 @@ fn build_expanded_reference_groups(
     }
   }
 
-  let mut groups: Vec<ReferenceGroup> = Vec::new();
+  let mut groups: Vec<SourceContext> = Vec::new();
 
   for scoped_ref in scoped_refs {
     let ref_topic = topic::new_node_topic(&scoped_ref.reference_node);
@@ -1207,7 +1207,7 @@ fn build_expanded_reference_groups(
       .map(extract_control_flow_chain)
       .unwrap_or_default();
 
-    insert_reference(
+    insert_into_context(
       &mut groups,
       contract_topic,
       contract_sort_key,
@@ -1346,16 +1346,16 @@ fn second_pass(
 
   // Populate references after all topic_metadata entries exist
   // (requires scopes to extract control flow chains for reference grouping)
-  populate_references(
+  populate_context(
     topic_metadata,
     in_scope_source_topics,
     nodes,
     in_scope_files,
   );
 
-  // Populate expanded_references after all topic_metadata entries exist
+  // Populate expanded_context after all topic_metadata entries exist
   // (requires scopes from all ancestry-related topics)
-  populate_expanded_references(
+  populate_expanded_context(
     topic_metadata,
     ancestors_map,
     descendants_map,
@@ -1365,7 +1365,7 @@ fn second_pass(
     in_scope_files,
   );
 
-  // Populate ancestry (similar to expanded_references but without relatives)
+  // Populate ancestry (similar to expanded_context but without relatives)
   populate_ancestry(
     topic_metadata,
     ancestors_map,
@@ -1458,9 +1458,9 @@ fn process_second_pass_nodes(
         ),
         name: in_scope_topic_declaration.name().clone(),
         scope: scope.clone(),
-        references: vec![], // Populated after all metadata is built
-        expanded_references: vec![], // Populated after all metadata is built
-        ancestry: vec![],   // Populated after all metadata is built
+        context: vec![], // Populated after all metadata is built
+        expanded_context: vec![], // Populated after all metadata is built
+        ancestry: vec![], // Populated after all metadata is built
         is_mutable,
         mutations: mutation_topics,
         ancestors: ancestor_topics,
@@ -1561,6 +1561,7 @@ fn process_second_pass_nodes(
             scope: scope.clone(),
             kind,
             condition,
+            context: vec![],
             mentions: vec![],
           },
         );
@@ -1646,6 +1647,7 @@ fn process_second_pass_nodes(
             topic,
             scope: scope.clone(),
             kind,
+            context: vec![],
             mentions: vec![],
           },
         );
@@ -3177,11 +3179,13 @@ fn collect_ancestry_in_direction(
   }
 }
 
-/// Populates the references field for all NamedTopic entries.
+/// Populates the context field for all TopicMetadata entries.
+/// For NamedTopics: builds context from declaration references + self-reference.
+/// For non-named topics: builds context from just the self-reference in the scope hierarchy.
 /// Must be called after all TopicMetadata entries have been created,
 /// so that the scope_map is complete and control flow chains can be
 /// extracted for every reference_node.
-fn populate_references(
+fn populate_context(
   topic_metadata: &mut BTreeMap<topic::Topic, TopicMetadata>,
   in_scope_source_topics: &BTreeMap<i32, InScopeDeclaration>,
   nodes: &BTreeMap<topic::Topic, Node>,
@@ -3197,7 +3201,7 @@ fn populate_references(
     .collect();
 
   // Build reference groups for each declaration
-  let refs_map: BTreeMap<topic::Topic, Vec<ReferenceGroup>> =
+  let refs_map: BTreeMap<topic::Topic, Vec<SourceContext>> =
     in_scope_source_topics
       .iter()
       .filter_map(|(&node_id, decl)| {
@@ -3205,7 +3209,7 @@ fn populate_references(
         // Only process declarations that have topic_metadata (i.e. are in scope)
         let scope = scope_map.get(&node_id)?;
         let self_reference = scope_to_self_reference(scope, node_id);
-        let reference_groups = build_reference_groups(
+        let reference_groups = build_source_context(
           decl.references(),
           self_reference,
           &scope_map,
@@ -3217,23 +3221,67 @@ fn populate_references(
       })
       .collect();
 
-  // Update each metadata with references
+  // Update each named topic metadata with context
   for (topic, metadata) in topic_metadata.iter_mut() {
     if let Some(refs) = refs_map.get(topic) {
-      if let TopicMetadata::NamedTopic { references, .. } = metadata {
-        *references = refs.clone();
+      if let TopicMetadata::NamedTopic { context, .. } = metadata {
+        *context = refs.clone();
+      }
+    }
+  }
+
+  // Build context for non-named topics (just the self-reference in scope hierarchy)
+  for (_topic, metadata) in topic_metadata.iter_mut() {
+    match metadata {
+      TopicMetadata::NamedTopic { .. } => {} // Already populated above
+      TopicMetadata::UnnamedTopic {
+        topic,
+        scope,
+        context,
+        ..
+      }
+      | TopicMetadata::ControlFlow {
+        topic,
+        scope,
+        context,
+        ..
+      }
+      | TopicMetadata::TitledTopic {
+        topic,
+        scope,
+        context,
+        ..
+      }
+      | TopicMetadata::CommentTopic {
+        topic,
+        scope,
+        context,
+        ..
+      } => {
+        if let Some(node_id) = topic.underlying_id().ok() {
+          if let Some(self_ref) = scope_to_self_reference(scope, node_id) {
+            *context = build_source_context(
+              &[],
+              Some(self_ref),
+              &scope_map,
+              nodes,
+              in_scope_source_topics,
+              in_scope_files,
+            );
+          }
+        }
       }
     }
   }
 }
 
-/// Populates the expanded_references field for all TopicMetadata entries.
+/// Populates the expanded_context field for all TopicMetadata entries.
 /// This must be called after all TopicMetadata entries have been created,
 /// as it needs access to the scopes of all ancestry-related topics.
 ///
 /// This was written by Claude Code and I think it is pretty bloated, but
 /// it works.
-fn populate_expanded_references(
+fn populate_expanded_context(
   topic_metadata: &mut BTreeMap<topic::Topic, TopicMetadata>,
   ancestors_map: &AncestorsMap,
   descendants_map: &DescendantsMap,
@@ -3252,7 +3300,7 @@ fn populate_expanded_references(
     .collect();
 
   // Collect expanded references for each topic before mutating
-  let expanded_refs_map: BTreeMap<topic::Topic, Vec<ReferenceGroup>> =
+  let expanded_refs_map: BTreeMap<topic::Topic, Vec<SourceContext>> =
     topic_metadata
       .iter()
       .filter_map(|(topic, _metadata)| {
@@ -3366,7 +3414,7 @@ fn populate_expanded_references(
         }
 
         // Build reference groups with ancestry-aware sorting
-        let expanded_refs = build_expanded_reference_groups(
+        let expanded_refs = build_expanded_source_context(
           &scoped_refs,
           &ancestry.ancestors,
           &ancestry.descendants,
@@ -3381,21 +3429,20 @@ fn populate_expanded_references(
       })
       .collect();
 
-  // Now update each metadata with expanded_references
+  // Now update each metadata with expanded_context
   for (topic, metadata) in topic_metadata.iter_mut() {
     if let Some(expanded_refs) = expanded_refs_map.get(topic) {
       match metadata {
         TopicMetadata::NamedTopic {
-          expanded_references,
-          ..
+          expanded_context, ..
         } => {
-          *expanded_references = expanded_refs.clone();
+          *expanded_context = expanded_refs.clone();
         }
         TopicMetadata::UnnamedTopic { .. }
         | TopicMetadata::ControlFlow { .. }
         | TopicMetadata::TitledTopic { .. }
         | TopicMetadata::CommentTopic { .. } => {
-          // No expanded_references for unnamed/titled/comment topics
+          // No expanded_context for unnamed/titled/comment topics
         }
       }
     }
@@ -3403,7 +3450,7 @@ fn populate_expanded_references(
 }
 
 /// Populates the ancestry field for all TopicMetadata entries.
-/// Similar to populate_expanded_references but only includes ancestors and descendants,
+/// Similar to populate_expanded_context but only includes ancestors and descendants,
 /// not relatives.
 fn populate_ancestry(
   topic_metadata: &mut BTreeMap<topic::Topic, TopicMetadata>,
@@ -3423,7 +3470,7 @@ fn populate_ancestry(
     .collect();
 
   // Collect ancestry references for each topic before mutating
-  let ancestry_refs_map: BTreeMap<topic::Topic, Vec<ReferenceGroup>> =
+  let ancestry_refs_map: BTreeMap<topic::Topic, Vec<SourceContext>> =
     topic_metadata
       .iter()
       .filter_map(|(topic, _metadata)| {
@@ -3535,7 +3582,7 @@ fn populate_ancestry(
         }
 
         // Build reference groups with ancestry-aware sorting
-        let ancestry_refs = build_expanded_reference_groups(
+        let ancestry_refs = build_expanded_source_context(
           &scoped_refs,
           &ancestry.ancestors,
           &ancestry.descendants,

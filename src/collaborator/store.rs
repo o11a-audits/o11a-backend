@@ -1,7 +1,7 @@
 use crate::api::ScopeInfo;
 use crate::collaborator::models::Comment;
 use crate::core::topic::Topic;
-use crate::core::{self, insert_reference, topic::new_topic};
+use crate::core::{self, insert_into_context, topic::new_topic};
 
 /// Registers a comment in audit_data's topic_metadata and wires up mentions.
 ///
@@ -33,6 +33,7 @@ pub fn register_comment_in_audit_data(
       created_at: comment.created_at.clone(),
       scope: scope.to_scope(),
       mentioned_topics,
+      context: vec![],
       mentions: vec![],
     },
   );
@@ -50,7 +51,7 @@ pub fn register_comment_in_audit_data(
 }
 
 /// Inserts a CommentMention reference into the mentioned topic's
-/// `TopicMetadata.mentions` ReferenceGroups.
+/// `TopicMetadata.mentions` SourceContexts.
 ///
 /// Uses the comment's target topic as the reference_topic and
 /// the comment's scope to determine the correct group (component) and
@@ -106,7 +107,7 @@ fn insert_comment_mention(
     | Some(core::TopicMetadata::CommentTopic { mentions, .. }) => mentions,
     None => return,
   };
-  insert_reference(
+  insert_into_context(
     mentions,
     component_topic,
     component_sort_key,
