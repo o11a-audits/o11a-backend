@@ -236,6 +236,11 @@ pub enum Scope {
     container: ProjectPath,
     component: topic::Topic,
     member: topic::Topic,
+    /// When the node is inside a member's signature, this holds the
+    /// containing signature list node (e.g. the ParameterList for parameters
+    /// or return values, or the ModifierList for modifier specifiers).
+    /// None for nodes that are not inside a signature.
+    signature_container: Option<topic::Topic>,
   },
   ContainingBlock {
     container: ProjectPath,
@@ -259,11 +264,13 @@ pub fn add_to_scope(scope: &Scope, topic: topic::Topic) -> Scope {
       container: container.clone(),
       component: component.clone(),
       member: topic,
+      signature_container: None,
     },
     Scope::Member {
       container,
       component,
       member,
+      ..
     } => {
       let mut containing_blocks = Vec::new();
       containing_blocks.push(ContainingBlockLayer {
@@ -353,6 +360,7 @@ pub fn set_member(scope: &Scope, topic: topic::Topic) -> Scope {
       container: container.clone(),
       component: component.clone(),
       member: topic,
+      signature_container: None,
     },
     Scope::Member {
       container,
@@ -362,6 +370,7 @@ pub fn set_member(scope: &Scope, topic: topic::Topic) -> Scope {
       container: container.clone(),
       component: component.clone(),
       member: topic,
+      signature_container: None,
     },
     Scope::ContainingBlock {
       container,
@@ -371,7 +380,32 @@ pub fn set_member(scope: &Scope, topic: topic::Topic) -> Scope {
       container: container.clone(),
       component: component.clone(),
       member: topic,
+      signature_container: None,
     },
+  }
+}
+
+/// Sets the signature_container on a Member scope.
+/// Panics if the scope is not `Member`.
+pub fn set_signature_container(
+  scope: &Scope,
+  container: topic::Topic,
+) -> Scope {
+  match scope {
+    Scope::Member {
+      container: proj,
+      component,
+      member,
+      ..
+    } => Scope::Member {
+      container: proj.clone(),
+      component: component.clone(),
+      member: member.clone(),
+      signature_container: Some(container),
+    },
+    _ => panic!(
+      "Invariant violation: set_signature_container called on non-Member scope"
+    ),
   }
 }
 

@@ -1951,6 +1951,142 @@ fn process_second_pass_nodes(
         // not walked further.
       }
 
+      ASTNode::FunctionSignature {
+        documentation,
+        modifiers,
+        parameters,
+        return_parameters,
+        ..
+      } => {
+        // Documentation is processed with the plain member scope
+        if let Some(doc) = documentation {
+          process_second_pass_nodes(
+            &vec![&**doc],
+            is_in_scope,
+            in_scope_source_topics,
+            in_scope_files,
+            mutations_map,
+            ancestors_map,
+            descendants_map,
+            relatives_map,
+            nodes,
+            scope,
+            topic_metadata,
+            function_properties,
+            variable_types,
+          )?;
+        }
+
+        // Modifiers list: set signature_container to the ModifierList node
+        let mods_scope = core::set_signature_container(
+          scope,
+          topic::new_node_topic(&modifiers.node_id()),
+        );
+        process_second_pass_nodes(
+          &vec![&**modifiers],
+          is_in_scope,
+          in_scope_source_topics,
+          in_scope_files,
+          mutations_map,
+          ancestors_map,
+          descendants_map,
+          relatives_map,
+          nodes,
+          &mods_scope,
+          topic_metadata,
+          function_properties,
+          variable_types,
+        )?;
+
+        // Parameters: set signature_container to the ParameterList node
+        let params_scope = core::set_signature_container(
+          scope,
+          topic::new_node_topic(&parameters.node_id()),
+        );
+        process_second_pass_nodes(
+          &vec![&**parameters],
+          is_in_scope,
+          in_scope_source_topics,
+          in_scope_files,
+          mutations_map,
+          ancestors_map,
+          descendants_map,
+          relatives_map,
+          nodes,
+          &params_scope,
+          topic_metadata,
+          function_properties,
+          variable_types,
+        )?;
+
+        // Return parameters: set signature_container to the return ParameterList node
+        let ret_scope = core::set_signature_container(
+          scope,
+          topic::new_node_topic(&return_parameters.node_id()),
+        );
+        process_second_pass_nodes(
+          &vec![&**return_parameters],
+          is_in_scope,
+          in_scope_source_topics,
+          in_scope_files,
+          mutations_map,
+          ancestors_map,
+          descendants_map,
+          relatives_map,
+          nodes,
+          &ret_scope,
+          topic_metadata,
+          function_properties,
+          variable_types,
+        )?;
+      }
+
+      ASTNode::ModifierSignature {
+        documentation,
+        parameters,
+        ..
+      } => {
+        // Documentation is processed with the plain member scope
+        if let Some(doc) = documentation {
+          process_second_pass_nodes(
+            &vec![&**doc],
+            is_in_scope,
+            in_scope_source_topics,
+            in_scope_files,
+            mutations_map,
+            ancestors_map,
+            descendants_map,
+            relatives_map,
+            nodes,
+            scope,
+            topic_metadata,
+            function_properties,
+            variable_types,
+          )?;
+        }
+
+        // Parameters: set signature_container to the ParameterList node
+        let params_scope = core::set_signature_container(
+          scope,
+          topic::new_node_topic(&parameters.node_id()),
+        );
+        process_second_pass_nodes(
+          &vec![&**parameters],
+          is_in_scope,
+          in_scope_source_topics,
+          in_scope_files,
+          mutations_map,
+          ancestors_map,
+          descendants_map,
+          relatives_map,
+          nodes,
+          &params_scope,
+          topic_metadata,
+          function_properties,
+          variable_types,
+        )?;
+      }
+
       // Default: process all children generically
       _ => {
         let child_nodes = node.nodes();

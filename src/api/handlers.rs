@@ -468,6 +468,8 @@ pub struct ScopeInfo {
   pub member: Option<String>,
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub containing_blocks: Vec<ContainingBlockLayerInfo>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub signature_container: Option<String>,
 }
 
 impl ScopeInfo {
@@ -480,6 +482,7 @@ impl ScopeInfo {
         component: None,
         member: None,
         containing_blocks: vec![],
+        signature_container: None,
       },
       core::Scope::Container { container } => ScopeInfo {
         scope_type: "Container".to_string(),
@@ -487,6 +490,7 @@ impl ScopeInfo {
         component: None,
         member: None,
         containing_blocks: vec![],
+        signature_container: None,
       },
       core::Scope::Component {
         container,
@@ -497,17 +501,20 @@ impl ScopeInfo {
         component: Some(component.id.clone()),
         member: None,
         containing_blocks: vec![],
+        signature_container: None,
       },
       core::Scope::Member {
         container,
         component,
         member,
+        signature_container,
       } => ScopeInfo {
         scope_type: "Member".to_string(),
         container: Some(container.file_path.clone()),
         component: Some(component.id.clone()),
         member: Some(member.id.clone()),
         containing_blocks: vec![],
+        signature_container: signature_container.as_ref().map(|t| t.id.clone()),
       },
       core::Scope::ContainingBlock {
         container,
@@ -531,6 +538,7 @@ impl ScopeInfo {
             }),
           })
           .collect(),
+        signature_container: None,
       },
     }
   }
@@ -584,6 +592,10 @@ impl ScopeInfo {
         container: container(),
         component: new_topic(self.component.as_ref().unwrap()),
         member: new_topic(self.member.as_ref().unwrap()),
+        signature_container: self
+          .signature_container
+          .as_ref()
+          .map(|s| new_topic(s)),
       },
       "Component" => core::Scope::Component {
         container: container(),
@@ -605,6 +617,7 @@ impl Default for ScopeInfo {
       component: None,
       member: None,
       containing_blocks: vec![],
+      signature_container: None,
     }
   }
 }
