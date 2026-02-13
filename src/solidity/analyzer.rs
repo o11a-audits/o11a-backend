@@ -1078,7 +1078,40 @@ fn build_source_context(
 ) -> Vec<SourceContext> {
   let mut groups: Vec<SourceContext> = Vec::new();
 
+  // Collect all reference_node IDs to detect semantic block subsumption.
+  // If block B is nested inside block A and both are reference_nodes,
+  // block B is redundant because expanding A already shows B's content.
+  let all_ref_nodes: HashSet<i32> = self_reference
+    .iter()
+    .map(|r| r.reference_node)
+    .chain(scoped_refs.iter().map(|r| r.reference_node))
+    .collect();
+
+  // A reference_node is subsumed if any block in its containing_blocks
+  // chain is also a reference_node (meaning a higher block already covers it).
+  let is_subsumed = |ref_node: i32| -> bool {
+    if let Some(scope) = scope_map.get(&ref_node) {
+      if let Scope::ContainingBlock {
+        containing_blocks, ..
+      } = scope
+      {
+        return containing_blocks.iter().any(|layer| {
+          layer
+            .block
+            .underlying_id()
+            .ok()
+            .map_or(false, |block_id| all_ref_nodes.contains(&block_id))
+        });
+      }
+    }
+    false
+  };
+
   let mut insert_scoped_ref = |scoped_ref: &ScopedReference| {
+    if is_subsumed(scoped_ref.reference_node) {
+      return;
+    }
+
     let ref_topic = topic::new_node_topic(&scoped_ref.reference_node);
     let ref_sort_key = get_source_location_start(&ref_topic, nodes);
     let contract_topic =
