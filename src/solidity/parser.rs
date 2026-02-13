@@ -1135,6 +1135,7 @@ pub enum ASTNode {
     node_id: i32,
     src_location: SourceLocation,
     parameters: Vec<ASTNode>,
+    is_return_parameters: bool,
   },
   TryCatchClause {
     node_id: i32,
@@ -2948,10 +2949,12 @@ pub fn children_to_stubs(node: ASTNode) -> ASTNode {
       node_id,
       src_location,
       parameters,
+      is_return_parameters,
     } => ASTNode::ParameterList {
       node_id: node_id,
       src_location: src_location,
       parameters: parameters.iter().map(|n| node_to_stub(n)).collect(),
+      is_return_parameters: is_return_parameters,
     },
     ASTNode::TryCatchClause {
       node_id,
@@ -4789,12 +4792,21 @@ fn node_from_json(
         node_type_str,
         context,
       )?;
-      let return_parameters = get_required_node_with_context(
+      let mut return_parameters = get_required_node_with_context(
         val,
         "returnParameters",
         node_type_str,
         context,
       )?;
+
+      // Mark the return parameter list so downstream consumers can distinguish it
+      if let ASTNode::ParameterList {
+        is_return_parameters,
+        ..
+      } = &mut *return_parameters
+      {
+        *is_return_parameters = true;
+      }
 
       // Restore the previous signature parent node
       context.signature_parent_node.set(previous_signature_parent);
@@ -5116,6 +5128,7 @@ fn node_from_json(
         node_id,
         src_location,
         parameters,
+        is_return_parameters: false,
       })
     }
     "TryCatchClause" => {
