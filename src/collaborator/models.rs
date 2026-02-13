@@ -226,17 +226,10 @@ pub struct CommentListResponse {
   pub comment_topic_ids: Vec<String>, // ["C1", "C2", "C3"]
 }
 
-/// Entry in topic comments response
-#[derive(Debug, Clone, Serialize)]
-pub struct TopicCommentEntry {
-  pub comment_topic_id: String,
-  pub comment_type: String,
-}
-
 /// Response for listing comments on a topic
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Serialize)]
 pub struct TopicCommentsResponse {
-  pub comments: Vec<TopicCommentEntry>,
+  pub comments: Vec<crate::api::handlers::TopicMetadataResponse>,
 }
 
 /// Response for status queries

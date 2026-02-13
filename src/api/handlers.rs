@@ -729,7 +729,7 @@ pub struct ControlFlowTopicResponse {
 }
 
 /// Response for CommentTopic metadata
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CommentTopicResponse {
   pub topic_id: String,
   pub author_id: i64,
@@ -977,16 +977,23 @@ pub async fn get_topic_comments(
     "GET /api/v1/audits/{}/topics/{}/comments",
     audit_id, topic_id
   );
-  let comments =
+  let db_comments =
     db::get_comments_for_topic_raw(&state.db, &audit_id, &topic_id)
       .await
       .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-  let comments = comments
+  let ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in get_topic_comments: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+  let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+
+  let comments = db_comments
     .iter()
-    .map(|c| TopicCommentEntry {
-      comment_topic_id: c.comment_topic_id(),
-      comment_type: c.comment_type.clone(),
+    .filter_map(|c| {
+      let comment_topic = new_topic(&c.comment_topic_id());
+      let metadata = audit_data.topic_metadata.get(&comment_topic)?;
+      Some(topic_metadata_to_response(&comment_topic, metadata))
     })
     .collect();
 
