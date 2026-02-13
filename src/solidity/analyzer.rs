@@ -1049,15 +1049,15 @@ fn scope_to_self_reference(
   }
 }
 
-/// Extracts the control flow chain from a scope's containing blocks.
-/// Returns the sequence of ControlFlowInfo values (filtering out None entries).
-fn extract_control_flow_chain(scope: &Scope) -> Vec<core::ControlFlowInfo> {
+/// Extracts the annotation chain from a scope's containing blocks.
+/// Returns the sequence of BlockAnnotation values (filtering out None entries).
+fn extract_annotation_chain(scope: &Scope) -> Vec<core::BlockAnnotation> {
   match scope {
     Scope::ContainingBlock {
       containing_blocks, ..
     } => containing_blocks
       .iter()
-      .filter_map(|layer| layer.control_flow.clone())
+      .filter_map(|layer| layer.annotation.clone())
       .collect(),
     _ => vec![],
   }
@@ -1129,9 +1129,9 @@ fn build_source_context(
       (member_topic, member_sort_key)
     });
 
-    let control_flow_chain = scope_map
+    let annotation_chain = scope_map
       .get(&scoped_ref.reference_node)
-      .map(extract_control_flow_chain)
+      .map(extract_annotation_chain)
       .unwrap_or_default();
 
     insert_into_context(
@@ -1140,7 +1140,7 @@ fn build_source_context(
       contract_sort_key,
       is_in_scope,
       subscope,
-      &control_flow_chain,
+      &annotation_chain,
       core::Reference::project_reference(ref_topic, ref_sort_key),
     );
   };
@@ -1235,9 +1235,9 @@ fn build_expanded_source_context(
       (member_topic, member_sort_key)
     });
 
-    let control_flow_chain = scope_map
+    let annotation_chain = scope_map
       .get(&scoped_ref.reference_node)
-      .map(extract_control_flow_chain)
+      .map(extract_annotation_chain)
       .unwrap_or_default();
 
     insert_into_context(
@@ -1246,7 +1246,7 @@ fn build_expanded_source_context(
       contract_sort_key,
       in_scope,
       subscope,
-      &control_flow_chain,
+      &annotation_chain,
       core::Reference::project_reference(ref_topic, ref_sort_key),
     );
   }
@@ -1718,11 +1718,11 @@ fn process_second_pass_nodes(
         )?;
 
         // Process true body with True branch control flow added to scope
-        let true_cf = core::ControlFlowInfo {
+        let true_cf = core::BlockAnnotation {
           topic: cf_topic.clone(),
-          kind: core::ControlFlowKind::If(core::ControlFlowBranch::True),
+          kind: core::BlockAnnotationKind::If(core::ControlFlowBranch::True),
         };
-        let true_scope = core::add_control_flow_to_scope(scope, true_cf);
+        let true_scope = core::add_annotation_to_scope(scope, true_cf);
         process_second_pass_nodes(
           &vec![true_body.as_ref()],
           is_in_scope,
@@ -1741,11 +1741,11 @@ fn process_second_pass_nodes(
 
         // Process false body with False branch control flow added to scope
         if let Some(false_body) = false_body {
-          let false_cf = core::ControlFlowInfo {
+          let false_cf = core::BlockAnnotation {
             topic: cf_topic,
-            kind: core::ControlFlowKind::If(core::ControlFlowBranch::False),
+            kind: core::BlockAnnotationKind::If(core::ControlFlowBranch::False),
           };
-          let false_scope = core::add_control_flow_to_scope(scope, false_cf);
+          let false_scope = core::add_annotation_to_scope(scope, false_cf);
           process_second_pass_nodes(
             &vec![false_body.as_ref()],
             is_in_scope,
@@ -1770,9 +1770,9 @@ fn process_second_pass_nodes(
         body,
         ..
       } => {
-        let cf = core::ControlFlowInfo {
+        let cf = core::BlockAnnotation {
           topic: topic::new_node_topic(node_id),
-          kind: core::ControlFlowKind::For,
+          kind: core::BlockAnnotationKind::For,
         };
 
         // Process condition (LoopExpression) without control flow context
@@ -1793,7 +1793,7 @@ fn process_second_pass_nodes(
         )?;
 
         // Process body with control flow added to scope
-        let cf_scope = core::add_control_flow_to_scope(scope, cf);
+        let cf_scope = core::add_annotation_to_scope(scope, cf);
         process_second_pass_nodes(
           &vec![body.as_ref()],
           is_in_scope,
@@ -1817,9 +1817,9 @@ fn process_second_pass_nodes(
         body,
         ..
       } => {
-        let cf = core::ControlFlowInfo {
+        let cf = core::BlockAnnotation {
           topic: topic::new_node_topic(node_id),
-          kind: core::ControlFlowKind::While,
+          kind: core::BlockAnnotationKind::While,
         };
 
         // Process condition without control flow context
@@ -1841,7 +1841,7 @@ fn process_second_pass_nodes(
 
         // Process body with control flow added to scope
         if let Some(body) = body {
-          let cf_scope = core::add_control_flow_to_scope(scope, cf);
+          let cf_scope = core::add_annotation_to_scope(scope, cf);
           process_second_pass_nodes(
             &vec![body.as_ref()],
             is_in_scope,
@@ -1866,9 +1866,9 @@ fn process_second_pass_nodes(
         body,
         ..
       } => {
-        let cf = core::ControlFlowInfo {
+        let cf = core::BlockAnnotation {
           topic: topic::new_node_topic(node_id),
-          kind: core::ControlFlowKind::DoWhile,
+          kind: core::BlockAnnotationKind::DoWhile,
         };
 
         // Process condition without control flow context
@@ -1890,7 +1890,7 @@ fn process_second_pass_nodes(
 
         // Process body with control flow added to scope
         if let Some(body) = body {
-          let cf_scope = core::add_control_flow_to_scope(scope, cf);
+          let cf_scope = core::add_annotation_to_scope(scope, cf);
           process_second_pass_nodes(
             &vec![body.as_ref()],
             is_in_scope,
@@ -1907,6 +1907,48 @@ fn process_second_pass_nodes(
             variable_types,
           )?;
         }
+      }
+
+      ASTNode::UncheckedBlock {
+        node_id,
+        statements,
+        ..
+      } => {
+        let block_scope =
+          core::add_to_scope(scope, topic::new_node_topic(node_id));
+        let ann = core::BlockAnnotation {
+          topic: topic::new_node_topic(node_id),
+          kind: core::BlockAnnotationKind::Unchecked,
+        };
+        let annotated_scope = core::add_annotation_to_scope(&block_scope, ann);
+        let child_nodes: Vec<&ASTNode> = statements.iter().collect();
+        process_second_pass_nodes(
+          &child_nodes,
+          is_in_scope,
+          in_scope_source_topics,
+          in_scope_files,
+          mutations_map,
+          ancestors_map,
+          descendants_map,
+          relatives_map,
+          nodes,
+          &annotated_scope,
+          topic_metadata,
+          function_properties,
+          variable_types,
+        )?;
+      }
+
+      ASTNode::InlineAssembly { node_id, .. } => {
+        let block_scope =
+          core::add_to_scope(scope, topic::new_node_topic(node_id));
+        let ann = core::BlockAnnotation {
+          topic: topic::new_node_topic(node_id),
+          kind: core::BlockAnnotationKind::InlineAssembly,
+        };
+        let _annotated_scope = core::add_annotation_to_scope(&block_scope, ann);
+        // InlineAssembly has no parseable children — scope is created but
+        // not walked further.
       }
 
       // Default: process all children generically

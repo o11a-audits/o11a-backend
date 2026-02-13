@@ -390,12 +390,12 @@ pub async fn get_source_text(
 
 // Topic metadata response
 
-/// Serializable control flow kind for API responses.
-/// Flattens `ControlFlowKind::If(ControlFlowBranch)` into `if_true`/`if_false`
+/// Serializable block annotation kind for API responses.
+/// Flattens `BlockAnnotationKind::If(ControlFlowBranch)` into `if_true`/`if_false`
 /// for a clean single-discriminator JSON representation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ControlFlowKindInfo {
+pub enum BlockAnnotationKindInfo {
   #[serde(rename = "if_true")]
   IfTrue,
   #[serde(rename = "if_false")]
@@ -403,39 +403,49 @@ pub enum ControlFlowKindInfo {
   For,
   While,
   DoWhile,
+  Unchecked,
+  InlineAssembly,
 }
 
-impl ControlFlowKindInfo {
-  pub fn from_core(kind: &core::ControlFlowKind) -> Self {
+impl BlockAnnotationKindInfo {
+  pub fn from_core(kind: &core::BlockAnnotationKind) -> Self {
     match kind {
-      core::ControlFlowKind::If(core::ControlFlowBranch::True) => Self::IfTrue,
-      core::ControlFlowKind::If(core::ControlFlowBranch::False) => {
+      core::BlockAnnotationKind::If(core::ControlFlowBranch::True) => {
+        Self::IfTrue
+      }
+      core::BlockAnnotationKind::If(core::ControlFlowBranch::False) => {
         Self::IfFalse
       }
-      core::ControlFlowKind::For => Self::For,
-      core::ControlFlowKind::While => Self::While,
-      core::ControlFlowKind::DoWhile => Self::DoWhile,
+      core::BlockAnnotationKind::For => Self::For,
+      core::BlockAnnotationKind::While => Self::While,
+      core::BlockAnnotationKind::DoWhile => Self::DoWhile,
+      core::BlockAnnotationKind::Unchecked => Self::Unchecked,
+      core::BlockAnnotationKind::InlineAssembly => Self::InlineAssembly,
     }
   }
 
-  pub fn to_core(&self) -> core::ControlFlowKind {
+  pub fn to_core(&self) -> core::BlockAnnotationKind {
     match self {
-      Self::IfTrue => core::ControlFlowKind::If(core::ControlFlowBranch::True),
-      Self::IfFalse => {
-        core::ControlFlowKind::If(core::ControlFlowBranch::False)
+      Self::IfTrue => {
+        core::BlockAnnotationKind::If(core::ControlFlowBranch::True)
       }
-      Self::For => core::ControlFlowKind::For,
-      Self::While => core::ControlFlowKind::While,
-      Self::DoWhile => core::ControlFlowKind::DoWhile,
+      Self::IfFalse => {
+        core::BlockAnnotationKind::If(core::ControlFlowBranch::False)
+      }
+      Self::For => core::BlockAnnotationKind::For,
+      Self::While => core::BlockAnnotationKind::While,
+      Self::DoWhile => core::BlockAnnotationKind::DoWhile,
+      Self::Unchecked => core::BlockAnnotationKind::Unchecked,
+      Self::InlineAssembly => core::BlockAnnotationKind::InlineAssembly,
     }
   }
 }
 
-/// Serializable control flow info for API responses.
+/// Serializable block annotation for API responses.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ControlFlowInfoResponse {
+pub struct BlockAnnotationResponse {
   pub topic: String,
-  pub kind: ControlFlowKindInfo,
+  pub kind: BlockAnnotationKindInfo,
 }
 
 /// One layer in the containing block nesting chain for API responses.
@@ -443,7 +453,7 @@ pub struct ControlFlowInfoResponse {
 pub struct ContainingBlockLayerInfo {
   pub block: String,
   #[serde(skip_serializing_if = "Option::is_none")]
-  pub control_flow: Option<ControlFlowInfoResponse>,
+  pub annotation: Option<BlockAnnotationResponse>,
 }
 
 /// Serializable scope information for storing in database and API responses
@@ -513,10 +523,10 @@ impl ScopeInfo {
           .iter()
           .map(|layer| ContainingBlockLayerInfo {
             block: layer.block.id.clone(),
-            control_flow: layer.control_flow.as_ref().map(|cf| {
-              ControlFlowInfoResponse {
-                topic: cf.topic.id.clone(),
-                kind: ControlFlowKindInfo::from_core(&cf.kind),
+            annotation: layer.annotation.as_ref().map(|ann| {
+              BlockAnnotationResponse {
+                topic: ann.topic.id.clone(),
+                kind: BlockAnnotationKindInfo::from_core(&ann.kind),
               }
             }),
           })
@@ -561,10 +571,10 @@ impl ScopeInfo {
           .iter()
           .map(|layer| core::ContainingBlockLayer {
             block: new_topic(&layer.block),
-            control_flow: layer.control_flow.as_ref().map(|cf| {
-              core::ControlFlowInfo {
-                topic: new_topic(&cf.topic),
-                kind: cf.kind.to_core(),
+            annotation: layer.annotation.as_ref().map(|ann| {
+              core::BlockAnnotation {
+                topic: new_topic(&ann.topic),
+                kind: ann.kind.to_core(),
               }
             }),
           })
@@ -652,11 +662,11 @@ impl ReferenceResponse {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct ControlFlowSourceContextResponse {
-  pub control_flow: ControlFlowInfoResponse,
+pub struct AnnotatedBlockSourceContextResponse {
+  pub annotation: BlockAnnotationResponse,
   pub references: Vec<ReferenceResponse>,
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
-  pub nested: Vec<ControlFlowSourceContextResponse>,
+  pub nested: Vec<AnnotatedBlockSourceContextResponse>,
   #[serde(default, skip_serializing_if = "std::ops::Not::not")]
   pub has_sibling_branch: bool,
 }
@@ -666,7 +676,7 @@ pub struct NestedSourceContextResponse {
   pub subscope: String,
   pub references: Vec<ReferenceResponse>,
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
-  pub control_flow_groups: Vec<ControlFlowSourceContextResponse>,
+  pub annotation_groups: Vec<AnnotatedBlockSourceContextResponse>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -759,22 +769,22 @@ pub enum TopicMetadataResponse {
 }
 
 // Helper function to convert SourceContext to SourceContextResponse
-fn convert_cf_context(
-  groups: &[crate::core::ControlFlowSourceContext],
-) -> Vec<ControlFlowSourceContextResponse> {
+fn convert_annotation_context(
+  groups: &[crate::core::AnnotatedBlockSourceContext],
+) -> Vec<AnnotatedBlockSourceContextResponse> {
   groups
     .iter()
-    .map(|g| ControlFlowSourceContextResponse {
-      control_flow: ControlFlowInfoResponse {
-        topic: g.control_flow().topic.id.clone(),
-        kind: ControlFlowKindInfo::from_core(&g.control_flow().kind),
+    .map(|g| AnnotatedBlockSourceContextResponse {
+      annotation: BlockAnnotationResponse {
+        topic: g.annotation().topic.id.clone(),
+        kind: BlockAnnotationKindInfo::from_core(&g.annotation().kind),
       },
       references: g
         .references()
         .iter()
         .map(ReferenceResponse::from_reference)
         .collect(),
-      nested: convert_cf_context(g.nested()),
+      nested: convert_annotation_context(g.nested()),
       has_sibling_branch: g.has_sibling_branch(),
     })
     .collect()
@@ -803,7 +813,7 @@ fn convert_source_context(
             .iter()
             .map(ReferenceResponse::from_reference)
             .collect(),
-          control_flow_groups: convert_cf_context(m.control_flow_groups()),
+          annotation_groups: convert_annotation_context(m.annotation_groups()),
         })
         .collect(),
     })

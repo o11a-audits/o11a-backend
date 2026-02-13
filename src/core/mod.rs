@@ -82,29 +82,37 @@ impl ElementaryType {
 // ============================================================================
 
 // ============================================================================
-// Control Flow Types
+// Block Annotation Types
 // ============================================================================
 
-/// Describes which control flow statement encloses a containing block layer.
+/// Describes the annotation on a containing block layer — either a control flow
+/// statement whose body is this block, or an annotated block type like
+/// `unchecked` or `assembly`.
+///
 /// Branch information is encoded directly in the kind — only `If` has branches,
-/// so this avoids a disjoint field that would be meaningless for loops.
+/// so this avoids a disjoint field that would be meaningless for other kinds.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ControlFlowInfo {
-  /// The topic of the control flow statement node
+pub struct BlockAnnotation {
+  /// The topic of the annotating node (the control flow statement or
+  /// the annotated block itself).
   pub topic: topic::Topic,
-  pub kind: ControlFlowKind,
+  pub kind: BlockAnnotationKind,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum ControlFlowKind {
+pub enum BlockAnnotationKind {
+  // Control flow
   If(ControlFlowBranch),
   For,
   While,
   DoWhile,
+  // Annotated blocks
+  Unchecked,
+  InlineAssembly,
 }
 
 /// Branchless kind for the TopicMetadata::ControlFlow variant.
-/// Unlike ControlFlowKind (which encodes branch info for scope tracking),
+/// Unlike BlockAnnotationKind (which encodes branch info for scope tracking),
 /// this simply identifies the statement type.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ControlFlowStatementKind {
@@ -121,15 +129,15 @@ pub enum ControlFlowBranch {
 }
 
 /// One layer in the containing block nesting chain.
-/// Pairs a semantic block with the optional control flow statement that
-/// it contains.
+/// Pairs a semantic block with an optional annotation describing what
+/// kind of block it is (control flow body, unchecked, assembly, etc.).
 #[derive(Debug, Clone)]
 pub struct ContainingBlockLayer {
   /// The semantic block at this nesting level.
   pub block: topic::Topic,
-  /// The control flow statement that is contained within this block.
-  /// None if no control flow has been encountered yet at this nesting level.
-  pub control_flow: Option<ControlFlowInfo>,
+  /// The annotation on this block layer, if any.
+  /// None for plain semantic blocks with no governing statement or keyword.
+  pub annotation: Option<BlockAnnotation>,
 }
 
 // ============================================================================
@@ -260,7 +268,7 @@ pub fn add_to_scope(scope: &Scope, topic: topic::Topic) -> Scope {
       let mut containing_blocks = Vec::new();
       containing_blocks.push(ContainingBlockLayer {
         block: topic,
-        control_flow: None,
+        annotation: None,
       });
       Scope::ContainingBlock {
         container: container.clone(),
@@ -278,7 +286,7 @@ pub fn add_to_scope(scope: &Scope, topic: topic::Topic) -> Scope {
       let mut containing_blocks = containing_blocks.clone();
       containing_blocks.push(ContainingBlockLayer {
         block: topic,
-        control_flow: None,
+        annotation: None,
       });
       Scope::ContainingBlock {
         container: container.clone(),
@@ -290,16 +298,16 @@ pub fn add_to_scope(scope: &Scope, topic: topic::Topic) -> Scope {
   }
 }
 
-/// Attaches control flow information to the innermost containing block layer.
-/// Used when a control flow statement (if/for/while/do-while) is encountered
-/// within a semantic block.
+/// Attaches an annotation to the innermost containing block layer.
+/// Used when a control flow statement or annotated block (unchecked, assembly)
+/// is encountered within a semantic block.
 ///
-/// Panics if the scope is not `ContainingBlock` (control flow nodes cannot
+/// Panics if the scope is not `ContainingBlock` (annotated blocks cannot
 /// exist outside a semantic block) or if the innermost layer already has
-/// control flow info (each block has at most one control flow on a nesting path).
-pub fn add_control_flow_to_scope(
+/// an annotation (each block has at most one annotation on a nesting path).
+pub fn add_annotation_to_scope(
   scope: &Scope,
-  control_flow: ControlFlowInfo,
+  annotation: BlockAnnotation,
 ) -> Scope {
   match scope {
     Scope::ContainingBlock {
@@ -312,12 +320,12 @@ pub fn add_control_flow_to_scope(
         .last()
         .expect("ContainingBlock scope must have at least one layer");
       assert!(
-        last.control_flow.is_none(),
-        "Invariant violation: innermost containing block layer already has control flow info"
+        last.annotation.is_none(),
+        "Invariant violation: innermost containing block layer already has an annotation"
       );
       let mut containing_blocks = containing_blocks.clone();
       let last_mut = containing_blocks.last_mut().unwrap();
-      last_mut.control_flow = Some(control_flow);
+      last_mut.annotation = Some(annotation);
       Scope::ContainingBlock {
         container: container.clone(),
         component: component.clone(),
@@ -326,7 +334,7 @@ pub fn add_control_flow_to_scope(
       }
     }
     _ => panic!(
-      "Invariant violation: control flow node encountered outside a containing block scope"
+      "Invariant violation: annotated block node encountered outside a containing block scope"
     ),
   }
 }
@@ -564,25 +572,25 @@ impl SourceContext {
   }
 }
 
-/// Groups references within a control flow statement body.
-/// Recursive to handle nested control flow (if inside for inside while).
+/// Groups references within an annotated block (control flow body, unchecked, assembly, etc.).
+/// Recursive to handle nesting (e.g. if inside for inside unchecked).
 #[derive(Debug, Clone, PartialEq)]
-pub struct ControlFlowSourceContext {
-  /// The control flow statement that groups these references
-  control_flow: ControlFlowInfo,
+pub struct AnnotatedBlockSourceContext {
+  /// The block annotation that groups these references
+  annotation: BlockAnnotation,
   /// Source location start for sorting groups relative to each other
   sort_key: Option<usize>,
-  /// References directly within this control flow body (not nested in deeper control flow)
+  /// References directly within this block (not nested in deeper annotated blocks)
   references: Vec<Reference>,
-  /// Nested control flow groups within this one
-  nested: Vec<ControlFlowSourceContext>,
+  /// Nested annotated block groups within this one
+  nested: Vec<AnnotatedBlockSourceContext>,
   /// Whether this If branch has a sibling branch (true body has false body, or vice versa)
   has_sibling_branch: bool,
 }
 
-impl ControlFlowSourceContext {
-  pub fn control_flow(&self) -> &ControlFlowInfo {
-    &self.control_flow
+impl AnnotatedBlockSourceContext {
+  pub fn annotation(&self) -> &BlockAnnotation {
+    &self.annotation
   }
 
   pub fn sort_key(&self) -> Option<usize> {
@@ -593,7 +601,7 @@ impl ControlFlowSourceContext {
     &self.references
   }
 
-  pub fn nested(&self) -> &[ControlFlowSourceContext] {
+  pub fn nested(&self) -> &[AnnotatedBlockSourceContext] {
     &self.nested
   }
 
@@ -611,10 +619,10 @@ pub struct NestedSourceContext {
   subscope: topic::Topic,
   /// Source location start for sorting nested groups relative to each other
   sort_key: Option<usize>,
-  /// References within this nested scope (outside any control flow)
+  /// References within this nested scope (outside any annotated block)
   references: Vec<Reference>,
-  /// References grouped by control flow statement
-  control_flow_groups: Vec<ControlFlowSourceContext>,
+  /// References grouped by annotated block (control flow, unchecked, assembly, etc.)
+  annotation_groups: Vec<AnnotatedBlockSourceContext>,
 }
 
 impl NestedSourceContext {
@@ -630,8 +638,8 @@ impl NestedSourceContext {
     &self.references
   }
 
-  pub fn control_flow_groups(&self) -> &[ControlFlowSourceContext] {
-    &self.control_flow_groups
+  pub fn annotation_groups(&self) -> &[AnnotatedBlockSourceContext] {
+    &self.annotation_groups
   }
 }
 
@@ -664,8 +672,8 @@ pub fn ensure_context(
 /// Inserts a reference into a sorted, deduplicated Vec<SourceContext>.
 ///
 /// Finds or creates the appropriate SourceContext (by scope topic) and, if a subscope
-/// is provided, the appropriate NestedSourceContext. If a control flow chain is provided,
-/// the reference is nested within recursive ControlFlowSourceContext(s) inside the
+/// is provided, the appropriate NestedSourceContext. If an annotation chain is provided,
+/// the reference is nested within recursive AnnotatedBlockSourceContext(s) inside the
 /// NestedSourceContext.
 ///
 /// Inserts the reference at the correct sorted position. Skips insertion if a reference
@@ -676,7 +684,7 @@ pub fn insert_into_context(
   scope_sort_key: Option<usize>,
   is_in_scope: bool,
   subscope: Option<(topic::Topic, Option<usize>)>,
-  control_flow_chain: &[ControlFlowInfo],
+  annotation_chain: &[BlockAnnotation],
   reference: Reference,
 ) {
   // Ensure the context exists
@@ -707,7 +715,7 @@ pub fn insert_into_context(
             subscope: subscope_topic.clone(),
             sort_key: subscope_sort_key,
             references: Vec::new(),
-            control_flow_groups: Vec::new(),
+            annotation_groups: Vec::new(),
           },
         );
       }
@@ -718,13 +726,13 @@ pub fn insert_into_context(
         .find(|n| n.subscope == subscope_topic)
         .unwrap();
 
-      if control_flow_chain.is_empty() {
+      if annotation_chain.is_empty() {
         insert_ref_sorted(&mut nested.references, reference);
       } else {
-        // Walk the control flow chain, creating/finding groups at each level
-        let target_refs = find_or_create_cf_context(
-          &mut nested.control_flow_groups,
-          control_flow_chain,
+        // Walk the annotation chain, creating/finding groups at each level
+        let target_refs = find_or_create_annotation_context(
+          &mut nested.annotation_groups,
+          annotation_chain,
         );
         insert_ref_sorted(target_refs, reference);
       }
@@ -732,35 +740,35 @@ pub fn insert_into_context(
   }
 }
 
-/// Walks a control flow chain, creating or finding `ControlFlowSourceContext`s at
+/// Walks an annotation chain, creating or finding `AnnotatedBlockSourceContext`s at
 /// each level, and returns a mutable reference to the `references` vec at the final level.
-fn find_or_create_cf_context<'a>(
-  groups: &'a mut Vec<ControlFlowSourceContext>,
-  chain: &[ControlFlowInfo],
+fn find_or_create_annotation_context<'a>(
+  groups: &'a mut Vec<AnnotatedBlockSourceContext>,
+  chain: &[BlockAnnotation],
 ) -> &'a mut Vec<Reference> {
   assert!(!chain.is_empty());
 
-  let cf = &chain[0];
+  let ann = &chain[0];
 
-  // Find or create the group for this control flow (matched by topic + kind)
+  // Find or create the group for this annotation (matched by topic + kind)
   if !groups
     .iter()
-    .any(|g| g.control_flow.topic == cf.topic && g.control_flow.kind == cf.kind)
+    .any(|g| g.annotation.topic == ann.topic && g.annotation.kind == ann.kind)
   {
     // When inserting an If branch, check if the sibling branch already exists
-    let has_sibling = matches!(cf.kind, ControlFlowKind::If(_))
+    let has_sibling = matches!(ann.kind, BlockAnnotationKind::If(_))
       && groups.iter().any(|g| {
-        g.control_flow.topic == cf.topic && g.control_flow.kind != cf.kind
+        g.annotation.topic == ann.topic && g.annotation.kind != ann.kind
       });
 
-    let sort_key = cf.topic.underlying_id().ok().map(|id| id as usize);
+    let sort_key = ann.topic.underlying_id().ok().map(|id| id as usize);
     let pos = groups
       .binary_search_by(|g| g.sort_key.cmp(&sort_key))
       .unwrap_or_else(|pos| pos);
     groups.insert(
       pos,
-      ControlFlowSourceContext {
-        control_flow: cf.clone(),
+      AnnotatedBlockSourceContext {
+        annotation: ann.clone(),
         sort_key,
         references: Vec::new(),
         nested: Vec::new(),
@@ -771,7 +779,7 @@ fn find_or_create_cf_context<'a>(
     // If we found a sibling, mark the existing sibling too
     if has_sibling {
       if let Some(sibling) = groups.iter_mut().find(|g| {
-        g.control_flow.topic == cf.topic && g.control_flow.kind != cf.kind
+        g.annotation.topic == ann.topic && g.annotation.kind != ann.kind
       }) {
         sibling.has_sibling_branch = true;
       }
@@ -780,15 +788,13 @@ fn find_or_create_cf_context<'a>(
 
   let group = groups
     .iter_mut()
-    .find(|g| {
-      g.control_flow.topic == cf.topic && g.control_flow.kind == cf.kind
-    })
+    .find(|g| g.annotation.topic == ann.topic && g.annotation.kind == ann.kind)
     .unwrap();
 
   if chain.len() == 1 {
     &mut group.references
   } else {
-    find_or_create_cf_context(&mut group.nested, &chain[1..])
+    find_or_create_annotation_context(&mut group.nested, &chain[1..])
   }
 }
 
