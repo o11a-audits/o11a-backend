@@ -388,6 +388,53 @@ pub async fn get_source_text(
   Ok(Html(source_text))
 }
 
+// Topic delimiter response
+
+#[derive(Debug, Serialize)]
+pub struct TopicDelimiterResponse {
+  pub opening: String,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub closing: Option<String>,
+}
+
+// Get delimiter for a specific topic within an audit
+pub async fn get_delimiter(
+  State(state): State<AppState>,
+  Path((audit_id, topic_id)): Path<(String, String)>,
+) -> Result<Json<Option<TopicDelimiterResponse>>, StatusCode> {
+  println!("GET /api/v1/audits/{}/delimiter/{}", audit_id, topic_id);
+
+  let ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in get_delimiter: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+
+  let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+
+  let topic = new_topic(&topic_id);
+
+  let node = audit_data.nodes.get(&topic).ok_or_else(|| {
+    eprintln!("Topic '{}' not found in audit '{}'", topic_id, audit_id);
+    StatusCode::NOT_FOUND
+  })?;
+
+  let delimiter = match node {
+    core::Node::Solidity(solidity_node) => {
+      crate::solidity::formatter::node_to_delimiter(
+        solidity_node,
+        &audit_data.nodes,
+        &audit_data.topic_metadata,
+      )
+    }
+    core::Node::Documentation(_) => None,
+  };
+
+  Ok(Json(delimiter.map(|d| TopicDelimiterResponse {
+    opening: d.opening,
+    closing: d.closing,
+  })))
+}
+
 // Topic metadata response
 
 /// Serializable block annotation kind for API responses.

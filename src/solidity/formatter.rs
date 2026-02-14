@@ -2295,6 +2295,146 @@ fn do_node_to_source_text(
   formatting::format_node(&node_str, &new_node_topic(&node.node_id()), "node")
 }
 
+/// Delimiter pair for a container topic: opening and optional closing HTML strings.
+pub struct Delimiter {
+  pub opening: String,
+  pub closing: Option<String>,
+}
+
+/// Returns the formatted delimiter pair for a container topic, or `None` if
+/// the node type does not have meaningful token-bearing delimiters.
+///
+/// Only nodes whose delimiters contain child topic tokens are included:
+/// - IfStatement: `if (cond)`
+/// - ForStatement: `for (LoopExpr)`
+/// - WhileStatement: `while (cond)`
+/// - DoWhileStatement: `do` (opening) / `while (cond)` (closing)
+pub fn node_to_delimiter(
+  node: &ASTNode,
+  nodes_map: &BTreeMap<topic::Topic, core::Node>,
+  topic_metadata: &BTreeMap<topic::Topic, core::TopicMetadata>,
+) -> Option<Delimiter> {
+  let ctx = Context {
+    target_topic: new_node_topic(&node.node_id()),
+    omit_variable_declaration_let: false,
+    format_parameter_variable_as_signature: false,
+  };
+  do_node_to_delimiter(node, nodes_map, topic_metadata, &ctx)
+}
+
+fn do_node_to_delimiter(
+  node: &ASTNode,
+  nodes_map: &BTreeMap<topic::Topic, core::Node>,
+  topic_metadata: &BTreeMap<topic::Topic, core::TopicMetadata>,
+  ctx: &Context,
+) -> Option<Delimiter> {
+  let delimiter = match node.resolve(nodes_map) {
+    ASTNode::IfStatement {
+      node_id, condition, ..
+    } => {
+      let cond_placeholder = maybe_identifier_placeholder(condition);
+      let cond =
+        do_node_to_source_text(condition, 0, nodes_map, topic_metadata, ctx);
+      let opening = format!(
+        "{}{} ({}{}\n) {}",
+        formatting::format_statement_placeholder(&new_node_topic(node_id)),
+        formatting::format_topic_keyword(
+          &new_node_topic(node_id),
+          "if",
+          &new_node_topic(node_id)
+        ),
+        cond_placeholder,
+        formatting::indent(&cond, 1),
+        formatting::format_brace("{", 0),
+      );
+      Some(Delimiter {
+        opening,
+        closing: Some(formatting::format_brace("}", 0)),
+      })
+    }
+
+    ASTNode::ForStatement {
+      node_id, condition, ..
+    } => {
+      let loop_expr =
+        do_node_to_source_text(condition, 0, nodes_map, topic_metadata, ctx);
+      let opening = format!(
+        "{}{} ({}\n) {}",
+        formatting::format_statement_placeholder(&new_node_topic(node_id)),
+        formatting::format_topic_keyword(
+          &new_node_topic(node_id),
+          "for",
+          &new_node_topic(node_id)
+        ),
+        formatting::indent(&loop_expr, 1),
+        formatting::format_brace("{", 0),
+      );
+      Some(Delimiter {
+        opening,
+        closing: Some(formatting::format_brace("}", 0)),
+      })
+    }
+
+    ASTNode::WhileStatement {
+      node_id, condition, ..
+    } => {
+      let cond_placeholder = maybe_identifier_placeholder(condition);
+      let cond =
+        do_node_to_source_text(condition, 0, nodes_map, topic_metadata, ctx);
+      let opening = format!(
+        "{}{} ({}\n) {}",
+        formatting::format_statement_placeholder(&new_node_topic(node_id)),
+        formatting::format_topic_keyword(
+          &new_node_topic(node_id),
+          "while",
+          &new_node_topic(node_id)
+        ),
+        formatting::indent(&format!("{}{}", cond_placeholder, &cond), 1),
+        formatting::format_brace("{", 0),
+      );
+      Some(Delimiter {
+        opening,
+        closing: Some(formatting::format_brace("}", 0)),
+      })
+    }
+
+    ASTNode::DoWhileStatement {
+      node_id, condition, ..
+    } => {
+      let cond_placeholder = maybe_identifier_placeholder(condition);
+      let cond =
+        do_node_to_source_text(condition, 0, nodes_map, topic_metadata, ctx);
+      let opening = format!(
+        "{}{} {}",
+        formatting::format_statement_placeholder(&new_node_topic(node_id)),
+        formatting::format_topic_keyword(
+          &new_node_topic(node_id),
+          "do",
+          &new_node_topic(node_id),
+        ),
+        formatting::format_brace("{", 0),
+      );
+      let closing = format!(
+        "{} {} ({}\n)",
+        formatting::format_brace("}", 0),
+        formatting::format_keyword("while"),
+        formatting::indent(&format!("{}{}", cond_placeholder, cond), 1),
+      );
+      Some(Delimiter {
+        opening,
+        closing: Some(closing),
+      })
+    }
+
+    _ => None,
+  };
+
+  delimiter.map(|d| Delimiter {
+    opening: format!("<code>{}</code>", d.opening),
+    closing: d.closing.map(|c| format!("<code>{}</code>", c)),
+  })
+}
+
 // This function is used in many places where the node type is already known
 // because this function has to exist for the times when the identifier is a
 // reference and the node type is not already known, and duplicating

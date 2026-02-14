@@ -47,6 +47,10 @@ pub fn create_router(state: AppState) -> Router {
       "/api/v1/audits/:audit_id/metadata/:topic_id",
       get(handlers::get_metadata),
     )
+    .route(
+      "/api/v1/audits/:audit_id/delimiter/:topic_id",
+      get(handlers::get_delimiter),
+    )
     // ============================================
     // Collaborator comment routes
     // ============================================
