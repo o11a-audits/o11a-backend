@@ -614,6 +614,27 @@ impl SourceContext {
   }
 }
 
+/// A child element within a nested or annotated block source context.
+/// Unifies references and annotated block groups into a single ordered list
+/// so that correct linear source order is preserved.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SourceChild {
+  /// A direct reference to a topic at this level.
+  Reference(Reference),
+  /// A nested annotated block group (control flow body, unchecked, assembly, etc.).
+  AnnotatedBlock(AnnotatedBlockSourceContext),
+}
+
+impl SourceChild {
+  /// Returns the sort key for ordering children relative to each other.
+  pub fn sort_key(&self) -> Option<usize> {
+    match self {
+      SourceChild::Reference(r) => r.sort_key(),
+      SourceChild::AnnotatedBlock(a) => a.sort_key(),
+    }
+  }
+}
+
 /// Groups references within an annotated block (control flow body, unchecked, assembly, etc.).
 /// Recursive to handle nesting (e.g. if inside for inside unchecked).
 #[derive(Debug, Clone, PartialEq)]
@@ -622,10 +643,8 @@ pub struct AnnotatedBlockSourceContext {
   annotation: BlockAnnotation,
   /// Source location start for sorting groups relative to each other
   sort_key: Option<usize>,
-  /// References directly within this block (not nested in deeper annotated blocks)
-  references: Vec<Reference>,
-  /// Nested annotated block groups within this one
-  nested: Vec<AnnotatedBlockSourceContext>,
+  /// Ordered children (references and nested annotated blocks) in source order
+  children: Vec<SourceChild>,
   /// Whether this If branch has a sibling branch (true body has false body, or vice versa)
   has_sibling_branch: bool,
 }
@@ -639,12 +658,8 @@ impl AnnotatedBlockSourceContext {
     self.sort_key
   }
 
-  pub fn references(&self) -> &[Reference] {
-    &self.references
-  }
-
-  pub fn nested(&self) -> &[AnnotatedBlockSourceContext] {
-    &self.nested
+  pub fn children(&self) -> &[SourceChild] {
+    &self.children
   }
 
   pub fn has_sibling_branch(&self) -> bool {
@@ -661,10 +676,8 @@ pub struct NestedSourceContext {
   subscope: topic::Topic,
   /// Source location start for sorting nested groups relative to each other
   sort_key: Option<usize>,
-  /// References within this nested scope (outside any annotated block)
-  references: Vec<Reference>,
-  /// References grouped by annotated block (control flow, unchecked, assembly, etc.)
-  annotation_groups: Vec<AnnotatedBlockSourceContext>,
+  /// Ordered children (references and annotated block groups) in source order
+  children: Vec<SourceChild>,
 }
 
 impl NestedSourceContext {
@@ -676,12 +689,8 @@ impl NestedSourceContext {
     self.sort_key
   }
 
-  pub fn references(&self) -> &[Reference] {
-    &self.references
-  }
-
-  pub fn annotation_groups(&self) -> &[AnnotatedBlockSourceContext] {
-    &self.annotation_groups
+  pub fn children(&self) -> &[SourceChild] {
+    &self.children
   }
 }
 
@@ -756,8 +765,7 @@ pub fn insert_into_context(
           NestedSourceContext {
             subscope: subscope_topic.clone(),
             sort_key: subscope_sort_key,
-            references: Vec::new(),
-            annotation_groups: Vec::new(),
+            children: Vec::new(),
           },
         );
       }
@@ -769,164 +777,190 @@ pub fn insert_into_context(
         .unwrap();
 
       if annotation_chain.is_empty() {
-        insert_ref_sorted(&mut nested.references, reference);
+        insert_child_ref(&mut nested.children, reference);
       } else {
         // Walk the annotation chain, creating/finding groups at each level
-        let target_refs = find_or_create_annotation_context(
-          &mut nested.annotation_groups,
+        let target_children = find_or_create_annotation_context(
+          &mut nested.children,
           annotation_chain,
         );
-        insert_ref_sorted(target_refs, reference);
+        insert_child_ref(target_children, reference);
       }
     }
   }
 }
 
 /// Walks an annotation chain, creating or finding `AnnotatedBlockSourceContext`s at
-/// each level, and returns a mutable reference to the `references` vec at the final level.
+/// each level, and returns a mutable reference to the `children` vec at the final level.
 fn find_or_create_annotation_context<'a>(
-  groups: &'a mut Vec<AnnotatedBlockSourceContext>,
+  children: &'a mut Vec<SourceChild>,
   chain: &[BlockAnnotation],
-) -> &'a mut Vec<Reference> {
+) -> &'a mut Vec<SourceChild> {
   assert!(!chain.is_empty());
 
   let ann = &chain[0];
 
   // Find or create the group for this annotation (matched by topic + kind)
-  if !groups
-    .iter()
-    .any(|g| g.annotation.topic == ann.topic && g.annotation.kind == ann.kind)
-  {
+  let exists = children.iter().any(|c| {
+    matches!(
+      c,
+      SourceChild::AnnotatedBlock(g)
+        if g.annotation.topic == ann.topic && g.annotation.kind == ann.kind
+    )
+  });
+
+  if !exists {
     // When inserting an If branch, check if the sibling branch already exists
     let has_sibling = matches!(ann.kind, BlockAnnotationKind::If(_))
-      && groups.iter().any(|g| {
-        g.annotation.topic == ann.topic && g.annotation.kind != ann.kind
+      && children.iter().any(|c| {
+        matches!(
+          c,
+          SourceChild::AnnotatedBlock(g)
+            if g.annotation.topic == ann.topic && g.annotation.kind != ann.kind
+        )
       });
 
     let sort_key = ann.topic.underlying_id().ok().map(|id| id as usize);
-    let pos = groups
-      .binary_search_by(|g| g.sort_key.cmp(&sort_key))
+    let pos = children
+      .binary_search_by(|c| c.sort_key().cmp(&sort_key))
       .unwrap_or_else(|pos| pos);
-    groups.insert(
+    children.insert(
       pos,
-      AnnotatedBlockSourceContext {
+      SourceChild::AnnotatedBlock(AnnotatedBlockSourceContext {
         annotation: ann.clone(),
         sort_key,
-        references: Vec::new(),
-        nested: Vec::new(),
+        children: Vec::new(),
         has_sibling_branch: has_sibling,
-      },
+      }),
     );
 
     // If we found a sibling, mark the existing sibling too
     if has_sibling {
-      if let Some(sibling) = groups.iter_mut().find(|g| {
-        g.annotation.topic == ann.topic && g.annotation.kind != ann.kind
-      }) {
-        sibling.has_sibling_branch = true;
+      for child in children.iter_mut() {
+        if let SourceChild::AnnotatedBlock(g) = child {
+          if g.annotation.topic == ann.topic && g.annotation.kind != ann.kind {
+            g.has_sibling_branch = true;
+            break;
+          }
+        }
       }
     }
   }
 
-  let group = groups
+  let group = children
     .iter_mut()
-    .find(|g| g.annotation.topic == ann.topic && g.annotation.kind == ann.kind)
+    .find_map(|c| match c {
+      SourceChild::AnnotatedBlock(g)
+        if g.annotation.topic == ann.topic && g.annotation.kind == ann.kind =>
+      {
+        Some(g)
+      }
+      _ => None,
+    })
     .unwrap();
 
   if chain.len() == 1 {
-    &mut group.references
+    &mut group.children
   } else {
-    find_or_create_annotation_context(&mut group.nested, &chain[1..])
+    find_or_create_annotation_context(&mut group.children, &chain[1..])
   }
 }
 
-/// Inserts a reference into a sorted Vec, merging by reference_topic.
+/// Merges `incoming` into `existing` when they share the same reference_topic.
 ///
-/// Merge rules for duplicate reference_topics:
+/// Merge rules:
 /// - ProjectReference + ProjectReference → skip (already present)
 /// - CommentMention + CommentMention → merge mention_topics
 /// - ProjectReference + CommentMention → promote to ProjectReferenceWithMentions
 /// - ProjectReferenceWithMentions + CommentMention → merge mention_topics
-fn insert_ref_sorted(refs: &mut Vec<Reference>, reference: Reference) {
-  let ref_topic = reference.reference_topic().clone();
+/// - CommentMention + ProjectReference → promote to ProjectReferenceWithMentions
+fn merge_reference(existing: &mut Reference, incoming: &Reference) {
+  let ref_topic = existing.reference_topic().clone();
 
-  if let Some(existing) =
-    refs.iter_mut().find(|r| *r.reference_topic() == ref_topic)
-  {
-    match (&mut *existing, &reference) {
-      // ProjectReference + ProjectReference → already present, skip
-      (
-        Reference::ProjectReference { .. },
-        Reference::ProjectReference { .. },
-      ) => {}
+  match (&mut *existing, incoming) {
+    // ProjectReference + ProjectReference → already present, skip
+    (
+      Reference::ProjectReference { .. },
+      Reference::ProjectReference { .. },
+    ) => {}
 
-      // ProjectReference + CommentMention → promote to ProjectReferenceWithMentions
-      (
-        existing_ref @ Reference::ProjectReference { .. },
-        Reference::CommentMention { mention_topics, .. },
-      ) => {
-        let sort_key = existing_ref.sort_key();
-        *existing_ref = Reference::ProjectReferenceWithMentions {
-          reference_topic: ref_topic,
-          mention_topics: mention_topics.clone(),
-          sort_key,
-        };
-      }
-
-      // ProjectReferenceWithMentions + CommentMention → merge mention_topics
-      (
-        Reference::ProjectReferenceWithMentions {
-          mention_topics: existing_mentions,
-          ..
-        },
-        Reference::CommentMention {
-          mention_topics: new_mentions,
-          ..
-        },
-      ) => {
-        for mt in new_mentions {
-          if !existing_mentions.contains(mt) {
-            existing_mentions.push(mt.clone());
-          }
-        }
-      }
-
-      // CommentMention + CommentMention → merge mention_topics
-      (
-        Reference::CommentMention {
-          mention_topics: existing_mentions,
-          ..
-        },
-        Reference::CommentMention {
-          mention_topics: new_mentions,
-          ..
-        },
-      ) => {
-        for mt in new_mentions {
-          if !existing_mentions.contains(mt) {
-            existing_mentions.push(mt.clone());
-          }
-        }
-      }
-
-      // CommentMention + ProjectReference → promote to ProjectReferenceWithMentions
-      (
-        existing_ref @ Reference::CommentMention { .. },
-        Reference::ProjectReference { .. },
-      ) => {
-        let sort_key = existing_ref.sort_key();
-        let mention_topics = existing_ref.mention_topics().unwrap().to_vec();
-        *existing_ref = Reference::ProjectReferenceWithMentions {
-          reference_topic: ref_topic,
-          mention_topics,
-          sort_key,
-        };
-      }
-
-      // All other combinations with ProjectReferenceWithMentions as the incoming
-      // reference shouldn't occur in practice, but handle gracefully
-      _ => {}
+    // ProjectReference + CommentMention → promote to ProjectReferenceWithMentions
+    (
+      existing_ref @ Reference::ProjectReference { .. },
+      Reference::CommentMention { mention_topics, .. },
+    ) => {
+      let sort_key = existing_ref.sort_key();
+      *existing_ref = Reference::ProjectReferenceWithMentions {
+        reference_topic: ref_topic,
+        mention_topics: mention_topics.clone(),
+        sort_key,
+      };
     }
+
+    // ProjectReferenceWithMentions + CommentMention → merge mention_topics
+    (
+      Reference::ProjectReferenceWithMentions {
+        mention_topics: existing_mentions,
+        ..
+      },
+      Reference::CommentMention {
+        mention_topics: new_mentions,
+        ..
+      },
+    ) => {
+      for mt in new_mentions {
+        if !existing_mentions.contains(mt) {
+          existing_mentions.push(mt.clone());
+        }
+      }
+    }
+
+    // CommentMention + CommentMention → merge mention_topics
+    (
+      Reference::CommentMention {
+        mention_topics: existing_mentions,
+        ..
+      },
+      Reference::CommentMention {
+        mention_topics: new_mentions,
+        ..
+      },
+    ) => {
+      for mt in new_mentions {
+        if !existing_mentions.contains(mt) {
+          existing_mentions.push(mt.clone());
+        }
+      }
+    }
+
+    // CommentMention + ProjectReference → promote to ProjectReferenceWithMentions
+    (
+      existing_ref @ Reference::CommentMention { .. },
+      Reference::ProjectReference { .. },
+    ) => {
+      let sort_key = existing_ref.sort_key();
+      let mention_topics = existing_ref.mention_topics().unwrap().to_vec();
+      *existing_ref = Reference::ProjectReferenceWithMentions {
+        reference_topic: ref_topic,
+        mention_topics,
+        sort_key,
+      };
+    }
+
+    // All other combinations with ProjectReferenceWithMentions as the incoming
+    // reference shouldn't occur in practice, but handle gracefully
+    _ => {}
+  }
+}
+
+/// Inserts a reference into a sorted Vec<Reference>, merging by reference_topic.
+/// Used for SourceContext.scope_references which remains Vec<Reference>.
+fn insert_ref_sorted(refs: &mut Vec<Reference>, reference: Reference) {
+  if let Some(existing) = refs
+    .iter_mut()
+    .find(|r| *r.reference_topic() == *reference.reference_topic())
+  {
+    merge_reference(existing, &reference);
     return;
   }
 
@@ -935,6 +969,28 @@ fn insert_ref_sorted(refs: &mut Vec<Reference>, reference: Reference) {
     .binary_search_by(|r| r.sort_key().cmp(&sort_key))
     .unwrap_or_else(|pos| pos);
   refs.insert(pos, reference);
+}
+
+/// Inserts a Reference as a SourceChild into a sorted children list,
+/// merging by reference_topic if a matching Reference already exists.
+fn insert_child_ref(children: &mut Vec<SourceChild>, reference: Reference) {
+  if let Some(existing) = children.iter_mut().find_map(|c| match c {
+    SourceChild::Reference(r)
+      if *r.reference_topic() == *reference.reference_topic() =>
+    {
+      Some(r)
+    }
+    _ => None,
+  }) {
+    merge_reference(existing, &reference);
+    return;
+  }
+
+  let sort_key = reference.sort_key();
+  let pos = children
+    .binary_search_by(|c| c.sort_key().cmp(&sort_key))
+    .unwrap_or_else(|pos| pos);
+  children.insert(pos, SourceChild::Reference(reference));
 }
 
 #[derive(Debug, Clone)]

@@ -721,22 +721,25 @@ impl ReferenceResponse {
   }
 }
 
+/// A child element in a source context — either a direct reference or an annotated block group.
 #[derive(Debug, Clone, Serialize)]
-pub struct AnnotatedBlockSourceContextResponse {
-  pub annotation: BlockAnnotationResponse,
-  pub references: Vec<ReferenceResponse>,
-  #[serde(default, skip_serializing_if = "Vec::is_empty")]
-  pub nested: Vec<AnnotatedBlockSourceContextResponse>,
-  #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-  pub has_sibling_branch: bool,
+#[serde(tag = "child_type")]
+pub enum SourceChildResponse {
+  #[serde(rename = "reference")]
+  Reference { reference: ReferenceResponse },
+  #[serde(rename = "annotated_block")]
+  AnnotatedBlock {
+    annotation: BlockAnnotationResponse,
+    children: Vec<SourceChildResponse>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    has_sibling_branch: bool,
+  },
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct NestedSourceContextResponse {
   pub subscope: String,
-  pub references: Vec<ReferenceResponse>,
-  #[serde(default, skip_serializing_if = "Vec::is_empty")]
-  pub annotation_groups: Vec<AnnotatedBlockSourceContextResponse>,
+  pub children: Vec<SourceChildResponse>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -828,24 +831,28 @@ pub enum TopicMetadataResponse {
   CommentTopic(CommentTopicResponse),
 }
 
-// Helper function to convert SourceContext to SourceContextResponse
-fn convert_annotation_context(
-  groups: &[crate::core::AnnotatedBlockSourceContext],
-) -> Vec<AnnotatedBlockSourceContextResponse> {
-  groups
+// Helper function to convert SourceChild to SourceChildResponse
+fn convert_children(
+  children: &[crate::core::SourceChild],
+) -> Vec<SourceChildResponse> {
+  children
     .iter()
-    .map(|g| AnnotatedBlockSourceContextResponse {
-      annotation: BlockAnnotationResponse {
-        topic: g.annotation().topic.id.clone(),
-        kind: BlockAnnotationKindInfo::from_core(&g.annotation().kind),
-      },
-      references: g
-        .references()
-        .iter()
-        .map(ReferenceResponse::from_reference)
-        .collect(),
-      nested: convert_annotation_context(g.nested()),
-      has_sibling_branch: g.has_sibling_branch(),
+    .map(|child| match child {
+      crate::core::SourceChild::Reference(r) => {
+        SourceChildResponse::Reference {
+          reference: ReferenceResponse::from_reference(r),
+        }
+      }
+      crate::core::SourceChild::AnnotatedBlock(g) => {
+        SourceChildResponse::AnnotatedBlock {
+          annotation: BlockAnnotationResponse {
+            topic: g.annotation().topic.id.clone(),
+            kind: BlockAnnotationKindInfo::from_core(&g.annotation().kind),
+          },
+          children: convert_children(g.children()),
+          has_sibling_branch: g.has_sibling_branch(),
+        }
+      }
     })
     .collect()
 }
@@ -868,16 +875,35 @@ fn convert_source_context(
         .iter()
         .map(|m| NestedSourceContextResponse {
           subscope: m.subscope().id().to_string(),
-          references: m
-            .references()
-            .iter()
-            .map(ReferenceResponse::from_reference)
-            .collect(),
-          annotation_groups: convert_annotation_context(m.annotation_groups()),
+          children: convert_children(m.children()),
         })
         .collect(),
     })
     .collect()
+}
+
+/// Recursively collects comment topic IDs from all children (references and nested blocks).
+fn collect_comment_topics_from_children(
+  children: &[crate::core::SourceChild],
+  comment_topic_ids: &mut Vec<String>,
+) {
+  for child in children {
+    match child {
+      crate::core::SourceChild::Reference(reference) => {
+        if let Some(mention_topics) = reference.mention_topics() {
+          for t in mention_topics {
+            comment_topic_ids.push(t.id.clone());
+          }
+        }
+      }
+      crate::core::SourceChild::AnnotatedBlock(block) => {
+        collect_comment_topics_from_children(
+          block.children(),
+          comment_topic_ids,
+        );
+      }
+    }
+  }
 }
 
 // Helper function to convert TopicMetadata to TopicMetadataResponse
@@ -1252,13 +1278,10 @@ pub async fn get_comments_mentioning_topic(
       }
     }
     for nested in group.nested_references() {
-      for reference in nested.references() {
-        if let Some(mention_topics) = reference.mention_topics() {
-          for t in mention_topics {
-            comment_topic_ids.push(t.id.clone());
-          }
-        }
-      }
+      collect_comment_topics_from_children(
+        nested.children(),
+        &mut comment_topic_ids,
+      );
     }
   }
 
