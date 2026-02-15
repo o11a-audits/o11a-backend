@@ -2430,8 +2430,8 @@ fn do_node_to_delimiter(
   };
 
   delimiter.map(|d| Delimiter {
-    opening: format!("<code>{}</code>", d.opening),
-    closing: d.closing.map(|c| format!("<code>{}</code>", c)),
+    opening: format!("<pre><code>{}</code></pre>", d.opening),
+    closing: d.closing.map(|c| format!("<pre><code>{}</code></pre>", c)),
   })
 }
 

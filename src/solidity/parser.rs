@@ -4590,10 +4590,21 @@ fn node_from_json(
         context,
       )?;
 
+      // Transform statements into semantic blocks (same as Block)
+      let semantic_blocks = if !statements.is_empty() {
+        group_statements_into_semantic_blocks(
+          statements,
+          &context.source_content,
+          &src_location,
+        )?
+      } else {
+        vec![]
+      };
+
       Ok(ASTNode::UncheckedBlock {
         node_id,
         src_location,
-        statements,
+        statements: semantic_blocks,
       })
     }
     "VariableDeclarationStatement" => {

@@ -328,7 +328,15 @@ pub fn add_annotation_to_scope(
         .expect("ContainingBlock scope must have at least one layer");
       assert!(
         last.annotation.is_none(),
-        "Invariant violation: innermost containing block layer already has an annotation"
+        "Invariant violation: innermost containing block layer already has an annotation.\n\
+         Existing annotation: {:?}\n\
+         New annotation: {:?}\n\
+         Block topic: {:?}\n\
+         Scope: {:?}",
+        last.annotation,
+        annotation,
+        last.block,
+        scope,
       );
       let mut containing_blocks = containing_blocks.clone();
       let last_mut = containing_blocks.last_mut().unwrap();
