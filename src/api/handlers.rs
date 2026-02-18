@@ -1045,6 +1045,65 @@ pub async fn get_metadata(
   Ok(Json(topic_metadata_to_response(&topic, metadata)))
 }
 
+// Get pre-rendered topic view HTML for a specific topic within an audit.
+// Static panels (topic, expanded references, breadcrumb, highlight CSS) are
+// cached forever since they are purely AST-derived. Dynamic panels (comments,
+// mentions) are rendered fresh each time.
+pub async fn get_topic_view(
+  State(state): State<AppState>,
+  Path((audit_id, topic_id)): Path<(String, String)>,
+) -> Result<Json<super::topic_view::TopicViewResponse>, StatusCode> {
+  println!("GET /api/v1/audits/{}/topic_view/{}", audit_id, topic_id);
+
+  let mut ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in get_topic_view: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+
+  let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+
+  let source_text_cache = ctx
+    .source_text_cache
+    .get(&audit_id)
+    .cloned()
+    .unwrap_or_default();
+
+  // Check cache for static parts
+  let cached = ctx.get_cached_topic_view(&audit_id, &topic_id).cloned();
+
+  let response = super::topic_view::build_topic_view(
+    &topic_id,
+    audit_data,
+    &source_text_cache,
+    cached.as_ref(),
+  )
+  .ok_or_else(|| {
+    eprintln!(
+      "Metadata for topic '{}' not found in audit '{}'",
+      topic_id, audit_id
+    );
+    StatusCode::NOT_FOUND
+  })?;
+
+  // Cache the static parts if not already cached
+  if cached.is_none() {
+    ctx.cache_topic_view(
+      &audit_id,
+      &topic_id,
+      core::CachedTopicView {
+        topic_panel_html: response.topic_panel_html.clone(),
+        expanded_references_panel_html: response
+          .expanded_references_panel_html
+          .clone(),
+        breadcrumb_html: response.breadcrumb_html.clone(),
+        highlight_css: response.highlight_css.clone(),
+      },
+    );
+  }
+
+  Ok(Json(response))
+}
+
 // ============================================================================
 // Collaborator query parameter types
 // ============================================================================

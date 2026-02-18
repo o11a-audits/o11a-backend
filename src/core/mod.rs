@@ -194,11 +194,23 @@ pub struct AuditData {
   pub variable_types: BTreeMap<topic::Topic, SolidityType>,
 }
 
+/// Cached static parts of a topic view (AST-derived, never invalidated).
+#[derive(Debug, Clone)]
+pub struct CachedTopicView {
+  pub topic_panel_html: String,
+  pub expanded_references_panel_html: String,
+  pub breadcrumb_html: String,
+  pub highlight_css: String,
+}
+
 pub struct DataContext {
   // Map of audit_id to audit data
   pub audits: BTreeMap<String, AuditData>,
   /// Cached rendered HTML keyed by (audit_id, topic_id)
   pub source_text_cache: HashMap<String, HashMap<String, String>>,
+  /// Cached topic view static panels keyed by (audit_id, topic_id).
+  /// These are purely AST-derived and never invalidated.
+  pub topic_view_cache: HashMap<String, HashMap<String, CachedTopicView>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1479,6 +1491,7 @@ pub fn new_data_context() -> DataContext {
   DataContext {
     audits: BTreeMap::new(),
     source_text_cache: HashMap::new(),
+    topic_view_cache: HashMap::new(),
   }
 }
 
@@ -1541,6 +1554,32 @@ impl DataContext {
   ) -> Option<&String> {
     self
       .source_text_cache
+      .get(audit_id)
+      .and_then(|m| m.get(topic_id))
+  }
+
+  /// Cache static topic view panels (AST-derived, never invalidated)
+  pub fn cache_topic_view(
+    &mut self,
+    audit_id: &str,
+    topic_id: &str,
+    cached: CachedTopicView,
+  ) {
+    self
+      .topic_view_cache
+      .entry(audit_id.to_string())
+      .or_default()
+      .insert(topic_id.to_string(), cached);
+  }
+
+  /// Get cached static topic view panels
+  pub fn get_cached_topic_view(
+    &self,
+    audit_id: &str,
+    topic_id: &str,
+  ) -> Option<&CachedTopicView> {
+    self
+      .topic_view_cache
       .get(audit_id)
       .and_then(|m| m.get(topic_id))
   }
