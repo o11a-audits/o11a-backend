@@ -1104,6 +1104,44 @@ pub async fn get_topic_view(
   Ok(Json(response))
 }
 
+pub async fn get_mentions_panel(
+  State(state): State<AppState>,
+  Path((audit_id, topic_id)): Path<(String, String)>,
+) -> Result<Json<super::topic_view::MentionsPanelResponse>, StatusCode> {
+  println!(
+    "GET /api/v1/audits/{}/mentions_panel/{}",
+    audit_id, topic_id
+  );
+
+  let ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in get_mentions_panel: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+
+  let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+
+  let source_text_cache = ctx
+    .source_text_cache
+    .get(&audit_id)
+    .cloned()
+    .unwrap_or_default();
+
+  let response = super::topic_view::build_mentions_panel(
+    &topic_id,
+    audit_data,
+    &source_text_cache,
+  )
+  .ok_or_else(|| {
+    eprintln!(
+      "Metadata for topic '{}' not found in audit '{}'",
+      topic_id, audit_id
+    );
+    StatusCode::NOT_FOUND
+  })?;
+
+  Ok(Json(response))
+}
+
 // ============================================================================
 // Collaborator query parameter types
 // ============================================================================

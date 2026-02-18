@@ -16,17 +16,14 @@ use crate::formatting::html_escape;
 #[derive(Debug, Serialize)]
 pub struct TopicViewResponse {
   pub topic_panel_html: String,
-  pub mentions_panel_html: String,
   pub expanded_references_panel_html: String,
   pub breadcrumb_html: String,
   pub highlight_css: String,
-  pub comments: CommentsViewData,
 }
 
 #[derive(Debug, Serialize)]
-pub struct CommentsViewData {
-  pub panel_html: String,
-  pub comment_topic_ids: Vec<String>,
+pub struct MentionsPanelResponse {
+  pub mentions_panel_html: String,
 }
 
 // ============================================================================
@@ -1105,9 +1102,8 @@ pub fn render_highlight_css(
 // Public API: Build Full Topic View Response
 // ============================================================================
 
-/// Build the complete TopicViewResponse for a given topic.
-/// If `cached` is provided, the static panels are reused from the cache
-/// and only dynamic panels (mentions, comments) are rendered fresh.
+/// Build the TopicViewResponse for a given topic (static panels only).
+/// If `cached` is provided, the static panels are reused from the cache.
 pub fn build_topic_view(
   topic_id: &str,
   audit_data: &AuditData,
@@ -1117,7 +1113,6 @@ pub fn build_topic_view(
   let topic = topic::new_topic(topic_id);
   let metadata = audit_data.topic_metadata.get(&topic)?;
 
-  // Static parts: use cache if available, otherwise render
   let (
     topic_panel_html,
     expanded_references_panel_html,
@@ -1149,7 +1144,24 @@ pub fn build_topic_view(
     }
   };
 
-  // Dynamic parts: always rendered fresh
+  Some(TopicViewResponse {
+    topic_panel_html,
+    expanded_references_panel_html,
+    breadcrumb_html,
+    highlight_css,
+  })
+}
+
+/// Build the MentionsPanelResponse for a given topic.
+/// Mentions are dynamic (depend on user-created comments) and are never cached.
+pub fn build_mentions_panel(
+  topic_id: &str,
+  audit_data: &AuditData,
+  source_text_cache: &std::collections::HashMap<String, String>,
+) -> Option<MentionsPanelResponse> {
+  let topic = topic::new_topic(topic_id);
+  let metadata = audit_data.topic_metadata.get(&topic)?;
+
   let mentions_panel_html = render_grouped_source_panel(
     metadata.mentions(),
     audit_data,
@@ -1157,54 +1169,7 @@ pub fn build_topic_view(
     true,
   );
 
-  let (comments_panel_html, comment_topic_ids) =
-    render_comments_panel(topic_id, audit_data, source_text_cache);
-
-  Some(TopicViewResponse {
-    topic_panel_html,
+  Some(MentionsPanelResponse {
     mentions_panel_html,
-    expanded_references_panel_html,
-    breadcrumb_html,
-    highlight_css,
-    comments: CommentsViewData {
-      panel_html: comments_panel_html,
-      comment_topic_ids,
-    },
   })
-}
-
-/// Render the comments panel by looking up comment topics and their contexts.
-fn render_comments_panel(
-  topic_id: &str,
-  audit_data: &AuditData,
-  source_text_cache: &std::collections::HashMap<String, String>,
-) -> (String, Vec<String>) {
-  let topic = topic::new_topic(topic_id);
-
-  // Find all CommentTopic metadata entries that target this topic
-  let mut comment_topic_ids = Vec::new();
-  let mut all_comment_contexts: Vec<SourceContext> = Vec::new();
-
-  for (comment_topic, metadata) in &audit_data.topic_metadata {
-    if let TopicMetadata::CommentTopic {
-      target_topic,
-      context,
-      ..
-    } = metadata
-    {
-      if *target_topic == topic {
-        comment_topic_ids.push(comment_topic.id().to_string());
-        all_comment_contexts.extend(context.iter().cloned());
-      }
-    }
-  }
-
-  let html = render_grouped_source_panel(
-    &all_comment_contexts,
-    audit_data,
-    source_text_cache,
-    true,
-  );
-
-  (html, comment_topic_ids)
 }

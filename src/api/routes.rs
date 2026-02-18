@@ -55,6 +55,10 @@ pub fn create_router(state: AppState) -> Router {
       "/api/v1/audits/:audit_id/topic_view/:topic_id",
       get(handlers::get_topic_view),
     )
+    .route(
+      "/api/v1/audits/:audit_id/mentions_panel/:topic_id",
+      get(handlers::get_mentions_panel),
+    )
     // ============================================
     // Collaborator comment routes
     // ============================================
