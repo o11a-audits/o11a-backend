@@ -98,21 +98,23 @@ fn process_documentation_node(
 
   match node {
     DocumentationNode::Root { children, .. } => {
+      // Add the Root node first so build_self_context can look up its source location
+      audit_data.nodes.insert(
+        topic.clone(),
+        Node::Documentation(parser::children_to_stubs(node.clone())),
+      );
+
+      let context = build_self_context(&topic, scope, &audit_data.nodes);
+
       audit_data.topic_metadata.insert(
         topic.clone(),
         TopicMetadata::UnnamedTopic {
           topic: topic.clone(),
           kind: UnnamedTopicKind::DocumentationRoot,
           scope: scope.clone(),
-          context: vec![],
+          context,
           mentions: vec![],
         },
-      );
-
-      // Add the Root node to the audit data
-      audit_data.nodes.insert(
-        topic.clone(),
-        Node::Documentation(parser::children_to_stubs(node.clone())),
       );
 
       // Process children with the same scope
@@ -132,22 +134,23 @@ fn process_documentation_node(
     DocumentationNode::Heading {
       children, section, ..
     } => {
-      // Headings create section declarations - scoped at current level
+      // Add the heading node first so build_self_context can look up its source location
+      audit_data.nodes.insert(
+        topic.clone(),
+        Node::Documentation(parser::children_to_stubs(node.clone())),
+      );
+
+      let context = build_self_context(&topic, scope, &audit_data.nodes);
+
       audit_data.topic_metadata.insert(
         topic.clone(),
         TopicMetadata::UnnamedTopic {
           topic: topic.clone(),
           kind: UnnamedTopicKind::DocumentationHeading,
           scope: scope.clone(),
-          context: vec![],
+          context,
           mentions: vec![],
         },
-      );
-
-      // Add the heading node with children converted to stubs
-      audit_data.nodes.insert(
-        topic.clone(),
-        Node::Documentation(parser::children_to_stubs(node.clone())),
       );
 
       // Process heading text children (inline formatting nodes)
@@ -171,7 +174,16 @@ fn process_documentation_node(
     DocumentationNode::Section {
       title, children, ..
     } => {
-      // Add topic metadata for the section - use TitledTopic with the section title
+      // Add the section node first so build_self_context can look up its source location
+      audit_data.nodes.insert(
+        topic.clone(),
+        Node::Documentation(parser::children_to_stubs(node.clone())),
+      );
+
+      // Build a self-referencing context so the topic panel shows this section's content
+      let context = build_self_context(&topic, scope, &audit_data.nodes);
+
+      // Add topic metadata for the section
       audit_data.topic_metadata.insert(
         topic.clone(),
         TopicMetadata::TitledTopic {
@@ -179,7 +191,7 @@ fn process_documentation_node(
           scope: scope.clone(),
           kind: TitledTopicKind::DocumentationSection,
           title: title.clone(),
-          context: vec![],
+          context,
           mentions: vec![],
         },
       );
@@ -201,30 +213,25 @@ fn process_documentation_node(
           mentions_by_topic,
         )?;
       }
-
-      // Add the section node itself with children converted to stubs
-      audit_data.nodes.insert(
-        topic,
-        Node::Documentation(parser::children_to_stubs(node.clone())),
-      );
     }
 
     DocumentationNode::Paragraph { children, .. } => {
+      audit_data.nodes.insert(
+        topic.clone(),
+        Node::Documentation(parser::children_to_stubs(node.clone())),
+      );
+
+      let context = build_self_context(&topic, scope, &audit_data.nodes);
+
       audit_data.topic_metadata.insert(
         topic.clone(),
         TopicMetadata::UnnamedTopic {
           topic: topic.clone(),
           kind: UnnamedTopicKind::DocumentationParagraph,
           scope: scope.clone(),
-          context: vec![],
+          context,
           mentions: vec![],
         },
-      );
-
-      // Add the node with children converted to stubs
-      audit_data.nodes.insert(
-        topic.clone(),
-        Node::Documentation(parser::children_to_stubs(node.clone())),
       );
 
       // Paragraphs don't add to scope - only sections/headers define scope hierarchy.
@@ -240,21 +247,22 @@ fn process_documentation_node(
     }
 
     DocumentationNode::Sentence { children, .. } => {
+      audit_data.nodes.insert(
+        topic.clone(),
+        Node::Documentation(parser::children_to_stubs(node.clone())),
+      );
+
+      let context = build_self_context(&topic, scope, &audit_data.nodes);
+
       audit_data.topic_metadata.insert(
         topic.clone(),
         TopicMetadata::UnnamedTopic {
           topic: topic.clone(),
           kind: UnnamedTopicKind::DocumentationSentence,
           scope: scope.clone(),
-          context: vec![],
+          context,
           mentions: vec![],
         },
-      );
-
-      // Add the node with children converted to stubs
-      audit_data.nodes.insert(
-        topic.clone(),
-        Node::Documentation(parser::children_to_stubs(node.clone())),
       );
 
       // Sentences don't create a new scope level - they stay within the
@@ -270,21 +278,22 @@ fn process_documentation_node(
     }
 
     DocumentationNode::CodeBlock { children, .. } => {
+      audit_data.nodes.insert(
+        topic.clone(),
+        Node::Documentation(parser::children_to_stubs(node.clone())),
+      );
+
+      let context = build_self_context(&topic, scope, &audit_data.nodes);
+
       audit_data.topic_metadata.insert(
         topic.clone(),
         TopicMetadata::UnnamedTopic {
           topic: topic.clone(),
           kind: UnnamedTopicKind::DocumentationCodeBlock,
           scope: scope.clone(),
-          context: vec![],
+          context,
           mentions: vec![],
         },
-      );
-
-      // Add the node with children converted to stubs
-      audit_data.nodes.insert(
-        topic.clone(),
-        Node::Documentation(parser::children_to_stubs(node.clone())),
       );
 
       // Process children (code tokens) with the same scope
@@ -299,21 +308,22 @@ fn process_documentation_node(
     }
 
     DocumentationNode::List { children, .. } => {
+      audit_data.nodes.insert(
+        topic.clone(),
+        Node::Documentation(parser::children_to_stubs(node.clone())),
+      );
+
+      let context = build_self_context(&topic, scope, &audit_data.nodes);
+
       audit_data.topic_metadata.insert(
         topic.clone(),
         TopicMetadata::UnnamedTopic {
           topic: topic.clone(),
           kind: UnnamedTopicKind::DocumentationList,
           scope: scope.clone(),
-          context: vec![],
+          context,
           mentions: vec![],
         },
-      );
-
-      // Add the node with children converted to stubs
-      audit_data.nodes.insert(
-        topic.clone(),
-        Node::Documentation(parser::children_to_stubs(node.clone())),
       );
 
       // Process children with the same scope
@@ -328,21 +338,22 @@ fn process_documentation_node(
     }
 
     DocumentationNode::BlockQuote { children, .. } => {
+      audit_data.nodes.insert(
+        topic.clone(),
+        Node::Documentation(parser::children_to_stubs(node.clone())),
+      );
+
+      let context = build_self_context(&topic, scope, &audit_data.nodes);
+
       audit_data.topic_metadata.insert(
         topic.clone(),
         TopicMetadata::UnnamedTopic {
           topic: topic.clone(),
           kind: UnnamedTopicKind::DocumentationBlockQuote,
           scope: scope.clone(),
-          context: vec![],
+          context,
           mentions: vec![],
         },
-      );
-
-      // Add the node with children converted to stubs
-      audit_data.nodes.insert(
-        topic.clone(),
-        Node::Documentation(parser::children_to_stubs(node.clone())),
       );
 
       // Process children with the same scope
@@ -357,22 +368,22 @@ fn process_documentation_node(
     }
 
     DocumentationNode::InlineCode { children, .. } => {
-      // Add topic metadata for the inline code
+      audit_data.nodes.insert(
+        topic.clone(),
+        Node::Documentation(parser::children_to_stubs(node.clone())),
+      );
+
+      let context = build_self_context(&topic, scope, &audit_data.nodes);
+
       audit_data.topic_metadata.insert(
         topic.clone(),
         TopicMetadata::UnnamedTopic {
           topic: topic.clone(),
           kind: UnnamedTopicKind::DocumentationInlineCode,
           scope: scope.clone(),
-          context: vec![],
+          context,
           mentions: vec![],
         },
-      );
-
-      // Add the inline code node with children converted to stubs
-      audit_data.nodes.insert(
-        topic.clone(),
-        Node::Documentation(parser::children_to_stubs(node.clone())),
       );
 
       // Process children (code tokens) with the same scope
@@ -445,6 +456,86 @@ fn process_documentation_node(
   }
 
   Ok(())
+}
+
+/// Builds a self-referencing SourceContext for a documentation topic.
+/// Places the topic as a reference within its scope hierarchy so the
+/// topic panel shows the topic's own rendered content.
+fn build_self_context(
+  topic: &topic::Topic,
+  scope: &Scope,
+  nodes: &BTreeMap<topic::Topic, Node>,
+) -> Vec<core::SourceContext> {
+  let mut groups: Vec<core::SourceContext> = Vec::new();
+  let sort_key = get_source_location_start(topic, nodes);
+
+  match scope {
+    Scope::Global | Scope::Container { .. } => {
+      // Topic is at the top level (e.g., Root or H1 section) — use itself as
+      // both the scope and the reference so the panel renders its content.
+      insert_into_context(
+        &mut groups,
+        topic.clone(),
+        sort_key,
+        true,
+        None,
+        &[],
+        core::Reference::project_reference(topic.clone(), sort_key),
+      );
+    }
+    Scope::Component { component, .. } => {
+      // Topic is under a component (e.g., H2 section under H1)
+      let component_sort_key = get_source_location_start(component, nodes);
+      insert_into_context(
+        &mut groups,
+        component.clone(),
+        component_sort_key,
+        true,
+        None,
+        &[],
+        core::Reference::project_reference(topic.clone(), sort_key),
+      );
+    }
+    Scope::Member {
+      component, member, ..
+    } => {
+      // Topic is under a member (e.g., H3 section under H2 under H1)
+      let component_sort_key = get_source_location_start(component, nodes);
+      let member_sort_key = get_source_location_start(member, nodes);
+      insert_into_context(
+        &mut groups,
+        component.clone(),
+        component_sort_key,
+        true,
+        Some((member.clone(), member_sort_key)),
+        &[],
+        core::Reference::project_reference(topic.clone(), sort_key),
+      );
+    }
+    Scope::ContainingBlock {
+      component,
+      member,
+      containing_blocks,
+      ..
+    } => {
+      if let Some(layer) = containing_blocks.last() {
+        let component_sort_key = get_source_location_start(component, nodes);
+        let member_sort_key = get_source_location_start(member, nodes);
+        let cb_sort_key = get_source_location_start(&layer.block, nodes);
+        insert_into_context(
+          &mut groups,
+          component.clone(),
+          component_sort_key,
+          true,
+          Some((member.clone(), member_sort_key)),
+          &[],
+          core::Reference::project_reference(layer.block.clone(), cb_sort_key),
+        );
+      }
+    }
+  }
+
+  groups
 }
 
 /// Builds SourceContexts from collected mentions and updates the referenced topics' mentions field.
