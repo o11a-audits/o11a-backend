@@ -90,9 +90,9 @@ pub fn format_topic_token(
   data_topic: &topic::Topic,
 ) -> String {
   format!(
-    "<span id=\"{}\" class=\"topic-token {}\" data-topic=\"{}\" tabindex=\"0\">{}</span>",
-    id_topic.id(),
+    "<span class=\"topic-token {}\" data-node-topic=\"{}\" data-topic=\"{}\" tabindex=\"0\">{}</span>",
     class,
+    id_topic.id(),
     data_topic.id(),
     token
   )
@@ -106,9 +106,9 @@ pub fn format_topic_block(
   data_topic: &topic::Topic,
 ) -> String {
   format!(
-    "<div id=\"{}\" class=\"topic-token {}\" data-topic=\"{}\" tabindex=\"0\">{}</div>",
-    id_topic.id(),
+    "<div class=\"topic-token {}\" data-node-topic=\"{}\" data-topic=\"{}\" tabindex=\"0\">{}</div>",
     class,
+    id_topic.id(),
     data_topic.id(),
     content
   )
@@ -170,9 +170,9 @@ pub fn format_node(
   class: &str,
 ) -> String {
   format!(
-    "<span id=\"{}\" class=\"{}\">{}</span>",
-    topic.id(),
+    "<span class=\"{}\" data-node-topic=\"{}\">{}</span>",
     class,
+    topic.id(),
     node_str
   )
 }
@@ -239,9 +239,9 @@ pub fn format_topic_code_block(
 ) -> String {
   let lang_class = lang.map(|l| format!(" language-{}", l)).unwrap_or_default();
   format!(
-    "<pre id=\"{}\" class=\"topic-token code-block{}\" data-topic=\"{}\" tabindex=\"0\"><code>{}</code></pre>",
-    topic.id(),
+    "<pre class=\"topic-token code-block{}\" data-node-topic=\"{}\" data-topic=\"{}\" tabindex=\"0\"><code>{}</code></pre>",
     lang_class,
+    topic.id(),
     topic.id(),
     content
   )
