@@ -20,6 +20,7 @@ pub struct Context {
   /// as its parent signature node. Set to false when recursively formatting the
   /// signature to prevent infinite recursion.
   pub format_parameter_variable_as_signature: bool,
+  pub omit_function_and_modifier_bodies: bool,
 }
 
 pub fn global_to_source_text(topic: &topic::Topic) -> Option<String> {
@@ -60,6 +61,7 @@ pub fn node_to_source_text(
     target_topic: new_node_topic(&node.node_id()),
     omit_variable_declaration_let: false,
     format_parameter_variable_as_signature: false,
+    omit_function_and_modifier_bodies: false,
   };
 
   format!(
@@ -1308,6 +1310,8 @@ fn do_node_to_source_text(
             omit_variable_declaration_let: true,
             format_parameter_variable_as_signature: ctx
               .format_parameter_variable_as_signature,
+            omit_function_and_modifier_bodies: ctx
+              .omit_function_and_modifier_bodies,
           };
           let declarations_str = declarations
             .iter()
@@ -1397,6 +1401,8 @@ fn do_node_to_source_text(
           target_topic: ctx.target_topic.clone(),
           omit_variable_declaration_let: false,
           format_parameter_variable_as_signature: false,
+          omit_function_and_modifier_bodies: ctx
+            .omit_function_and_modifier_bodies,
         };
         do_node_to_source_text(
           sig_node,
@@ -1652,6 +1658,13 @@ fn do_node_to_source_text(
           formatting::format_brace("{}", indent_level)
         )
       } else {
+        let contract_ctx = Context {
+          target_topic: ctx.target_topic.clone(),
+          omit_variable_declaration_let: ctx.omit_variable_declaration_let,
+          format_parameter_variable_as_signature: ctx
+            .format_parameter_variable_as_signature,
+          omit_function_and_modifier_bodies: true,
+        };
         let members = nodes
           .iter()
           .map(|n| {
@@ -1660,7 +1673,7 @@ fn do_node_to_source_text(
               indent_level + 1,
               nodes_map,
               topic_metadata,
-              ctx,
+              &contract_ctx,
             )
           })
           .collect::<Vec<_>>()
@@ -1740,26 +1753,30 @@ fn do_node_to_source_text(
         )
       );
       let modifiers_str = {
-        let s = do_node_to_source_text(
+        do_node_to_source_text(
           modifiers,
           indent_level,
           nodes_map,
           topic_metadata,
           ctx,
-        );
-        if s.is_empty() { s } else { format!("{}\n", s) }
-      };
-      let returns = format!(
-        "{} {} ",
-        formatting::format_keyword("returns"),
-        do_node_to_source_text(
-          return_parameters,
-          indent_level,
-          nodes_map,
-          topic_metadata,
-          ctx
         )
-      );
+      };
+      let returns = match kind {
+        FunctionKind::Constructor | FunctionKind::Fallback | FunctionKind::Receive => {
+          String::new()
+        }
+        _ => format!(
+          "\n{} {} ",
+          formatting::format_keyword("returns"),
+          do_node_to_source_text(
+            return_parameters,
+            indent_level,
+            nodes_map,
+            topic_metadata,
+            ctx
+          )
+        ),
+      };
 
       format!(
         "{}{}{}{}{}{}{}",
@@ -1784,13 +1801,23 @@ fn do_node_to_source_text(
         ctx,
       );
 
-      let body_str = if let Some(b) = body {
-        do_node_to_source_text(b, indent_level, nodes_map, topic_metadata, ctx)
+      if ctx.omit_function_and_modifier_bodies {
+        format!("{}", sig_str)
       } else {
-        String::new()
-      };
+        let body_str = if let Some(b) = body {
+          do_node_to_source_text(
+            b,
+            indent_level,
+            nodes_map,
+            topic_metadata,
+            ctx,
+          )
+        } else {
+          String::new()
+        };
 
-      format!("{}{}", sig_str, body_str)
+        format!("{}{}", sig_str, body_str)
+      }
     }
 
     ASTNode::EventDefinition {
@@ -1894,15 +1921,19 @@ fn do_node_to_source_text(
         ctx,
       );
 
-      let body_str = do_node_to_source_text(
-        body,
-        indent_level,
-        nodes_map,
-        topic_metadata,
-        ctx,
-      );
+      if ctx.omit_function_and_modifier_bodies {
+        format!("{}", sig_str)
+      } else {
+        let body_str = do_node_to_source_text(
+          body,
+          indent_level,
+          nodes_map,
+          topic_metadata,
+          ctx,
+        );
 
-      format!("{} {}", sig_str, body_str)
+        format!("{} {}", sig_str, body_str)
+      }
     }
 
     ASTNode::StructDefinition {
@@ -1920,6 +1951,8 @@ fn do_node_to_source_text(
         omit_variable_declaration_let: true,
         format_parameter_variable_as_signature: ctx
           .format_parameter_variable_as_signature,
+        omit_function_and_modifier_bodies: ctx
+          .omit_function_and_modifier_bodies,
       };
       let members_str = members
         .iter()
@@ -2135,6 +2168,8 @@ fn do_node_to_source_text(
           omit_variable_declaration_let: true,
           format_parameter_variable_as_signature: ctx
             .format_parameter_variable_as_signature,
+          omit_function_and_modifier_bodies: ctx
+            .omit_function_and_modifier_bodies,
         };
         let params = parameters
           .iter()
@@ -2281,7 +2316,7 @@ fn do_node_to_source_text(
           .collect::<Vec<_>>()
           .join("\n");
         format!(
-          "{}\n{}",
+          "{}{}",
           formatting::format_keyword("mods"),
           formatting::indent(&mods, indent_level)
         )
@@ -2317,6 +2352,7 @@ pub fn node_to_delimiter(
     target_topic: new_node_topic(&node.node_id()),
     omit_variable_declaration_let: false,
     format_parameter_variable_as_signature: false,
+    omit_function_and_modifier_bodies: false,
   };
   do_node_to_delimiter(node, nodes_map, topic_metadata, &ctx)
 }
