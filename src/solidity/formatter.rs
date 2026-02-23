@@ -613,10 +613,9 @@ fn do_node_to_source_text(
           )
         );
         format!(
-          "{}[{}{}",
+          "{}[{}\n]",
           base,
           formatting::indent(&idx_content, bracket_indent + 1),
-          formatting::indent("]", bracket_indent),
         )
       } else {
         base
