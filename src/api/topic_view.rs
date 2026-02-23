@@ -1102,8 +1102,26 @@ pub fn render_highlight_css(
 // Public API: Build Full Topic View Response
 // ============================================================================
 
+/// Resolve a comment topic to its first non-comment target topic.
+/// Follows the `target_topic` chain recursively until a non-comment topic is found.
+fn resolve_comment_target<'a>(
+  metadata: &'a TopicMetadata,
+  audit_data: &'a AuditData,
+) -> &'a TopicMetadata {
+  let mut current = metadata;
+  while let Some(target) = current.target_topic() {
+    match audit_data.topic_metadata.get(target) {
+      Some(target_metadata) => current = target_metadata,
+      None => break,
+    }
+  }
+  current
+}
+
 /// Build the TopicViewResponse for a given topic (static panels only).
 /// If `cached` is provided, the static panels are reused from the cache.
+/// For comment topics, the view is rendered as if for the comment's
+/// (first recursive non-comment) target topic.
 pub fn build_topic_view(
   topic_id: &str,
   audit_data: &AuditData,
@@ -1112,6 +1130,9 @@ pub fn build_topic_view(
 ) -> Option<TopicViewResponse> {
   let topic = topic::new_topic(topic_id);
   let metadata = audit_data.topic_metadata.get(&topic)?;
+
+  // For comment topics, resolve to the target topic's metadata
+  let view_metadata = resolve_comment_target(metadata, audit_data);
 
   let (
     topic_panel_html,
@@ -1127,19 +1148,21 @@ pub fn build_topic_view(
     ),
     None => {
       let topic_html = render_grouped_source_panel(
-        metadata.context(),
+        view_metadata.context(),
         audit_data,
         source_text_cache,
         true,
       );
       let expanded_html = render_grouped_source_panel(
-        metadata.expanded_context(),
+        view_metadata.expanded_context(),
         audit_data,
         source_text_cache,
         true,
       );
-      let breadcrumb = render_history_breadcrumb(metadata, audit_data);
-      let css = render_highlight_css(topic_id, metadata);
+      let breadcrumb =
+        render_history_breadcrumb(view_metadata, audit_data);
+      let css =
+        render_highlight_css(view_metadata.topic().id(), view_metadata);
       (topic_html, expanded_html, breadcrumb, css)
     }
   };

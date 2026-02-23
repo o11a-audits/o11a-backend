@@ -1293,6 +1293,13 @@ impl TopicMetadata {
     }
   }
 
+  pub fn target_topic(&self) -> Option<&topic::Topic> {
+    match self {
+      TopicMetadata::CommentTopic { target_topic, .. } => Some(target_topic),
+      _ => None,
+    }
+  }
+
   pub fn mentions(&self) -> &[SourceContext] {
     match self {
       TopicMetadata::NamedTopic { mentions, .. }
