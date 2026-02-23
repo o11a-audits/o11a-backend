@@ -329,6 +329,31 @@ pub async fn get_contracts(
   Ok(Json(ContractsResponse { contracts }))
 }
 
+// Get all qualified topic names for an audit
+pub async fn get_qualified_names(
+  State(state): State<AppState>,
+  Path(audit_id): Path<String>,
+) -> Result<Json<Vec<String>>, StatusCode> {
+  println!("GET /api/v1/audits/{}/qualified_names", audit_id);
+
+  let ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in get_qualified_names: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+
+  let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+
+  let mut names: Vec<String> = audit_data
+    .name_index
+    .qualified_names()
+    .into_iter()
+    .map(|s| s.to_string())
+    .collect();
+  names.sort_unstable();
+
+  Ok(Json(names))
+}
+
 // Get source text for a specific topic within an audit
 pub async fn get_source_text(
   State(state): State<AppState>,

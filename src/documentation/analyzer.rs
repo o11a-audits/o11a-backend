@@ -22,6 +22,9 @@ pub fn analyze(
     .get_audit_mut(audit_id)
     .ok_or_else(|| format!("Audit '{}' not found", audit_id))?;
 
+  // Build name index for fast topic lookup during code token parsing
+  audit_data.name_index = core::TopicNameIndex::build(&audit_data);
+
   // Parse document files in the order specified by documents.txt
   let ast_map =
     parser::process_files(project_root, document_files, &audit_data)?;
@@ -749,7 +752,6 @@ Protocol Solvency
   fn test_analyze_documentation_creates_topic_metadata() {
     let mut audit_data = create_test_audit_data();
     let project_path = create_test_project_path();
-
     // Parse the markdown
     let ast = ast_from_markdown(
       TEST_MARKDOWN,
@@ -834,7 +836,6 @@ Protocol Solvency
   fn test_section_scope_hierarchy() {
     let mut audit_data = create_test_audit_data();
     let project_path = create_test_project_path();
-
     let ast = ast_from_markdown(
       TEST_MARKDOWN,
       &project_path,
@@ -925,7 +926,6 @@ Protocol Solvency
   fn test_inline_code_parsing() {
     let mut audit_data = create_test_audit_data();
     let project_path = create_test_project_path();
-
     let ast = ast_from_markdown(
       TEST_MARKDOWN,
       &project_path,
@@ -996,7 +996,6 @@ Protocol Solvency
   fn test_inline_code_scope_hierarchy() {
     let mut audit_data = create_test_audit_data();
     let project_path = create_test_project_path();
-
     let ast = ast_from_markdown(
       TEST_MARKDOWN,
       &project_path,
@@ -1087,7 +1086,7 @@ Protocol Solvency
         );
         assert_eq!(
           component_metadata.unwrap().name(),
-          "Overview",
+          Some("Overview"),
           "Component should be 'Overview' section"
         );
 
@@ -1099,7 +1098,7 @@ Protocol Solvency
         );
         assert_eq!(
           member_metadata.unwrap().name(),
-          "Main invariants",
+          Some("Main invariants"),
           "Member should be 'Main invariants' section"
         );
 
@@ -1116,7 +1115,7 @@ Protocol Solvency
         );
         assert_eq!(
           containing_block_metadata.unwrap().name(),
-          "Solvency Invariants",
+          Some("Solvency Invariants"),
           "Containing block should be 'Solvency Invariants' section"
         );
       }

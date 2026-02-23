@@ -235,7 +235,7 @@ fn tokenize_code(
           (
             Some(metadata.topic().clone()),
             get_named_topic_kind(metadata),
-            Some(metadata.name().to_string()),
+            metadata.name().map(|n| n.to_string()),
           )
         } else {
           (None, None, None)
@@ -1061,15 +1061,16 @@ fn find_declaration_by_name<'a>(
     .or_else(|| {
       // If not found by topic ID, try to find by qualified name
       audit_data
-        .topic_metadata
-        .values()
-        .find(|decl| decl.qualified_name(audit_data) == value)
+        .name_index
+        .get_by_qualified_name(value)
+        .and_then(|t| audit_data.topic_metadata.get(t))
         .or_else(|| {
           // If not found by qualified name, try to find by simple name
+          // Returns None for ambiguous names (multiple topics share the name)
           audit_data
-            .topic_metadata
-            .values()
-            .find(|decl| decl.name() == value)
+            .name_index
+            .get_by_simple_name(value)
+            .and_then(|t| audit_data.topic_metadata.get(t))
         })
     })
 }

@@ -192,6 +192,72 @@ pub struct AuditData {
   pub function_properties: BTreeMap<topic::Topic, FunctionModProperties>,
   /// Maps variable topic IDs to their Solidity types (for checker module)
   pub variable_types: BTreeMap<topic::Topic, SolidityType>,
+  /// Pre-computed name indexes for fast topic lookup by name.
+  /// Built after all topic_metadata insertions are complete.
+  pub name_index: TopicNameIndex,
+}
+
+/// Pre-computed name indexes for fast topic lookup by name.
+/// Built once after all topic_metadata insertions are complete.
+pub struct TopicNameIndex {
+  by_qualified_name: HashMap<String, topic::Topic>,
+  by_simple_name: HashMap<String, topic::Topic>,
+}
+
+impl TopicNameIndex {
+  pub fn empty() -> Self {
+    TopicNameIndex {
+      by_qualified_name: HashMap::new(),
+      by_simple_name: HashMap::new(),
+    }
+  }
+
+  pub fn build(audit_data: &AuditData) -> Self {
+    let mut by_qualified_name = HashMap::new();
+    let mut simple_name_candidates: HashMap<String, Vec<topic::Topic>> =
+      HashMap::new();
+
+    for (topic, metadata) in &audit_data.topic_metadata {
+      if let Some(qname) = metadata.qualified_name(audit_data) {
+        by_qualified_name.insert(qname, topic.clone());
+      }
+
+      if let Some(sname) = metadata.name() {
+        simple_name_candidates
+          .entry(sname.to_string())
+          .or_default()
+          .push(topic.clone());
+      }
+    }
+
+    let by_simple_name = simple_name_candidates
+      .into_iter()
+      .filter_map(|(name, topics)| {
+        if topics.len() == 1 {
+          Some((name, topics.into_iter().next().unwrap()))
+        } else {
+          None
+        }
+      })
+      .collect();
+
+    TopicNameIndex {
+      by_qualified_name,
+      by_simple_name,
+    }
+  }
+
+  pub fn get_by_qualified_name(&self, name: &str) -> Option<&topic::Topic> {
+    self.by_qualified_name.get(name)
+  }
+
+  pub fn get_by_simple_name(&self, name: &str) -> Option<&topic::Topic> {
+    self.by_simple_name.get(name)
+  }
+
+  pub fn qualified_names(&self) -> Vec<&str> {
+    self.by_qualified_name.keys().map(|s| s.as_str()).collect()
+  }
 }
 
 /// Cached static parts of a topic view (AST-derived, never invalidated).
@@ -1093,13 +1159,13 @@ impl TopicMetadata {
     }
   }
 
-  pub fn name(&self) -> &str {
+  pub fn name(&self) -> Option<&str> {
     match self {
-      TopicMetadata::NamedTopic { name, .. } => name,
-      TopicMetadata::TitledTopic { title, .. } => title,
-      TopicMetadata::UnnamedTopic { topic, .. }
-      | TopicMetadata::ControlFlow { topic, .. }
-      | TopicMetadata::CommentTopic { topic, .. } => topic.id(),
+      TopicMetadata::NamedTopic { name, .. } => Some(name),
+      TopicMetadata::TitledTopic { title, .. } => Some(title),
+      TopicMetadata::UnnamedTopic { .. }
+      | TopicMetadata::ControlFlow { .. }
+      | TopicMetadata::CommentTopic { .. } => None,
     }
   }
 
@@ -1205,20 +1271,20 @@ impl TopicMetadata {
     }
   }
 
-  /// Returns the qualified name of the declaration
-  /// Format: component::member::statement::name, component::member::name, component::name, or name
-  /// Uses the declaration names from the scope components, falling back to topic IDs if not found
-  pub fn qualified_name(&self, audit_data: &AuditData) -> String {
-    match &self.scope() {
-      Scope::Global => self.name().to_string(),
-      Scope::Container { .. } => self.name().to_string(),
+  /// Returns the qualified name of the declaration, or None for unnamed topics.
+  /// Format: component.member.name, component.name, or name
+  /// Uses the declaration names from the scope components, falling back to topic IDs if not found.
+  pub fn qualified_name(&self, audit_data: &AuditData) -> Option<String> {
+    let name = self.name()?;
+    Some(match &self.scope() {
+      Scope::Global | Scope::Container { .. } => name.to_string(),
       Scope::Component { component, .. } => {
         let component_name = audit_data
           .topic_metadata
           .get(component)
-          .map(|d| d.name())
+          .and_then(|d| d.name())
           .unwrap_or_else(|| component.id());
-        format!("{}.{}", component_name, self.name())
+        format!("{}.{}", component_name, name)
       }
       Scope::Member {
         component, member, ..
@@ -1229,16 +1295,16 @@ impl TopicMetadata {
         let component_name = audit_data
           .topic_metadata
           .get(component)
-          .map(|d| d.name())
+          .and_then(|d| d.name())
           .unwrap_or_else(|| component.id());
         let member_name = audit_data
           .topic_metadata
           .get(member)
-          .map(|d| d.name())
+          .and_then(|d| d.name())
           .unwrap_or_else(|| member.id());
-        format!("{}.{}.{}", component_name, member_name, self.name())
+        format!("{}.{}.{}", component_name, member_name, name)
       }
-    }
+    })
   }
 }
 
@@ -1484,6 +1550,7 @@ pub fn new_audit_data(
     topic_metadata,
     function_properties: BTreeMap::new(),
     variable_types: BTreeMap::new(),
+    name_index: TopicNameIndex::empty(),
   }
 }
 
