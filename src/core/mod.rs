@@ -197,6 +197,36 @@ pub struct AuditData {
   pub name_index: TopicNameIndex,
 }
 
+/// Common short English words that should not match as simple topic names.
+/// These appear frequently in documentation prose inside backticks but are
+/// almost never intended to reference a Solidity declaration.
+/// Qualified names like "ERC20.transfer.from" are unaffected.
+fn is_common_word(name: &str) -> bool {
+  matches!(
+    name,
+    "a" | "an"
+      | "as"
+      | "at"
+      | "be"
+      | "by"
+      | "do"
+      | "for"
+      | "from"
+      | "if"
+      | "in"
+      | "is"
+      | "it"
+      | "no"
+      | "of"
+      | "on"
+      | "or"
+      | "so"
+      | "to"
+      | "up"
+      | "we"
+  )
+}
+
 /// Pre-computed name indexes for fast topic lookup by name.
 /// Built once after all topic_metadata insertions are complete.
 pub struct TopicNameIndex {
@@ -223,10 +253,12 @@ impl TopicNameIndex {
       }
 
       if let Some(sname) = metadata.name() {
-        simple_name_candidates
-          .entry(sname.to_string())
-          .or_default()
-          .push(topic.clone());
+        if !is_common_word(sname) {
+          simple_name_candidates
+            .entry(sname.to_string())
+            .or_default()
+            .push(topic.clone());
+        }
       }
     }
 
