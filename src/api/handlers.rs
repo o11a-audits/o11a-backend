@@ -1093,6 +1093,13 @@ pub async fn get_topic_view(
     .cloned()
     .unwrap_or_default();
 
+  // Build the dynamic comment parent chain prefix (empty for non-comment topics)
+  let prefix = super::topic_view::build_topic_panel_prefix(
+    &topic_id,
+    audit_data,
+    &source_text_cache,
+  );
+
   // Check cache for static parts
   let cached = ctx.get_cached_topic_view(&audit_id, &topic_id).cloned();
 
@@ -1101,6 +1108,7 @@ pub async fn get_topic_view(
     audit_data,
     &source_text_cache,
     cached.as_ref(),
+    &prefix,
   )
   .ok_or_else(|| {
     eprintln!(
@@ -1110,13 +1118,20 @@ pub async fn get_topic_view(
     StatusCode::NOT_FOUND
   })?;
 
-  // Cache the static parts if not already cached
+  // Cache the static parts if not already cached (without the dynamic prefix)
   if cached.is_none() {
+    // Strip the prefix to cache only the static topic panel
+    let static_topic_panel = if prefix.is_empty() {
+      response.topic_panel_html.clone()
+    } else {
+      response.topic_panel_html[prefix.len()..].to_string()
+    };
+
     ctx.cache_topic_view(
       &audit_id,
       &topic_id,
       core::CachedTopicView {
-        topic_panel_html: response.topic_panel_html.clone(),
+        topic_panel_html: static_topic_panel,
         expanded_references_panel_html: response
           .expanded_references_panel_html
           .clone(),
@@ -1159,6 +1174,46 @@ pub async fn get_mentions_panel(
   .ok_or_else(|| {
     eprintln!(
       "Metadata for topic '{}' not found in audit '{}'",
+      topic_id, audit_id
+    );
+    StatusCode::NOT_FOUND
+  })?;
+
+  Ok(Json(response))
+}
+
+/// GET /api/v1/audits/:audit_id/comment_thread/:topic_id
+/// Returns the comment and its recursive children as a thread HTML.
+pub async fn get_comment_thread(
+  State(state): State<AppState>,
+  Path((audit_id, topic_id)): Path<(String, String)>,
+) -> Result<Json<super::topic_view::CommentThreadResponse>, StatusCode> {
+  println!(
+    "GET /api/v1/audits/{}/comment_thread/{}",
+    audit_id, topic_id
+  );
+
+  let ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in get_comment_thread: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+
+  let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+
+  let source_text_cache = ctx
+    .source_text_cache
+    .get(&audit_id)
+    .cloned()
+    .unwrap_or_default();
+
+  let response = super::topic_view::build_comment_thread(
+    &topic_id,
+    audit_data,
+    &source_text_cache,
+  )
+  .ok_or_else(|| {
+    eprintln!(
+      "Topic '{}' not found in audit '{}'",
       topic_id, audit_id
     );
     StatusCode::NOT_FOUND

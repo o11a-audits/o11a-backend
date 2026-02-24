@@ -1300,6 +1300,31 @@ impl TopicMetadata {
     }
   }
 
+  pub fn author_id(&self) -> Option<i64> {
+    match self {
+      TopicMetadata::CommentTopic { author_id, .. } => Some(*author_id),
+      _ => None,
+    }
+  }
+
+  pub fn comment_type(&self) -> Option<&str> {
+    match self {
+      TopicMetadata::CommentTopic { comment_type, .. } => {
+        Some(comment_type.as_str())
+      }
+      _ => None,
+    }
+  }
+
+  pub fn created_at(&self) -> Option<&str> {
+    match self {
+      TopicMetadata::CommentTopic { created_at, .. } => {
+        Some(created_at.as_str())
+      }
+      _ => None,
+    }
+  }
+
   pub fn mentions(&self) -> &[SourceContext] {
     match self {
       TopicMetadata::NamedTopic { mentions, .. }

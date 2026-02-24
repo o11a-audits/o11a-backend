@@ -26,6 +26,11 @@ pub struct MentionsPanelResponse {
   pub mentions_panel_html: String,
 }
 
+#[derive(Debug, Serialize)]
+pub struct CommentThreadResponse {
+  pub thread_html: String,
+}
+
 // ============================================================================
 // CSS Constants (replicated from Gleam frontend)
 // ============================================================================
@@ -49,6 +54,8 @@ const SCOPE_OVERFLOW_GRADIENT_STYLE: &str = "display: none;";
 
 const OUT_OF_SCOPE_BORDER: &str =
   "border-color: var(--color-body-out-of-scope-bg)";
+
+const COMMENT_META_STYLE: &str = "display: flex; gap: 0.5rem; align-items: center; font-size: 0.8em; opacity: 0.7; margin-bottom: 0.25rem;";
 
 const CHEVRON_RIGHT_SVG: &str = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100%\" height=\"100%\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"display: block;\"><path d=\"m9 18 6-6-6-6\"/></svg>";
 
@@ -925,7 +932,7 @@ pub fn render_grouped_source_panel(
 
   for group in groups {
     html.push_str(
-      "<div class=\"reference-group\" style=\"margin-bottom: 0.5rem;\">",
+      "<div class=\"component-group\" style=\"margin-bottom: 0.5rem;\">",
     );
 
     // Render scope breadcrumb
@@ -994,7 +1001,7 @@ pub fn render_grouped_source_panel(
       index = next_index;
     }
 
-    html.push_str("</div>"); // close reference-group
+    html.push_str("</div>"); // close component-group
   }
 
   html
@@ -1118,15 +1125,59 @@ fn resolve_comment_target<'a>(
   current
 }
 
-/// Build the TopicViewResponse for a given topic (static panels only).
+/// Build the comment parent chain HTML for a topic.
+/// Returns an empty string for non-comment topics.
+pub fn build_topic_panel_prefix(
+  topic_id: &str,
+  audit_data: &AuditData,
+  source_text_cache: &std::collections::HashMap<String, String>,
+) -> String {
+  let topic = topic::new_topic(topic_id);
+  let metadata = match audit_data.topic_metadata.get(&topic) {
+    Some(m) if m.target_topic().is_some() => m,
+    _ => return String::new(),
+  };
+
+  let chain = collect_parent_chain(metadata, audit_data);
+  let total = chain.len();
+  let mut html = String::new();
+
+  html.push_str(
+    "<div class=\"component-group\" style=\"margin-bottom: 0.5rem;\">",
+  );
+
+  // Title in the same style as the component scope title
+  html.push_str(&format!(
+    "<div class=\"topic-reference-title scope-standard\" style=\"{}\"><span style=\"{}\"><code><span>Comment</span></code></span></div>",
+    SCOPE_STYLE, SCOPE_ITEM_STYLE
+  ));
+
+  for (i, comment_meta) in chain.iter().enumerate() {
+    html.push_str(&render_comment_node(
+      comment_meta,
+      i,
+      total,
+      i,
+      audit_data,
+      source_text_cache,
+    ));
+  }
+
+  html.push_str("</div>");
+  html
+}
+
+/// Build the TopicViewResponse for a given topic.
 /// If `cached` is provided, the static panels are reused from the cache.
 /// For comment topics, the view is rendered as if for the comment's
 /// (first recursive non-comment) target topic.
+/// `topic_panel_prefix` is prepended at the top of `topic_panel_html`.
 pub fn build_topic_view(
   topic_id: &str,
   audit_data: &AuditData,
   source_text_cache: &std::collections::HashMap<String, String>,
   cached: Option<&core::CachedTopicView>,
+  topic_panel_prefix: &str,
 ) -> Option<TopicViewResponse> {
   let topic = topic::new_topic(topic_id);
   let metadata = audit_data.topic_metadata.get(&topic)?;
@@ -1159,12 +1210,17 @@ pub fn build_topic_view(
         source_text_cache,
         true,
       );
-      let breadcrumb =
-        render_history_breadcrumb(view_metadata, audit_data);
-      let css =
-        render_highlight_css(view_metadata.topic().id(), view_metadata);
+      let breadcrumb = render_history_breadcrumb(view_metadata, audit_data);
+      let css = render_highlight_css(view_metadata.topic().id(), view_metadata);
       (topic_html, expanded_html, breadcrumb, css)
     }
+  };
+
+  // Prepend the prefix at the top of the topic panel
+  let topic_panel_html = if topic_panel_prefix.is_empty() {
+    topic_panel_html
+  } else {
+    format!("{}{}", topic_panel_prefix, topic_panel_html)
   };
 
   Some(TopicViewResponse {
@@ -1195,4 +1251,135 @@ pub fn build_mentions_panel(
   Some(MentionsPanelResponse {
     mentions_panel_html,
   })
+}
+
+// ============================================================================
+// Comment Thread Rendering
+// ============================================================================
+
+/// Render a single comment node: metadata header + rendered content.
+fn render_comment_node(
+  metadata: &TopicMetadata,
+  index: usize,
+  total: usize,
+  depth: usize,
+  audit_data: &AuditData,
+  source_text_cache: &std::collections::HashMap<String, String>,
+) -> String {
+  let topic_id = metadata.topic().id();
+  let author_id = metadata.author_id().unwrap_or(0);
+  let comment_type = metadata.comment_type().unwrap_or("note");
+  let created_at = metadata.created_at().unwrap_or("");
+
+  // Metadata header
+  let meta_html = format!(
+    "<div style=\"{}\"><span class=\"comment-type keyword\">{}</span> \
+     <span class=\"comment-author\">author:{}</span> \
+     <span class=\"comment-time\">{}</span></div>",
+    COMMENT_META_STYLE,
+    html_escape(comment_type),
+    author_id,
+    html_escape(created_at),
+  );
+
+  // Comment content from cache
+  let content_html =
+    get_source_text(metadata.topic(), audit_data, source_text_cache);
+
+  let inner = format!(
+    "{}<div class=\"comment-content code-style\">{}</div>",
+    meta_html, content_html
+  );
+
+  let wrapped = wrap_in_indent(&inner, depth);
+
+  let mut style = String::from(COMBINED_PANEL_STYLE);
+  style.push(' ');
+  style.push_str(&first_last_style(index, total));
+
+  format!(
+    "<div class=\"comment-thread-node\" data-topic=\"{}\" style=\"{}\">{}</div>",
+    html_escape(topic_id),
+    style,
+    wrapped
+  )
+}
+
+/// Collect the parent chain from a comment topic up to (but not including)
+/// the first non-comment target. Returns comments in root-first order
+/// (outermost comment first, the starting comment last).
+fn collect_parent_chain<'a>(
+  metadata: &'a TopicMetadata,
+  audit_data: &'a AuditData,
+) -> Vec<&'a TopicMetadata> {
+  let mut chain = vec![metadata];
+  let mut current = metadata;
+  while let Some(target) = current.target_topic() {
+    match audit_data.topic_metadata.get(target) {
+      Some(target_meta) if target_meta.target_topic().is_some() => {
+        // Target is also a comment — add to chain and continue
+        chain.push(target_meta);
+        current = target_meta;
+      }
+      _ => break,
+    }
+  }
+  chain.reverse();
+  chain
+}
+
+/// Recursively collect comment children into a flat list with depth info.
+/// Each entry is (metadata, depth). Collects in depth-first order.
+fn collect_children_recursive<'a>(
+  parent_topic: &topic::Topic,
+  depth: usize,
+  audit_data: &'a AuditData,
+  result: &mut Vec<(&'a TopicMetadata, usize)>,
+) {
+  let children: Vec<&TopicMetadata> = audit_data
+    .topic_metadata
+    .values()
+    .filter(|m| m.target_topic() == Some(parent_topic))
+    .collect();
+
+  for child_meta in children {
+    result.push((child_meta, depth));
+    collect_children_recursive(
+      child_meta.topic(),
+      depth + 1,
+      audit_data,
+      result,
+    );
+  }
+}
+
+/// Build the comment thread HTML for a comment topic.
+/// Renders the comment itself at the top, then recursively renders
+/// all reply children below it with increasing indent depth.
+/// Returns `None` if the topic is not found or is not a comment.
+pub fn build_comment_thread(
+  topic_id: &str,
+  audit_data: &AuditData,
+  source_text_cache: &std::collections::HashMap<String, String>,
+) -> Option<CommentThreadResponse> {
+  let topic = topic::new_topic(topic_id);
+  let metadata = audit_data.topic_metadata.get(&topic)?;
+
+  // Only works for comment topics
+  metadata.target_topic()?;
+
+  // Flatten the entire thread: root comment + all recursive children
+  let mut flat: Vec<(&TopicMetadata, usize)> = vec![(metadata, 0)];
+  collect_children_recursive(&topic, 1, audit_data, &mut flat);
+
+  let total = flat.len();
+  let mut html = String::new();
+
+  for (i, (meta, depth)) in flat.iter().enumerate() {
+    html.push_str(&render_comment_node(
+      meta, i, total, *depth, audit_data, source_text_cache,
+    ));
+  }
+
+  Some(CommentThreadResponse { thread_html: html })
 }
