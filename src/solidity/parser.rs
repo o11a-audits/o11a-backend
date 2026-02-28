@@ -18,12 +18,7 @@ struct ParserContext {
   pub signature_parent_node: Cell<Option<i32>>,
 }
 
-pub fn process(
-  project_root: &Path,
-) -> Result<
-  std::collections::BTreeMap<core::ProjectPath, Vec<SolidityAST>>,
-  String,
-> {
+pub fn process(project_root: &Path) -> Result<BTreeMap<core::ProjectPath, Vec<SolidityAST>>, String> {
   // Look for the "out" directory in the project root
   let out_dir = project_root.join("out");
   if !out_dir.exists() || !out_dir.is_dir() {
@@ -131,7 +126,6 @@ fn ast_from_json_file(
 
   // Read the original source file content
   let source_content = read_source_file(&project_path, &project_root)?;
-
   context.source_content = source_content;
 
   let nodes_array = ast_obj

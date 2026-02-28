@@ -1,3 +1,4 @@
+pub mod agent_context;
 pub mod db;
 pub mod formatter;
 pub mod models;

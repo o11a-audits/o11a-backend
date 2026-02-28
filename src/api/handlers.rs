@@ -1637,3 +1637,55 @@ pub async fn remove_vote(
 
   Ok(StatusCode::NO_CONTENT)
 }
+
+// ============================================================================
+// Agent context handler
+// ============================================================================
+
+#[derive(Debug, Deserialize)]
+pub struct AgentContextQuery {
+  #[serde(default)]
+  pub include_expanded_context: bool,
+}
+
+/// GET /api/v1/audits/:audit_id/agent_context/:topic_id
+pub async fn get_agent_context(
+  State(state): State<AppState>,
+  Path((audit_id, topic_id)): Path<(String, String)>,
+  Query(params): Query<AgentContextQuery>,
+) -> Result<Json<crate::collaborator::agent_context::AgentTopicContext>, StatusCode>
+{
+  println!(
+    "GET /api/v1/audits/{}/agent_context/{}",
+    audit_id, topic_id
+  );
+
+  let ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in get_agent_context: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+
+  let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+
+  let source_text_cache = ctx
+    .source_text_cache
+    .get(&audit_id)
+    .cloned()
+    .unwrap_or_default();
+
+  let response = crate::collaborator::agent_context::build_agent_context(
+    &topic_id,
+    audit_data,
+    &source_text_cache,
+    params.include_expanded_context,
+  )
+  .ok_or_else(|| {
+    eprintln!(
+      "Topic '{}' not found in audit '{}'",
+      topic_id, audit_id
+    );
+    StatusCode::NOT_FOUND
+  })?;
+
+  Ok(Json(response))
+}
