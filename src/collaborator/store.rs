@@ -38,6 +38,11 @@ pub fn register_comment_in_audit_data(
     },
   );
 
+  // Update comment index
+  audit_data
+    .comment_index
+    .insert(&comment.topic_id, comment_topic.clone());
+
   // Insert mention references into each mentioned topic's mentions field
   for mention in mentions {
     insert_comment_mention(

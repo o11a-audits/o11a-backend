@@ -1250,23 +1250,19 @@ pub async fn get_topic_comments(
     "GET /api/v1/audits/{}/topics/{}/comments",
     audit_id, topic_id
   );
-  let db_comments =
-    db::get_comments_for_topic_raw(&state.db, &audit_id, &topic_id)
-      .await
-      .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
   let ctx = state.data_context.lock().map_err(|e| {
     eprintln!("Mutex poisoned in get_topic_comments: {}", e);
     StatusCode::INTERNAL_SERVER_ERROR
   })?;
   let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
 
-  let comments = db_comments
+  let comments = audit_data
+    .comment_index
+    .get(&topic_id)
     .iter()
-    .filter_map(|c| {
-      let comment_topic = new_topic(&c.comment_topic_id());
-      let metadata = audit_data.topic_metadata.get(&comment_topic)?;
-      Some(topic_metadata_to_response(&comment_topic, metadata))
+    .filter_map(|comment_topic| {
+      let metadata = audit_data.topic_metadata.get(comment_topic)?;
+      Some(topic_metadata_to_response(comment_topic, metadata))
     })
     .collect();
 
@@ -1504,6 +1500,33 @@ pub async fn update_comment_status(
   let response = db::update_status(&state.db, comment_id, &payload.status)
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+  // Update in-memory comment index on hide/unhide
+  {
+    let comment_topic = new_topic(&format!("C{}", comment_id));
+    let mut ctx = state.data_context.lock().map_err(|e| {
+      eprintln!("Mutex poisoned in update_comment_status: {}", e);
+      StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    if let Some(audit_data) = ctx.get_audit_mut(&audit_id) {
+      if let Some(target_id) = audit_data
+        .topic_metadata
+        .get(&comment_topic)
+        .and_then(|m| m.target_topic())
+        .map(|t| t.id().to_string())
+      {
+        if payload.status == CommentStatus::Hidden {
+          audit_data
+            .comment_index
+            .remove(&target_id, &comment_topic);
+        } else {
+          audit_data
+            .comment_index
+            .insert(&target_id, comment_topic);
+        }
+      }
+    }
+  }
 
   // Broadcast status update via WebSocket
   let _ = state.comment_broadcast.send(CommentEvent::StatusUpdated {

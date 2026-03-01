@@ -195,6 +195,9 @@ pub struct AuditData {
   /// Pre-computed name indexes for fast topic lookup by name.
   /// Built after all topic_metadata insertions are complete.
   pub name_index: TopicNameIndex,
+  /// Reverse index: target topic ID → non-hidden comment topics.
+  /// Updated on comment create and status change.
+  pub comment_index: CommentIndex,
 }
 
 /// Common short English words that should not match as simple topic names.
@@ -289,6 +292,56 @@ impl TopicNameIndex {
 
   pub fn qualified_names(&self) -> Vec<&str> {
     self.by_qualified_name.keys().map(|s| s.as_str()).collect()
+  }
+}
+
+/// Reverse index from target topic ID to non-hidden comment topics.
+/// Updated incrementally on comment create and status change.
+pub struct CommentIndex {
+  by_target: HashMap<String, Vec<topic::Topic>>,
+}
+
+impl CommentIndex {
+  pub fn empty() -> Self {
+    CommentIndex {
+      by_target: HashMap::new(),
+    }
+  }
+
+  /// Add a comment targeting a topic.
+  pub fn insert(
+    &mut self,
+    target_topic_id: &str,
+    comment_topic: topic::Topic,
+  ) {
+    let comments = self
+      .by_target
+      .entry(target_topic_id.to_string())
+      .or_default();
+    if !comments.contains(&comment_topic) {
+      comments.push(comment_topic);
+    }
+  }
+
+  /// Remove a comment (when hidden).
+  pub fn remove(
+    &mut self,
+    target_topic_id: &str,
+    comment_topic: &topic::Topic,
+  ) {
+    if let Some(comments) = self.by_target.get_mut(target_topic_id) {
+      comments.retain(|t| t != comment_topic);
+      if comments.is_empty() {
+        self.by_target.remove(target_topic_id);
+      }
+    }
+  }
+
+  /// Get all comment topics targeting a given topic.
+  pub fn get(&self, target_topic_id: &str) -> &[topic::Topic] {
+    self.by_target
+      .get(target_topic_id)
+      .map_or(&[], |v| v.as_slice())
   }
 }
 
@@ -1615,6 +1668,7 @@ pub fn new_audit_data(
     function_properties: BTreeMap::new(),
     variable_types: BTreeMap::new(),
     name_index: TopicNameIndex::empty(),
+    comment_index: CommentIndex::empty(),
   }
 }
 

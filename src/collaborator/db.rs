@@ -173,21 +173,6 @@ pub async fn get_comment_raw(
     .await
 }
 
-/// Gets comments for a specific topic (raw database rows)
-pub async fn get_comments_for_topic_raw(
-  pool: &SqlitePool,
-  audit_id: &str,
-  topic_id: &str,
-) -> Result<Vec<Comment>, sqlx::Error> {
-  sqlx::query_as::<_, Comment>(
-        "SELECT * FROM comments WHERE audit_id = ? AND topic_id = ? AND status != 'hidden' ORDER BY created_at DESC",
-    )
-    .bind(audit_id)
-    .bind(topic_id)
-    .fetch_all(pool)
-    .await
-}
-
 /// Gets all comments for an audit filtered by type and status
 pub async fn get_comments_by_type_and_status(
   pool: &SqlitePool,
