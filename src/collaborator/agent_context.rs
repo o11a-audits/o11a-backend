@@ -1,4 +1,5 @@
 use serde::Serialize;
+use serde_json::json;
 
 use crate::core::{
   self, AuditData, BlockAnnotationKind, ControlFlowStatementKind,
@@ -23,6 +24,8 @@ pub struct AgentTopicContext {
   pub scope: String,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub is_mutable: Option<bool>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub condition: Option<serde_json::Value>,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub ancestors: Option<Vec<String>>,
   #[serde(skip_serializing_if = "Option::is_none")]
@@ -56,14 +59,18 @@ pub struct AgentNestedGroup {
 pub enum AgentSourceChild {
   #[serde(rename = "reference")]
   Reference {
-    code: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ast_snippet: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     comments: Option<Vec<AgentComment>>,
   },
   #[serde(rename = "annotated_block")]
   AnnotatedBlock {
-    annotation: String,
     kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    condition: Option<serde_json::Value>,
     children: Vec<AgentSourceChild>,
   },
 }
@@ -75,171 +82,31 @@ pub struct AgentComment {
 }
 
 // ============================================================================
-// Utility: HTML to plain text conversion
+// Utility: HTML content retrieval
 // ============================================================================
 
-/// Convert formatter HTML to plain text, preserving newlines and indentation.
-///
-/// Indentation is preserved via literal space characters baked into the
-/// content by `formatting::inline_indent()`. Indent span tags are stripped
-/// like any other HTML tag.
-///
-/// Handles special HTML patterns from the formatter:
-/// - Placeholder `<div>` elements → skipped (empty, no content)
-/// - All other tags (including indent spans) → stripped, content preserved
-///
-/// Also unescapes HTML entities and preserves literal `\n` characters.
-///
-/// Note: Inline comment injection happens at a higher level in
-/// `convert_reference`, which prepends `// [type] comment` lines from
-/// the `mention_topics` on each `Reference`. The placeholder divs in the
-/// formatter HTML point to declarations (not comments) and are skipped.
-fn html_to_plain_text(html: &str) -> String {
-  let mut output = String::with_capacity(html.len());
-  let mut pos = 0;
-  let bytes = html.as_bytes();
-
-  while pos < bytes.len() {
-    if bytes[pos] == b'<' {
-      // Find the end of this tag
-      let tag_start = pos;
-      let tag_end = match html[pos..].find('>') {
-        Some(offset) => pos + offset + 1,
-        None => break,
-      };
-      let tag_content = &html[tag_start + 1..tag_end - 1]; // between < and >
-
-      // Skip placeholder divs (empty elements, content injected elsewhere)
-      if is_placeholder_div(tag_content) {
-        // Skip past the closing </div>
-        if !tag_content.ends_with('/') {
-          if let Some(close_offset) = html[tag_end..].find("</div>") {
-            pos = tag_end + close_offset + 6;
-          } else {
-            pos = tag_end;
-          }
-        } else {
-          pos = tag_end;
-        }
-        continue;
-      }
-
-      // All other tags (including indent spans): skip tag, keep content
-      pos = tag_end;
-    } else if bytes[pos] == b'&' {
-      // Unescape HTML entities
-      if html[pos..].starts_with("&amp;") {
-        output.push('&');
-        pos += 5;
-      } else if html[pos..].starts_with("&lt;") {
-        output.push('<');
-        pos += 4;
-      } else if html[pos..].starts_with("&gt;") {
-        output.push('>');
-        pos += 4;
-      } else if html[pos..].starts_with("&quot;") {
-        output.push('"');
-        pos += 6;
-      } else if html[pos..].starts_with("&#39;") {
-        output.push('\'');
-        pos += 5;
-      } else {
-        output.push('&');
-        pos += 1;
-      }
-    } else {
-      output.push(bytes[pos] as char);
-      pos += 1;
-    }
-  }
-
-  output.trim_end().to_string()
-}
-
-/// Check if a tag is a placeholder div (inline-comment placeholder).
-fn is_placeholder_div(tag: &str) -> bool {
-  tag.starts_with("div ") && tag.contains("inline-comment")
-}
-
-/// Simple HTML tag stripping for contexts where we don't need indent/placeholder
-/// handling (e.g., comment content, documentation, names).
-fn strip_html_tags(html: &str) -> String {
-  let mut result = String::with_capacity(html.len());
-  let mut in_tag = false;
-
-  for ch in html.chars() {
-    match ch {
-      '<' => in_tag = true,
-      '>' => in_tag = false,
-      _ if !in_tag => result.push(ch),
-      _ => {}
-    }
-  }
-
-  // Collapse runs of whitespace into single spaces
-  let mut collapsed = String::with_capacity(result.len());
-  let mut last_was_space = false;
-  for ch in result.chars() {
-    if ch.is_whitespace() {
-      if !last_was_space {
-        collapsed.push(' ');
-        last_was_space = true;
-      }
-    } else {
-      collapsed.push(ch);
-      last_was_space = false;
-    }
-  }
-
-  collapsed.trim().to_string()
-}
-
-// ============================================================================
-// Utility: Source text as plain text
-// ============================================================================
-
-/// Get source text for a topic as plain text by rendering via the formatter
-/// and converting HTML to plain text. Preserves indentation and newlines,
-/// and resolves inline comment placeholders.
-fn get_plain_text(
+/// Get rendered HTML content for a comment or documentation topic.
+fn get_html_content(
   topic: &topic::Topic,
   audit_data: &AuditData,
   source_text_cache: &std::collections::HashMap<String, String>,
 ) -> String {
-  // Check cache first (comments and pre-rendered entries)
   if let Some(html) = source_text_cache.get(topic.id()) {
-    return html_to_plain_text(html);
+    return html.clone();
   }
 
-  // Check for global builtins
-  if let Some(html) =
-    crate::solidity::formatter::global_to_source_text(topic)
-  {
-    return html_to_plain_text(&html);
-  }
-
-  // Render from AST node and convert to plain text
   match audit_data.nodes.get(topic) {
-    Some(Node::Solidity(solidity_node)) => {
-      let html = crate::solidity::formatter::node_to_source_text(
-        solidity_node,
-        &audit_data.nodes,
-        &audit_data.topic_metadata,
-      );
-      html_to_plain_text(&html)
-    }
     Some(Node::Documentation(doc_node)) => {
-      let html = crate::documentation::formatter::node_to_html(
+      crate::documentation::formatter::node_to_html(
         doc_node,
         &audit_data.nodes,
         &FormatContext {
           comment_formatting: false,
           target_topic: topic.clone(),
         },
-      );
-      strip_html_tags(&html)
+      )
     }
-    None => topic.id().to_string(),
+    _ => topic.id().to_string(),
   }
 }
 
@@ -247,11 +114,10 @@ fn get_plain_text(
 // Utility: Topic name resolution
 // ============================================================================
 
-/// Resolve a topic to its display name (plain text, no HTML).
+/// Resolve a topic to its display name.
 fn resolve_topic_name(
   topic: &topic::Topic,
   audit_data: &AuditData,
-  source_text_cache: &std::collections::HashMap<String, String>,
 ) -> String {
   match audit_data.topic_metadata.get(topic) {
     Some(TopicMetadata::NamedTopic { name, .. }) => name.clone(),
@@ -259,13 +125,8 @@ fn resolve_topic_name(
     Some(TopicMetadata::UnnamedTopic { kind, .. }) => {
       unnamed_kind_to_string(kind)
     }
-    Some(TopicMetadata::ControlFlow {
-      kind, condition, ..
-    }) => {
-      let keyword = control_flow_kind_to_string(kind);
-      let cond_source =
-        get_plain_text(condition, audit_data, source_text_cache);
-      format!("{} ({})", keyword, cond_source)
+    Some(TopicMetadata::ControlFlow { kind, .. }) => {
+      control_flow_kind_to_string(kind).to_string()
     }
     Some(TopicMetadata::CommentTopic { comment_type, .. }) => {
       comment_type.clone()
@@ -297,7 +158,6 @@ fn control_flow_kind_to_string(
 fn scope_to_breadcrumb(
   scope: &Scope,
   audit_data: &AuditData,
-  source_text_cache: &std::collections::HashMap<String, String>,
 ) -> String {
   match scope {
     Scope::Global => "Global".to_string(),
@@ -307,7 +167,7 @@ fn scope_to_breadcrumb(
       component,
     } => {
       let component_name =
-        resolve_topic_name(component, audit_data, source_text_cache);
+        resolve_topic_name(component, audit_data);
       format!("{} > {}", container.file_path, component_name)
     }
     Scope::Member {
@@ -317,9 +177,9 @@ fn scope_to_breadcrumb(
       ..
     } => {
       let component_name =
-        resolve_topic_name(component, audit_data, source_text_cache);
+        resolve_topic_name(component, audit_data);
       let member_name =
-        resolve_topic_name(member, audit_data, source_text_cache);
+        resolve_topic_name(member, audit_data);
       format!(
         "{} > {} > {}",
         container.file_path, component_name, member_name
@@ -332,9 +192,9 @@ fn scope_to_breadcrumb(
       ..
     } => {
       let component_name =
-        resolve_topic_name(component, audit_data, source_text_cache);
+        resolve_topic_name(component, audit_data);
       let member_name =
-        resolve_topic_name(member, audit_data, source_text_cache);
+        resolve_topic_name(member, audit_data);
       format!(
         "{} > {} > {}",
         container.file_path, component_name, member_name
@@ -370,62 +230,41 @@ fn visibility_to_string(visibility: &NamedTopicVisibility) -> String {
 // Utility: Control flow annotation rendering
 // ============================================================================
 
-/// Render an annotation string for an annotated block.
-fn render_annotation(
+/// Render the condition of a control flow annotation as an AST snippet.
+fn render_condition_ast_snippet(
   annotation_topic: &topic::Topic,
   annotation_kind: &BlockAnnotationKind,
+  target_topic: &topic::Topic,
   audit_data: &AuditData,
   source_text_cache: &std::collections::HashMap<String, String>,
-) -> String {
+) -> Option<serde_json::Value> {
   match annotation_kind {
-    BlockAnnotationKind::If(_) => render_control_flow_condition(
-      annotation_topic,
-      "if",
-      audit_data,
-      source_text_cache,
-    ),
-    BlockAnnotationKind::While => render_control_flow_condition(
-      annotation_topic,
-      "while",
-      audit_data,
-      source_text_cache,
-    ),
-    BlockAnnotationKind::DoWhile => render_control_flow_condition(
-      annotation_topic,
-      "do-while",
-      audit_data,
-      source_text_cache,
-    ),
-    BlockAnnotationKind::For => render_control_flow_condition(
-      annotation_topic,
-      "for",
-      audit_data,
-      source_text_cache,
-    ),
-    BlockAnnotationKind::Unchecked => "unchecked".to_string(),
-    BlockAnnotationKind::InlineAssembly => "assembly".to_string(),
+    BlockAnnotationKind::If(_)
+    | BlockAnnotationKind::While
+    | BlockAnnotationKind::DoWhile
+    | BlockAnnotationKind::For => {}
+    _ => return None,
   }
-}
 
-/// Extract the condition source for a control flow statement.
-fn render_control_flow_condition(
-  statement_topic: &topic::Topic,
-  keyword: &str,
-  audit_data: &AuditData,
-  source_text_cache: &std::collections::HashMap<String, String>,
-) -> String {
-  let condition_topic = match audit_data.nodes.get(statement_topic) {
+  let condition_topic = match audit_data.nodes.get(annotation_topic) {
     Some(Node::Solidity(ast_node)) => get_condition_topic(ast_node),
     _ => None,
-  };
+  }?;
 
-  match condition_topic {
-    Some(cond_topic) => {
-      let cond_source =
-        get_plain_text(&cond_topic, audit_data, source_text_cache);
-      format!("{} ({})", keyword, cond_source)
+  match audit_data.nodes.get(&condition_topic) {
+    Some(Node::Solidity(node)) => {
+      let render_ctx = ASTRenderContext {
+        target_topic: target_topic.clone(),
+        omit_function_and_modifier_bodies: false,
+      };
+      Some(render_ast_snippet(
+        node,
+        &render_ctx,
+        audit_data,
+        source_text_cache,
+      ))
     }
-    None => keyword.to_string(),
+    _ => None,
   }
 }
 
@@ -457,33 +296,663 @@ fn annotation_kind_to_string(kind: &BlockAnnotationKind) -> &'static str {
 }
 
 // ============================================================================
+// AST Snippet Rendering
+// ============================================================================
+
+/// Controls which parts of the AST tree are expanded vs. stubbed.
+struct ASTRenderContext {
+  /// The topic the agent requested context for.
+  /// Used to decide whether to expand function bodies.
+  target_topic: topic::Topic,
+  /// When true, function/modifier bodies are omitted.
+  /// Set to true when converting ContractDefinition members.
+  omit_function_and_modifier_bodies: bool,
+}
+
+/// Render a type AST node to a plain-text string directly from its fields.
+fn render_type_name(node: &ASTNode) -> String {
+  match node {
+    ASTNode::ElementaryTypeName { name, .. } => name.clone(),
+    ASTNode::UserDefinedTypeName { path_node, .. } => {
+      render_type_name(path_node)
+    }
+    ASTNode::IdentifierPath { name, .. } => name.clone(),
+    ASTNode::Identifier { name, .. } => name.clone(),
+    ASTNode::ArrayTypeName { base_type, .. } => {
+      format!("{}[]", render_type_name(base_type))
+    }
+    ASTNode::Mapping {
+      key_type,
+      value_type,
+      ..
+    } => {
+      format!(
+        "mapping({} => {})",
+        render_type_name(key_type),
+        render_type_name(value_type)
+      )
+    }
+    ASTNode::FunctionTypeName { .. } => "function".to_string(),
+    _ => "unknown".to_string(),
+  }
+}
+
+/// Look up comments targeting a node from the CommentIndex.
+fn lookup_node_comments(
+  node_id: i32,
+  audit_data: &AuditData,
+  source_text_cache: &std::collections::HashMap<String, String>,
+) -> Vec<serde_json::Value> {
+  let node_topic = topic::new_node_topic(&node_id);
+  let comment_topics = audit_data.comment_index.get(node_topic.id());
+  comment_topics
+    .iter()
+    .filter_map(|comment_topic| {
+      let content =
+        get_html_content(comment_topic, audit_data, source_text_cache);
+      let content = content.trim().to_string();
+      if content.is_empty() {
+        return None;
+      }
+      let comment_type =
+        match audit_data.topic_metadata.get(comment_topic) {
+          Some(TopicMetadata::CommentTopic { comment_type, .. }) => {
+            comment_type.clone()
+          }
+          _ => "note".to_string(),
+        };
+      Some(json!({
+        "comment_type": comment_type,
+        "content": content,
+      }))
+    })
+    .collect()
+}
+
+/// Build a JSON object for a node, attaching comments if present.
+fn make_node_json(
+  mut obj: serde_json::Value,
+  comments: Vec<serde_json::Value>,
+) -> serde_json::Value {
+  if !comments.is_empty() {
+    obj["comments"] = json!(comments);
+  }
+  obj
+}
+
+/// Render an ASTNode as a structured AST snippet (JSON value).
+fn render_ast_snippet(
+  node: &ASTNode,
+  render_ctx: &ASTRenderContext,
+  audit_data: &AuditData,
+  source_text_cache: &std::collections::HashMap<String, String>,
+) -> serde_json::Value {
+  let resolved = node.resolve(&audit_data.nodes);
+
+  // Unresolved stub → TopicRef
+  if let ASTNode::Stub {
+    node_id, topic, ..
+  } = resolved
+  {
+    let name =
+      resolve_topic_name(topic, audit_data);
+    let comments =
+      lookup_node_comments(*node_id, audit_data, source_text_cache);
+    return make_node_json(
+      json!({
+        "type": "topic_ref",
+        "id": topic.id(),
+        "name": name,
+      }),
+      comments,
+    );
+  }
+
+  let node_id = resolved.node_id();
+  let id = topic::new_node_topic(&node_id).id().to_string();
+  let comments =
+    lookup_node_comments(node_id, audit_data, source_text_cache);
+
+  // Helper closure for recursive conversion
+  let recurse = |child: &ASTNode| -> serde_json::Value {
+    render_ast_snippet(child, render_ctx, audit_data, source_text_cache)
+  };
+
+  let obj = match resolved {
+    // === Leaf nodes ===
+    ASTNode::Identifier {
+      name,
+      referenced_declaration,
+      ..
+    } => json!({
+      "type": "identifier",
+      "id": id,
+      "name": name,
+      "referenced_declaration": topic::new_node_topic(referenced_declaration).id(),
+    }),
+
+    ASTNode::IdentifierPath {
+      name,
+      referenced_declaration,
+      ..
+    } => json!({
+      "type": "identifier",
+      "id": id,
+      "name": name,
+      "referenced_declaration": topic::new_node_topic(referenced_declaration).id(),
+    }),
+
+    ASTNode::Literal { kind, value, .. } => json!({
+      "type": "literal",
+      "id": id,
+      "kind": kind.as_str(),
+      "value": value,
+    }),
+
+    // === Type nodes ===
+    ASTNode::ElementaryTypeName { .. }
+    | ASTNode::UserDefinedTypeName { .. }
+    | ASTNode::ArrayTypeName { .. }
+    | ASTNode::Mapping { .. }
+    | ASTNode::FunctionTypeName { .. } => json!({
+      "type": "type_name",
+      "id": id,
+      "name": render_type_name(resolved),
+    }),
+
+    // === Expression nodes ===
+    ASTNode::Assignment {
+      operator,
+      left_hand_side,
+      right_hand_side,
+      ..
+    } => json!({
+      "type": "assignment",
+      "id": id,
+      "operator": operator.as_str(),
+      "left": recurse(left_hand_side),
+      "right": recurse(right_hand_side),
+    }),
+
+    ASTNode::BinaryOperation {
+      operator,
+      left_expression,
+      right_expression,
+      ..
+    } => json!({
+      "type": "binary_operation",
+      "id": id,
+      "operator": operator.as_str(),
+      "left": recurse(left_expression),
+      "right": recurse(right_expression),
+    }),
+
+    ASTNode::UnaryOperation {
+      operator,
+      prefix,
+      sub_expression,
+      ..
+    } => json!({
+      "type": "unary_operation",
+      "id": id,
+      "operator": operator.as_str(),
+      "prefix": prefix,
+      "operand": recurse(sub_expression),
+    }),
+
+    ASTNode::FunctionCall {
+      expression,
+      arguments,
+      ..
+    } => json!({
+      "type": "function_call",
+      "id": id,
+      "expression": recurse(expression),
+      "arguments": arguments.iter().map(|a| recurse(a)).collect::<Vec<_>>(),
+    }),
+
+    ASTNode::TypeConversion {
+      expression,
+      argument,
+      ..
+    } => json!({
+      "type": "function_call",
+      "id": id,
+      "expression": recurse(expression),
+      "arguments": [recurse(argument)],
+    }),
+
+    ASTNode::StructConstructor {
+      expression,
+      arguments,
+      ..
+    } => json!({
+      "type": "function_call",
+      "id": id,
+      "expression": recurse(expression),
+      "arguments": arguments.iter().map(|a| recurse(a)).collect::<Vec<_>>(),
+    }),
+
+    ASTNode::MemberAccess {
+      expression,
+      member_name,
+      referenced_declaration,
+      ..
+    } => {
+      let mut obj = json!({
+        "type": "member_access",
+        "id": id,
+        "expression": recurse(expression),
+        "member": member_name,
+      });
+      if let Some(ref_decl) = referenced_declaration {
+        obj["referenced_declaration"] =
+          json!(topic::new_node_topic(ref_decl).id());
+      }
+      obj
+    }
+
+    ASTNode::IndexAccess {
+      base_expression,
+      index_expression,
+      ..
+    } => {
+      let mut obj = json!({
+        "type": "index_access",
+        "id": id,
+        "base": recurse(base_expression),
+      });
+      if let Some(index) = index_expression {
+        obj["index"] = recurse(index);
+      }
+      obj
+    }
+
+    ASTNode::Conditional {
+      condition,
+      true_expression,
+      false_expression,
+      ..
+    } => {
+      let mut obj = json!({
+        "type": "conditional",
+        "id": id,
+        "condition": recurse(condition),
+        "true_expression": recurse(true_expression),
+      });
+      if let Some(false_expr) = false_expression {
+        obj["false_expression"] = recurse(false_expr);
+      }
+      obj
+    }
+
+    ASTNode::TupleExpression { components, .. } => json!({
+      "type": "tuple",
+      "id": id,
+      "components": components.iter().map(|c| recurse(c)).collect::<Vec<_>>(),
+    }),
+
+    // === Statement nodes ===
+    ASTNode::ExpressionStatement { expression, .. } => json!({
+      "type": "statement",
+      "id": id,
+      "kind": "expression",
+      "expression": recurse(expression),
+    }),
+
+    ASTNode::Return { expression, .. } => {
+      let mut obj = json!({
+        "type": "statement",
+        "id": id,
+        "kind": "return",
+      });
+      if let Some(expr) = expression {
+        obj["expression"] = recurse(expr);
+      }
+      obj
+    }
+
+    ASTNode::EmitStatement { event_call, .. } => json!({
+      "type": "statement",
+      "id": id,
+      "kind": "emit",
+      "expression": recurse(event_call),
+    }),
+
+    ASTNode::RevertStatement { error_call, .. } => json!({
+      "type": "statement",
+      "id": id,
+      "kind": "revert",
+      "expression": recurse(error_call),
+    }),
+
+    ASTNode::Break { .. } => json!({
+      "type": "statement",
+      "id": id,
+      "kind": "break",
+    }),
+
+    ASTNode::Continue { .. } => json!({
+      "type": "statement",
+      "id": id,
+      "kind": "continue",
+    }),
+
+    ASTNode::PlaceholderStatement { .. } => json!({
+      "type": "statement",
+      "id": id,
+      "kind": "placeholder",
+    }),
+
+    // === Variable declarations ===
+    ASTNode::VariableDeclarationStatement {
+      declarations,
+      initial_value,
+      ..
+    } => {
+      let mut obj = json!({
+        "type": "variable_declaration",
+        "id": id,
+        "declarations": declarations.iter().map(|d| recurse(d)).collect::<Vec<_>>(),
+      });
+      if let Some(val) = initial_value {
+        obj["initial_value"] = recurse(val);
+      }
+      obj
+    }
+
+    ASTNode::VariableDeclaration {
+      name, type_name, value, ..
+    } => {
+      let mut obj = json!({
+        "type": "variable_declaration",
+        "id": id,
+        "name": name,
+        "type_name": render_type_name(type_name),
+      });
+      if let Some(val) = value {
+        obj["initial_value"] = recurse(val);
+      }
+      obj
+    }
+
+    // === Block nodes ===
+    ASTNode::Block { statements, .. } => json!({
+      "type": "block",
+      "id": id,
+      "statements": statements.iter().map(|s| recurse(s)).collect::<Vec<_>>(),
+    }),
+
+    ASTNode::SemanticBlock { statements, .. } => json!({
+      "type": "block",
+      "id": id,
+      "kind": "semantic",
+      "statements": statements.iter().map(|s| recurse(s)).collect::<Vec<_>>(),
+    }),
+
+    ASTNode::UncheckedBlock { statements, .. } => json!({
+      "type": "block",
+      "id": id,
+      "kind": "unchecked",
+      "statements": statements.iter().map(|s| recurse(s)).collect::<Vec<_>>(),
+    }),
+
+    // === Control flow ===
+    ASTNode::IfStatement {
+      condition,
+      true_body,
+      false_body,
+      ..
+    } => {
+      let mut obj = json!({
+        "type": "control_flow",
+        "id": id,
+        "kind": "if",
+        "condition": recurse(condition),
+        "body": recurse(true_body),
+      });
+      if let Some(fb) = false_body {
+        obj["else_body"] = recurse(fb);
+      }
+      obj
+    }
+
+    ASTNode::ForStatement {
+      condition, body, ..
+    } => json!({
+      "type": "control_flow",
+      "id": id,
+      "kind": "for",
+      "condition": recurse(condition),
+      "body": recurse(body),
+    }),
+
+    ASTNode::WhileStatement {
+      condition, body, ..
+    } => {
+      let mut obj = json!({
+        "type": "control_flow",
+        "id": id,
+        "kind": "while",
+        "condition": recurse(condition),
+      });
+      if let Some(b) = body {
+        obj["body"] = recurse(b);
+      }
+      obj
+    }
+
+    ASTNode::DoWhileStatement {
+      condition, body, ..
+    } => {
+      let mut obj = json!({
+        "type": "control_flow",
+        "id": id,
+        "kind": "do_while",
+        "condition": recurse(condition),
+      });
+      if let Some(b) = body {
+        obj["body"] = recurse(b);
+      }
+      obj
+    }
+
+    // === Definitions ===
+    ASTNode::ContractDefinition {
+      signature,
+      nodes,
+      ..
+    } => {
+      let (name, kind) = match signature.as_ref() {
+        ASTNode::ContractSignature {
+          name,
+          contract_kind,
+          ..
+        } => (name.clone(), format!("{:?}", contract_kind).to_lowercase()),
+        _ => ("unknown".to_string(), "contract".to_string()),
+      };
+
+      let member_ctx = ASTRenderContext {
+        target_topic: render_ctx.target_topic.clone(),
+        omit_function_and_modifier_bodies: true,
+      };
+      let members: Vec<serde_json::Value> = nodes
+        .iter()
+        .map(|n| {
+          render_ast_snippet(
+            n,
+            &member_ctx,
+            audit_data,
+            source_text_cache,
+          )
+        })
+        .collect();
+
+      json!({
+        "type": "contract_definition",
+        "id": id,
+        "name": name,
+        "kind": kind,
+        "signature": render_ast_snippet(signature, render_ctx, audit_data, source_text_cache),
+        "members": members,
+      })
+    }
+
+    ASTNode::FunctionDefinition {
+      node_id,
+      signature,
+      body,
+      ..
+    } => {
+      let (name, kind) = match signature.as_ref() {
+        ASTNode::FunctionSignature { name, kind, .. } => {
+          (name.clone(), format!("{:?}", kind).to_lowercase())
+        }
+        ASTNode::ModifierSignature { name, .. } => {
+          (name.clone(), "modifier".to_string())
+        }
+        _ => ("unknown".to_string(), "function".to_string()),
+      };
+
+      let sig_json = render_ast_snippet(
+        signature,
+        render_ctx,
+        audit_data,
+        source_text_cache,
+      );
+
+      let is_target =
+        render_ctx.target_topic == topic::new_node_topic(node_id);
+      let body_json =
+        if !render_ctx.omit_function_and_modifier_bodies || is_target {
+          body.as_ref().map(|b| {
+            render_ast_snippet(
+              b,
+              render_ctx,
+              audit_data,
+              source_text_cache,
+            )
+          })
+        } else {
+          None
+        };
+
+      let mut obj = json!({
+        "type": "function_definition",
+        "id": id,
+        "name": name,
+        "kind": kind,
+        "signature": sig_json,
+      });
+      if let Some(body_val) = body_json {
+        obj["body"] = body_val;
+      }
+      obj
+    }
+
+    ASTNode::ModifierDefinition {
+      node_id,
+      signature,
+      body,
+      ..
+    } => {
+      let name = match signature.as_ref() {
+        ASTNode::ModifierSignature { name, .. } => name.clone(),
+        _ => "unknown".to_string(),
+      };
+
+      let sig_json = render_ast_snippet(
+        signature,
+        render_ctx,
+        audit_data,
+        source_text_cache,
+      );
+
+      let is_target =
+        render_ctx.target_topic == topic::new_node_topic(node_id);
+      let body_json =
+        if !render_ctx.omit_function_and_modifier_bodies || is_target {
+          Some(render_ast_snippet(
+            body,
+            render_ctx,
+            audit_data,
+            source_text_cache,
+          ))
+        } else {
+          None
+        };
+
+      let mut obj = json!({
+        "type": "function_definition",
+        "id": id,
+        "name": name,
+        "kind": "modifier",
+        "signature": sig_json,
+      });
+      if let Some(body_val) = body_json {
+        obj["body"] = body_val;
+      }
+      obj
+    }
+
+    // === Fallback: all other node types ===
+    _ => {
+      let children: Vec<serde_json::Value> =
+        resolved.nodes().iter().map(|n| recurse(n)).collect();
+      let mut obj = json!({
+        "type": "other",
+        "id": id,
+        "node_type": resolved.type_name(),
+      });
+      if !children.is_empty() {
+        obj["children"] = json!(children);
+      }
+      obj
+    }
+  };
+
+  make_node_json(obj, comments)
+}
+
+// ============================================================================
 // Source Context Conversion
 // ============================================================================
 
 /// Convert a list of SourceContext groups to AgentSourceGroup entries.
 fn convert_source_groups(
   groups: &[SourceContext],
+  target_topic: &topic::Topic,
   audit_data: &AuditData,
   source_text_cache: &std::collections::HashMap<String, String>,
 ) -> Vec<AgentSourceGroup> {
   groups
     .iter()
-    .map(|group| convert_source_group(group, audit_data, source_text_cache))
+    .map(|group| {
+      convert_source_group(
+        group,
+        target_topic,
+        audit_data,
+        source_text_cache,
+      )
+    })
     .collect()
 }
 
 fn convert_source_group(
   group: &SourceContext,
+  target_topic: &topic::Topic,
   audit_data: &AuditData,
   source_text_cache: &std::collections::HashMap<String, String>,
 ) -> AgentSourceGroup {
   let scope_name =
-    resolve_topic_name(group.scope(), audit_data, source_text_cache);
+    resolve_topic_name(group.scope(), audit_data);
 
   let scope_references = group
     .scope_references()
     .iter()
-    .map(|r| convert_reference(r, audit_data, source_text_cache))
+    .map(|r| {
+      convert_reference(r, target_topic, audit_data, source_text_cache)
+    })
     .collect();
 
   let nested_references = group
@@ -491,9 +960,10 @@ fn convert_source_group(
     .iter()
     .map(|nested| {
       let subscope_name =
-        resolve_topic_name(nested.subscope(), audit_data, source_text_cache);
+        resolve_topic_name(nested.subscope(), audit_data);
       let children = convert_source_children(
         nested.children(),
+        target_topic,
         audit_data,
         source_text_cache,
       );
@@ -515,6 +985,7 @@ fn convert_source_group(
 /// Recursively convert SourceChild entries to AgentSourceChild entries.
 fn convert_source_children(
   children: &[SourceChild],
+  target_topic: &topic::Topic,
   audit_data: &AuditData,
   source_text_cache: &std::collections::HashMap<String, String>,
 ) -> Vec<AgentSourceChild> {
@@ -522,25 +993,32 @@ fn convert_source_children(
     .iter()
     .map(|child| match child {
       SourceChild::Reference(reference) => {
-        convert_reference(reference, audit_data, source_text_cache)
+        convert_reference(
+          reference,
+          target_topic,
+          audit_data,
+          source_text_cache,
+        )
       }
       SourceChild::AnnotatedBlock(block) => {
         let annotation = block.annotation();
-        let annotation_str = render_annotation(
+        let kind = annotation_kind_to_string(&annotation.kind).to_string();
+        let condition = render_condition_ast_snippet(
           &annotation.topic,
           &annotation.kind,
+          target_topic,
           audit_data,
           source_text_cache,
         );
-        let kind = annotation_kind_to_string(&annotation.kind).to_string();
         let children = convert_source_children(
           block.children(),
+          target_topic,
           audit_data,
           source_text_cache,
         );
         AgentSourceChild::AnnotatedBlock {
-          annotation: annotation_str,
           kind,
+          condition,
           children,
         }
       }
@@ -549,27 +1027,48 @@ fn convert_source_children(
 }
 
 /// Convert a single Reference to an AgentSourceChild.
-/// Mention comments are injected inline as `// [type] comment` lines
-/// prepended before the code, mirroring how the topic view renders
-/// comments above their associated references.
+///
+/// For Solidity nodes, produces an `ast_snippet` field with structured AST JSON.
+/// For documentation nodes (and fallbacks), produces a `code` field with HTML.
+///
+/// Mention comments are attached as structured `AgentComment` entries.
 fn convert_reference(
   reference: &Reference,
+  target_topic: &topic::Topic,
   audit_data: &AuditData,
   source_text_cache: &std::collections::HashMap<String, String>,
 ) -> AgentSourceChild {
   let ref_topic = reference.reference_topic();
 
-  // Get source text by rendering via formatter and converting to plain text
-  let code = get_plain_text(ref_topic, audit_data, source_text_cache);
+  // Determine ast_snippet vs code based on node type
+  let (code, ast_snippet) = match audit_data.nodes.get(ref_topic) {
+    Some(Node::Solidity(solidity_node)) => {
+      let render_ctx = ASTRenderContext {
+        target_topic: target_topic.clone(),
+        omit_function_and_modifier_bodies: false,
+      };
+      let ast_json = render_ast_snippet(
+        solidity_node,
+        &render_ctx,
+        audit_data,
+        source_text_cache,
+      );
+      (None, Some(ast_json))
+    }
+    _ => {
+      let code =
+        get_html_content(ref_topic, audit_data, source_text_cache);
+      (Some(code), None)
+    }
+  };
 
-  // Resolve mention comments and inject inline before the code
-  let mut comment_lines = Vec::new();
+  // Resolve mention comments
   let mut comments = Vec::new();
 
   if let Some(mention_topics) = reference.mention_topics() {
     for mention_topic in mention_topics {
       let content =
-        get_plain_text(mention_topic, audit_data, source_text_cache);
+        get_html_content(mention_topic, audit_data, source_text_cache);
       let content = content.trim().to_string();
       if content.is_empty() {
         continue;
@@ -582,9 +1081,6 @@ fn convert_reference(
         _ => "note".to_string(),
       };
 
-      // Build inline comment line: // [issue] comment text
-      comment_lines.push(format!("// [{}] {}", comment_type, content));
-
       comments.push(AgentComment {
         comment_type,
         content,
@@ -592,21 +1088,17 @@ fn convert_reference(
     }
   }
 
-  // Prepend inline comment lines to the code
-  let code = if comment_lines.is_empty() {
-    code
-  } else {
-    comment_lines.push(code);
-    comment_lines.join("\n")
-  };
-
   let comments = if comments.is_empty() {
     None
   } else {
     Some(comments)
   };
 
-  AgentSourceChild::Reference { code, comments }
+  AgentSourceChild::Reference {
+    code,
+    ast_snippet,
+    comments,
+  }
 }
 
 // ============================================================================
@@ -616,10 +1108,9 @@ fn convert_reference(
 /// Build the agent context for a given topic.
 ///
 /// Returns a resolved JSON-serializable structure where all topic IDs
-/// are replaced with human-readable values (source code, names, etc.).
-///
-/// `source_text_cache` should be the audit's cached rendered HTML, used
-/// to extract source text and comment content (HTML-stripped to plain text).
+/// are replaced with human-readable values. Solidity topics are rendered
+/// as structured AST snippets; documentation and comments preserve their
+/// HTML representation.
 pub fn build_agent_context(
   topic_id: &str,
   audit_data: &AuditData,
@@ -629,14 +1120,21 @@ pub fn build_agent_context(
   let topic = topic::new_topic(topic_id);
   let metadata = audit_data.topic_metadata.get(&topic)?;
 
-  let name = resolve_topic_name(&topic, audit_data, source_text_cache);
-  let scope =
-    scope_to_breadcrumb(metadata.scope(), audit_data, source_text_cache);
+  let name = resolve_topic_name(&topic, audit_data);
+  let scope = scope_to_breadcrumb(metadata.scope(), audit_data);
 
-  let context =
-    convert_source_groups(metadata.context(), audit_data, source_text_cache);
-  let mentions =
-    convert_source_groups(metadata.mentions(), audit_data, source_text_cache);
+  let context = convert_source_groups(
+    metadata.context(),
+    &topic,
+    audit_data,
+    source_text_cache,
+  );
+  let mentions = convert_source_groups(
+    metadata.mentions(),
+    &topic,
+    audit_data,
+    source_text_cache,
+  );
 
   match metadata {
     TopicMetadata::NamedTopic {
@@ -658,7 +1156,7 @@ pub fn build_agent_context(
         Some(
           ancestors
             .iter()
-            .map(|t| resolve_topic_name(t, audit_data, source_text_cache))
+            .map(|t| resolve_topic_name(t, audit_data))
             .collect(),
         )
       };
@@ -669,7 +1167,7 @@ pub fn build_agent_context(
         Some(
           descendants
             .iter()
-            .map(|t| resolve_topic_name(t, audit_data, source_text_cache))
+            .map(|t| resolve_topic_name(t, audit_data))
             .collect(),
         )
       };
@@ -680,7 +1178,7 @@ pub fn build_agent_context(
         Some(
           relatives
             .iter()
-            .map(|t| resolve_topic_name(t, audit_data, source_text_cache))
+            .map(|t| resolve_topic_name(t, audit_data))
             .collect(),
         )
       };
@@ -688,6 +1186,7 @@ pub fn build_agent_context(
       let expanded = if include_expanded_context {
         Some(convert_source_groups(
           expanded_context,
+          &topic,
           audit_data,
           source_text_cache,
         ))
@@ -702,6 +1201,7 @@ pub fn build_agent_context(
         visibility: Some(visibility_str),
         scope,
         is_mutable: Some(*is_mutable),
+        condition: None,
         ancestors: resolved_ancestors,
         descendants: resolved_descendants,
         relatives: resolved_relatives,
@@ -718,6 +1218,7 @@ pub fn build_agent_context(
       visibility: None,
       scope,
       is_mutable: None,
+      condition: None,
       ancestors: None,
       descendants: None,
       relatives: None,
@@ -726,20 +1227,41 @@ pub fn build_agent_context(
       mentions,
     }),
 
-    TopicMetadata::ControlFlow { kind, .. } => Some(AgentTopicContext {
-      name,
-      kind: control_flow_kind_to_string(kind).to_string(),
-      sub_kind: None,
-      visibility: None,
-      scope,
-      is_mutable: None,
-      ancestors: None,
-      descendants: None,
-      relatives: None,
-      context,
-      expanded_context: None,
-      mentions,
-    }),
+    TopicMetadata::ControlFlow {
+      kind, condition, ..
+    } => {
+      let condition_snippet = match audit_data.nodes.get(condition) {
+        Some(Node::Solidity(node)) => {
+          let render_ctx = ASTRenderContext {
+            target_topic: topic.clone(),
+            omit_function_and_modifier_bodies: false,
+          };
+          Some(render_ast_snippet(
+            node,
+            &render_ctx,
+            audit_data,
+            source_text_cache,
+          ))
+        }
+        _ => None,
+      };
+
+      Some(AgentTopicContext {
+        name,
+        kind: control_flow_kind_to_string(kind).to_string(),
+        sub_kind: None,
+        visibility: None,
+        scope,
+        is_mutable: None,
+        condition: condition_snippet,
+        ancestors: None,
+        descendants: None,
+        relatives: None,
+        context,
+        expanded_context: None,
+        mentions,
+      })
+    }
 
     TopicMetadata::TitledTopic { kind, .. } => {
       let kind_str = match kind {
@@ -753,6 +1275,7 @@ pub fn build_agent_context(
         visibility: None,
         scope,
         is_mutable: None,
+        condition: None,
         ancestors: None,
         descendants: None,
         relatives: None,
@@ -768,7 +1291,7 @@ pub fn build_agent_context(
       ..
     } => {
       let target_name =
-        resolve_topic_name(target_topic, audit_data, source_text_cache);
+        resolve_topic_name(target_topic, audit_data);
 
       Some(AgentTopicContext {
         name,
@@ -777,6 +1300,7 @@ pub fn build_agent_context(
         visibility: None,
         scope: format!("{} (on: {})", scope, target_name),
         is_mutable: None,
+        condition: None,
         ancestors: None,
         descendants: None,
         relatives: None,
@@ -785,435 +1309,5 @@ pub fn build_agent_context(
         mentions,
       })
     }
-  }
-}
-
-#[cfg(test)]
-mod tests {
-  use super::*;
-  use crate::core::{
-    self, NamedTopicKind, NamedTopicVisibility, Reference,
-    insert_into_context, topic,
-  };
-  use crate::solidity::parser::{ASTNode, SourceLocation};
-  use std::collections::{HashMap, HashSet};
-  use std::path::PathBuf;
-
-  fn dummy_src_location() -> SourceLocation {
-    SourceLocation {
-      start: None,
-      length: None,
-      index: None,
-    }
-  }
-
-  fn test_project_path() -> core::ProjectPath {
-    core::new_project_path(
-      &"src/Test.sol".to_string(),
-      &PathBuf::from("/project"),
-    )
-  }
-
-  /// Build a minimal AuditData with:
-  /// - A contract topic (scope)
-  /// - A function topic (subscope)
-  /// - A variable topic (the target of build_agent_context)
-  /// - A reference to the variable inside the function, with a mention comment
-  /// - A comment topic for the mention
-  fn build_test_data() -> (AuditData, HashMap<String, String>) {
-    let mut audit_data =
-      core::new_audit_data("test".to_string(), HashSet::new());
-    let mut source_text_cache = HashMap::new();
-
-    let project_path = test_project_path();
-
-    // Topics
-    let contract_topic = topic::new_node_topic(&100); // contract MyContract
-    let function_topic = topic::new_node_topic(&200); // function transfer
-    let variable_topic = topic::new_node_topic(&300); // balanceOf
-    let ref_node_topic = topic::new_node_topic(&301); // reference to balanceOf in transfer
-    let comment_topic = topic::new_comment_topic(1); // an issue comment
-
-    // AST nodes — minimal nodes so the formatter can render them
-    // The variable declaration renders as "uint256"
-    audit_data.nodes.insert(
-      ref_node_topic.clone(),
-      Node::Solidity(ASTNode::ElementaryTypeName {
-        node_id: 301,
-        src_location: dummy_src_location(),
-        name: "uint256".to_string(),
-      }),
-    );
-
-    // Put rendered HTML for the reference in the cache
-    // (simulating what node_to_source_text would produce for a variable reference)
-    source_text_cache.insert(
-      ref_node_topic.id().to_string(),
-      "<pre><code><span class=\"keyword\">pub</span> <span class=\"topic-token mutable-state-variable\">balanceOf</span>: <span class=\"type\">uint256</span></code></pre>".to_string(),
-    );
-
-    // Put rendered HTML for the comment in the cache
-    source_text_cache.insert(
-      comment_topic.id().to_string(),
-      "<div class=\"comment-root\"><div class=\"paragraph\">This variable is vulnerable to overflow</div></div>".to_string(),
-    );
-
-    // Contract metadata (scope for the variable)
-    audit_data.topic_metadata.insert(
-      contract_topic.clone(),
-      TopicMetadata::NamedTopic {
-        topic: contract_topic.clone(),
-        scope: Scope::Container {
-          container: project_path.clone(),
-        },
-        kind: NamedTopicKind::Contract(core::ContractKind::Contract),
-        name: "MyContract".to_string(),
-        visibility: NamedTopicVisibility::Public,
-        context: vec![],
-        expanded_context: vec![],
-        ancestry: vec![],
-        is_mutable: false,
-        mutations: vec![],
-        ancestors: vec![],
-        descendants: vec![],
-        relatives: vec![],
-        mentions: vec![],
-      },
-    );
-
-    // Function metadata (subscope)
-    audit_data.topic_metadata.insert(
-      function_topic.clone(),
-      TopicMetadata::NamedTopic {
-        topic: function_topic.clone(),
-        scope: Scope::Component {
-          container: project_path.clone(),
-          component: contract_topic.clone(),
-        },
-        kind: NamedTopicKind::Function(core::FunctionKind::Function),
-        name: "transfer".to_string(),
-        visibility: NamedTopicVisibility::Public,
-        context: vec![],
-        expanded_context: vec![],
-        ancestry: vec![],
-        is_mutable: false,
-        mutations: vec![],
-        ancestors: vec![],
-        descendants: vec![],
-        relatives: vec![],
-        mentions: vec![],
-      },
-    );
-
-    // Comment metadata
-    audit_data.topic_metadata.insert(
-      comment_topic.clone(),
-      TopicMetadata::CommentTopic {
-        topic: comment_topic.clone(),
-        author_id: 1,
-        comment_type: "issue".to_string(),
-        target_topic: variable_topic.clone(),
-        created_at: "2025-01-01".to_string(),
-        scope: Scope::Global,
-        mentioned_topics: vec![variable_topic.clone()],
-        context: vec![],
-        mentions: vec![],
-      },
-    );
-
-    // Build context for the variable: a reference with mention in a function
-    let reference = Reference::ProjectReferenceWithMentions {
-      reference_topic: ref_node_topic.clone(),
-      mention_topics: vec![comment_topic.clone()],
-      sort_key: Some(0),
-    };
-
-    let mut context_groups: Vec<SourceContext> = vec![];
-    insert_into_context(
-      &mut context_groups,
-      contract_topic.clone(),
-      Some(0),
-      true,
-      Some((function_topic.clone(), Some(10))),
-      &[],
-      reference,
-    );
-
-    // Variable metadata (the target topic)
-    audit_data.topic_metadata.insert(
-      variable_topic.clone(),
-      TopicMetadata::NamedTopic {
-        topic: variable_topic.clone(),
-        scope: Scope::Component {
-          container: project_path.clone(),
-          component: contract_topic.clone(),
-        },
-        kind: NamedTopicKind::StateVariable(core::VariableMutability::Mutable),
-        name: "balanceOf".to_string(),
-        visibility: NamedTopicVisibility::Public,
-        context: context_groups,
-        expanded_context: vec![],
-        ancestry: vec![],
-        is_mutable: true,
-        mutations: vec![],
-        ancestors: vec![],
-        descendants: vec![],
-        relatives: vec![],
-        mentions: vec![],
-      },
-    );
-
-    (audit_data, source_text_cache)
-  }
-
-  #[test]
-  fn test_comments_injected_inline_in_code() {
-    let (audit_data, source_text_cache) = build_test_data();
-
-    let result = build_agent_context(
-      "N300",
-      &audit_data,
-      &source_text_cache,
-      false,
-    );
-
-    let context = result.expect("should return agent context");
-
-    // Find the reference in the context groups
-    assert!(!context.context.is_empty(), "context should have groups");
-    let group = &context.context[0];
-    assert!(
-      !group.nested_references.is_empty(),
-      "group should have nested references"
-    );
-    let nested = &group.nested_references[0];
-    assert!(!nested.children.is_empty(), "nested should have children");
-
-    match &nested.children[0] {
-      AgentSourceChild::Reference { code, comments } => {
-        // The code should contain the inline comment
-        assert!(
-          code.contains("// [issue]"),
-          "code should contain inline comment marker, got: {}",
-          code
-        );
-        assert!(
-          code.contains("vulnerable to overflow"),
-          "code should contain comment text, got: {}",
-          code
-        );
-        // The code should also contain the source text
-        assert!(
-          code.contains("balanceOf"),
-          "code should contain source text, got: {}",
-          code
-        );
-
-        // Structured comments should also be present
-        let comments = comments.as_ref().expect("should have comments");
-        assert_eq!(comments.len(), 1);
-        assert_eq!(comments[0].comment_type, "issue");
-        assert!(comments[0].content.contains("vulnerable to overflow"));
-      }
-      other => panic!(
-        "expected Reference variant, got: {:?}",
-        std::mem::discriminant(other)
-      ),
-    }
-  }
-
-  #[test]
-  fn test_no_comments_when_no_mentions() {
-    let mut audit_data =
-      core::new_audit_data("test".to_string(), HashSet::new());
-    let source_text_cache = HashMap::new();
-
-    let project_path = test_project_path();
-    let contract_topic = topic::new_node_topic(&100);
-    let function_topic = topic::new_node_topic(&200);
-    let variable_topic = topic::new_node_topic(&300);
-    let ref_node_topic = topic::new_node_topic(&301);
-
-    // Minimal AST node for the reference
-    audit_data.nodes.insert(
-      ref_node_topic.clone(),
-      Node::Solidity(ASTNode::ElementaryTypeName {
-        node_id: 301,
-        src_location: dummy_src_location(),
-        name: "uint256".to_string(),
-      }),
-    );
-
-    // Contract + function metadata (for name resolution)
-    audit_data.topic_metadata.insert(
-      contract_topic.clone(),
-      TopicMetadata::NamedTopic {
-        topic: contract_topic.clone(),
-        scope: Scope::Container {
-          container: project_path.clone(),
-        },
-        kind: NamedTopicKind::Contract(core::ContractKind::Contract),
-        name: "MyContract".to_string(),
-        visibility: NamedTopicVisibility::Public,
-        context: vec![],
-        expanded_context: vec![],
-        ancestry: vec![],
-        is_mutable: false,
-        mutations: vec![],
-        ancestors: vec![],
-        descendants: vec![],
-        relatives: vec![],
-        mentions: vec![],
-      },
-    );
-
-    audit_data.topic_metadata.insert(
-      function_topic.clone(),
-      TopicMetadata::NamedTopic {
-        topic: function_topic.clone(),
-        scope: Scope::Component {
-          container: project_path.clone(),
-          component: contract_topic.clone(),
-        },
-        kind: NamedTopicKind::Function(core::FunctionKind::Function),
-        name: "transfer".to_string(),
-        visibility: NamedTopicVisibility::Public,
-        context: vec![],
-        expanded_context: vec![],
-        ancestry: vec![],
-        is_mutable: false,
-        mutations: vec![],
-        ancestors: vec![],
-        descendants: vec![],
-        relatives: vec![],
-        mentions: vec![],
-      },
-    );
-
-    // A plain reference with NO mentions
-    let reference = Reference::ProjectReference {
-      reference_topic: ref_node_topic.clone(),
-      sort_key: Some(0),
-    };
-
-    let mut context_groups: Vec<SourceContext> = vec![];
-    insert_into_context(
-      &mut context_groups,
-      contract_topic.clone(),
-      Some(0),
-      true,
-      Some((function_topic.clone(), Some(10))),
-      &[],
-      reference,
-    );
-
-    audit_data.topic_metadata.insert(
-      variable_topic.clone(),
-      TopicMetadata::NamedTopic {
-        topic: variable_topic.clone(),
-        scope: Scope::Component {
-          container: project_path.clone(),
-          component: contract_topic.clone(),
-        },
-        kind: NamedTopicKind::StateVariable(core::VariableMutability::Mutable),
-        name: "balanceOf".to_string(),
-        visibility: NamedTopicVisibility::Public,
-        context: context_groups,
-        expanded_context: vec![],
-        ancestry: vec![],
-        is_mutable: true,
-        mutations: vec![],
-        ancestors: vec![],
-        descendants: vec![],
-        relatives: vec![],
-        mentions: vec![],
-      },
-    );
-
-    let result = build_agent_context(
-      "N300",
-      &audit_data,
-      &source_text_cache,
-      false,
-    );
-
-    let context = result.expect("should return agent context");
-    let group = &context.context[0];
-    let nested = &group.nested_references[0];
-
-    match &nested.children[0] {
-      AgentSourceChild::Reference { code, comments } => {
-        // No comment markers should appear in the code
-        assert!(
-          !code.contains("//"),
-          "code should not contain comment markers, got: {}",
-          code
-        );
-        // No structured comments
-        assert!(
-          comments.is_none(),
-          "should have no comments"
-        );
-      }
-      other => panic!(
-        "expected Reference variant, got: {:?}",
-        std::mem::discriminant(other)
-      ),
-    }
-  }
-
-  #[test]
-  fn test_html_to_plain_text_preserves_indentation() {
-    use crate::formatting;
-
-    // Build HTML using actual formatting functions so literal spaces match
-    let inner = formatting::inline_indent("== 0", 1);
-    let body = format!("x\n{}", inner);
-    let indented = formatting::indent(&body, 1);
-    let html = format!("<pre><code>if ({}\n)</code></pre>", indented);
-
-    let result = html_to_plain_text(&html);
-    // inner inline_indent adds 2 spaces to "== 0", outer indent adds 2 more
-    assert_eq!(result, "if (\n  x\n    == 0\n)");
-  }
-
-  #[test]
-  fn test_html_to_plain_text_nested_indentation() {
-    use crate::formatting;
-
-    // Simulates nested indent spans (contract body > block body)
-    // Each indent() call adds 2 literal spaces per line
-    let inner_body = "stmt1\n\nstmt2";
-    let inner = formatting::indent(inner_body, 1);
-    let outer_body = format!("function foo() {{{}\n}}", inner);
-    let html = formatting::inline_indent(&outer_body, 0);
-
-    let result = html_to_plain_text(&html);
-    assert_eq!(
-      result,
-      "  function foo() {\n    stmt1\n\n    stmt2\n  }"
-    );
-  }
-
-  #[test]
-  fn test_html_to_plain_text_unescapes_entities() {
-    let html = "<span>x &gt; 0 &amp;&amp; y &lt; 10</span>";
-    let result = html_to_plain_text(html);
-    assert_eq!(result, "x > 0 && y < 10");
-  }
-
-  #[test]
-  fn test_html_to_plain_text_skips_placeholder_divs() {
-    let html = "<div class=\"identifier-inline-comment\" data-placeholder-topic=\"N123\"></div><span>balanceOf</span>";
-    let result = html_to_plain_text(html);
-    assert_eq!(result, "balanceOf");
-  }
-
-  #[test]
-  fn test_strip_html_tags_collapses_whitespace() {
-    let html =
-      "<div>  some  <span>  text  </span>  here  </div>";
-    let result = strip_html_tags(html);
-    assert_eq!(result, "some text here");
   }
 }

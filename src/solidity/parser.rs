@@ -324,6 +324,20 @@ impl FromStr for UnaryOperator {
   }
 }
 
+impl UnaryOperator {
+  pub fn as_str(&self) -> &'static str {
+    match self {
+      UnaryOperator::Increment => "++",
+      UnaryOperator::Decrement => "--",
+      UnaryOperator::Plus => "+",
+      UnaryOperator::Minus => "-",
+      UnaryOperator::BitwiseNot => "~",
+      UnaryOperator::Not => "!",
+      UnaryOperator::Delete => "delete",
+    }
+  }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum BinaryOperator {
   // Arithmetic
@@ -439,6 +453,17 @@ impl FromStr for LiteralKind {
   }
 }
 
+impl LiteralKind {
+  pub fn as_str(&self) -> &'static str {
+    match self {
+      LiteralKind::Number => "number",
+      LiteralKind::Bool => "bool",
+      LiteralKind::String => "string",
+      LiteralKind::HexString => "hexString",
+    }
+  }
+}
+
 impl FromStr for BinaryOperator {
   type Err = String;
 
@@ -474,6 +499,30 @@ impl BinaryOperator {
   pub fn is_relative_operator(&self) -> bool {
     !matches!(self, BinaryOperator::And | BinaryOperator::Or)
   }
+
+  pub fn as_str(&self) -> &'static str {
+    match self {
+      BinaryOperator::Add => "+",
+      BinaryOperator::Subtract => "-",
+      BinaryOperator::Multiply => "*",
+      BinaryOperator::Divide => "/",
+      BinaryOperator::Modulo => "%",
+      BinaryOperator::Power => "**",
+      BinaryOperator::Equal => "==",
+      BinaryOperator::NotEqual => "!=",
+      BinaryOperator::LessThan => "<",
+      BinaryOperator::LessThanOrEqual => "<=",
+      BinaryOperator::GreaterThan => ">",
+      BinaryOperator::GreaterThanOrEqual => ">=",
+      BinaryOperator::And => "&&",
+      BinaryOperator::Or => "||",
+      BinaryOperator::BitwiseAnd => "&",
+      BinaryOperator::BitwiseOr => "|",
+      BinaryOperator::BitwiseXor => "^",
+      BinaryOperator::LeftShift => "<<",
+      BinaryOperator::RightShift => ">>",
+    }
+  }
 }
 
 impl FromStr for AssignmentOperator {
@@ -493,6 +542,24 @@ impl FromStr for AssignmentOperator {
       "<<=" => Ok(AssignmentOperator::LeftShiftAssign),
       ">>=" => Ok(AssignmentOperator::RightShiftAssign),
       _ => Err(format!("Unknown assignment operator: {}", s)),
+    }
+  }
+}
+
+impl AssignmentOperator {
+  pub fn as_str(&self) -> &'static str {
+    match self {
+      AssignmentOperator::Assign => "=",
+      AssignmentOperator::AddAssign => "+=",
+      AssignmentOperator::SubtractAssign => "-=",
+      AssignmentOperator::MultiplyAssign => "*=",
+      AssignmentOperator::DivideAssign => "/=",
+      AssignmentOperator::ModuloAssign => "%=",
+      AssignmentOperator::BitwiseAndAssign => "&=",
+      AssignmentOperator::BitwiseOrAssign => "|=",
+      AssignmentOperator::BitwiseXorAssign => "^=",
+      AssignmentOperator::LeftShiftAssign => "<<=",
+      AssignmentOperator::RightShiftAssign => ">>=",
     }
   }
 }
@@ -2113,6 +2180,84 @@ impl ASTNode {
       self,
       ASTNode::SemanticBlock { .. } | ASTNode::FunctionSignature { .. }
     )
+  }
+
+  /// Return the variant name as a static string.
+  pub fn type_name(&self) -> &'static str {
+    match self {
+      ASTNode::Assignment { .. } => "Assignment",
+      ASTNode::BinaryOperation { .. } => "BinaryOperation",
+      ASTNode::Conditional { .. } => "Conditional",
+      ASTNode::ElementaryTypeNameExpression { .. } => {
+        "ElementaryTypeNameExpression"
+      }
+      ASTNode::FunctionCall { .. } => "FunctionCall",
+      ASTNode::Argument { .. } => "Argument",
+      ASTNode::TypeConversion { .. } => "TypeConversion",
+      ASTNode::StructConstructor { .. } => "StructConstructor",
+      ASTNode::FunctionCallOptions { .. } => "FunctionCallOptions",
+      ASTNode::Identifier { .. } => "Identifier",
+      ASTNode::IdentifierPath { .. } => "IdentifierPath",
+      ASTNode::IndexAccess { .. } => "IndexAccess",
+      ASTNode::IndexRangeAccess { .. } => "IndexRangeAccess",
+      ASTNode::Literal { .. } => "Literal",
+      ASTNode::MemberAccess { .. } => "MemberAccess",
+      ASTNode::NewExpression { .. } => "NewExpression",
+      ASTNode::TupleExpression { .. } => "TupleExpression",
+      ASTNode::UnaryOperation { .. } => "UnaryOperation",
+      ASTNode::EnumValue { .. } => "EnumValue",
+      ASTNode::Block { .. } => "Block",
+      ASTNode::SemanticBlock { .. } => "SemanticBlock",
+      ASTNode::Break { .. } => "Break",
+      ASTNode::Continue { .. } => "Continue",
+      ASTNode::DoWhileStatement { .. } => "DoWhileStatement",
+      ASTNode::EmitStatement { .. } => "EmitStatement",
+      ASTNode::ExpressionStatement { .. } => "ExpressionStatement",
+      ASTNode::ForStatement { .. } => "ForStatement",
+      ASTNode::LoopExpression { .. } => "LoopExpression",
+      ASTNode::IfStatement { .. } => "IfStatement",
+      ASTNode::InlineAssembly { .. } => "InlineAssembly",
+      ASTNode::PlaceholderStatement { .. } => "PlaceholderStatement",
+      ASTNode::Return { .. } => "Return",
+      ASTNode::RevertStatement { .. } => "RevertStatement",
+      ASTNode::TryStatement { .. } => "TryStatement",
+      ASTNode::UncheckedBlock { .. } => "UncheckedBlock",
+      ASTNode::VariableDeclarationStatement { .. } => {
+        "VariableDeclarationStatement"
+      }
+      ASTNode::WhileStatement { .. } => "WhileStatement",
+      ASTNode::ContractSignature { .. } => "ContractSignature",
+      ASTNode::FunctionSignature { .. } => "FunctionSignature",
+      ASTNode::ModifierSignature { .. } => "ModifierSignature",
+      ASTNode::ContractDefinition { .. } => "ContractDefinition",
+      ASTNode::FunctionDefinition { .. } => "FunctionDefinition",
+      ASTNode::EventDefinition { .. } => "EventDefinition",
+      ASTNode::ErrorDefinition { .. } => "ErrorDefinition",
+      ASTNode::ModifierDefinition { .. } => "ModifierDefinition",
+      ASTNode::StructDefinition { .. } => "StructDefinition",
+      ASTNode::EnumDefinition { .. } => "EnumDefinition",
+      ASTNode::UserDefinedValueTypeDefinition { .. } => {
+        "UserDefinedValueTypeDefinition"
+      }
+      ASTNode::VariableDeclaration { .. } => "VariableDeclaration",
+      ASTNode::PragmaDirective { .. } => "PragmaDirective",
+      ASTNode::ImportDirective { .. } => "ImportDirective",
+      ASTNode::UsingForDirective { .. } => "UsingForDirective",
+      ASTNode::SourceUnit { .. } => "SourceUnit",
+      ASTNode::InheritanceSpecifier { .. } => "InheritanceSpecifier",
+      ASTNode::ElementaryTypeName { .. } => "ElementaryTypeName",
+      ASTNode::FunctionTypeName { .. } => "FunctionTypeName",
+      ASTNode::ParameterList { .. } => "ParameterList",
+      ASTNode::ModifierList { .. } => "ModifierList",
+      ASTNode::TryCatchClause { .. } => "TryCatchClause",
+      ASTNode::ModifierInvocation { .. } => "ModifierInvocation",
+      ASTNode::UserDefinedTypeName { .. } => "UserDefinedTypeName",
+      ASTNode::ArrayTypeName { .. } => "ArrayTypeName",
+      ASTNode::Mapping { .. } => "Mapping",
+      ASTNode::StructuredDocumentation { .. } => "StructuredDocumentation",
+      ASTNode::Stub { .. } => "Stub",
+      ASTNode::Other { .. } => "Other",
+    }
   }
 }
 
