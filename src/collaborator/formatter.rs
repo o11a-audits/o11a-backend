@@ -1,24 +1,101 @@
+use crate::collaborator::parser::CommentNode;
 use crate::core;
-use crate::documentation::formatter as doc_formatter;
-use crate::documentation::formatter::FormatContext;
-use crate::documentation::parser::DocumentationAST;
+use crate::core::topic;
+use crate::formatting;
 use std::collections::BTreeMap;
 
-/// Renders a comment AST to HTML by delegating to the documentation formatter
-/// with comment formatting enabled (no topic IDs except on code references).
+/// Renders comment AST nodes to HTML.
 pub fn render_comment_html(
-  ast: &DocumentationAST,
-  comment_topic: &core::topic::Topic,
-  nodes_map: &BTreeMap<core::topic::Topic, core::Node>,
+  nodes: &[CommentNode],
+  comment_topic: &topic::Topic,
+  nodes_map: &BTreeMap<topic::Topic, core::Node>,
 ) -> String {
-  let ctx = FormatContext {
-    comment_formatting: true,
-    target_topic: comment_topic.clone(),
-  };
-  ast
-    .nodes
+  nodes
     .iter()
-    .map(|node| doc_formatter::node_to_html(node, nodes_map, &ctx))
-    .collect::<Vec<_>>()
-    .join("")
+    .map(|node| node_to_html(node, comment_topic, nodes_map))
+    .collect()
+}
+
+fn node_to_html(
+  node: &CommentNode,
+  comment_topic: &topic::Topic,
+  nodes_map: &BTreeMap<topic::Topic, core::Node>,
+) -> String {
+  match node {
+    CommentNode::Text { value } => formatting::html_escape(value),
+
+    CommentNode::InlineCode { children, .. } => {
+      let inner: String = children
+        .iter()
+        .map(|c| node_to_html(c, comment_topic, nodes_map))
+        .collect();
+      formatting::format_inline_code(&inner)
+    }
+
+    CommentNode::CodeKeyword { value } => {
+      formatting::format_keyword(&formatting::html_escape(value))
+    }
+
+    CommentNode::CodeOperator { value } => formatting::format_operator(value),
+
+    CommentNode::CodeIdentifier {
+      value,
+      referenced_topic,
+      kind,
+      referenced_name,
+      ..
+    } => {
+      let display_value = referenced_name.as_deref().unwrap_or(value);
+      let class = kind
+        .as_ref()
+        .map(formatting::named_topic_kind_to_class)
+        .unwrap_or("identifier");
+
+      match referenced_topic {
+        Some(ref_topic) => formatting::format_topic_token(
+          comment_topic,
+          &formatting::html_escape(display_value),
+          class,
+          ref_topic,
+        ),
+        None => formatting::format_token(
+          &formatting::html_escape(display_value),
+          class,
+        ),
+      }
+    }
+
+    CommentNode::CodeText { value } => formatting::html_escape(value),
+
+    CommentNode::Emphasis { text } => {
+      formatting::format_emphasis(&formatting::html_escape(text))
+    }
+
+    CommentNode::Strong { text } => {
+      formatting::format_strong(&formatting::html_escape(text))
+    }
+
+    CommentNode::Link { url, text } => {
+      formatting::format_link(url, None, &formatting::html_escape(text))
+    }
+  }
+}
+
+/// Renders comment AST nodes to plain text (raw markdown without semantics).
+pub fn render_comment_plain_text(nodes: &[CommentNode]) -> String {
+  nodes.iter().map(node_to_plain_text).collect()
+}
+
+fn node_to_plain_text(node: &CommentNode) -> String {
+  match node {
+    CommentNode::Text { value } => value.clone(),
+    CommentNode::InlineCode { value, .. } => format!("`{}`", value),
+    CommentNode::CodeKeyword { value }
+    | CommentNode::CodeOperator { value }
+    | CommentNode::CodeIdentifier { value, .. }
+    | CommentNode::CodeText { value } => value.clone(),
+    CommentNode::Emphasis { text } => format!("*{}*", text),
+    CommentNode::Strong { text } => format!("**{}**", text),
+    CommentNode::Link { text, url } => format!("[{}]({})", text, url),
+  }
 }

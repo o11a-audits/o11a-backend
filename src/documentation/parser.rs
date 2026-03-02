@@ -15,7 +15,7 @@ pub fn next_node_id() -> i32 {
 }
 
 /// Solidity keywords for syntax highlighting
-const SOLIDITY_KEYWORDS: &[&str] = &[
+pub(crate) const SOLIDITY_KEYWORDS: &[&str] = &[
   // Control flow
   "if",
   "else",
@@ -82,7 +82,7 @@ const SOLIDITY_KEYWORDS: &[&str] = &[
 ];
 
 /// Rust keywords for syntax highlighting
-const RUST_KEYWORDS: &[&str] = &[
+pub(crate) const RUST_KEYWORDS: &[&str] = &[
   // Control flow
   "if",
   "else",
@@ -127,7 +127,7 @@ const RUST_KEYWORDS: &[&str] = &[
 ];
 
 /// Operators for syntax highlighting (multi-character first, then single-character)
-const OPERATORS: &[&str] = &[
+pub(crate) const OPERATORS: &[&str] = &[
   // Multi-character (longest first)
   "<<=", ">>=", "..=", "...", "==", "!=", "<=", ">=", "&&", "||", "<<", ">>",
   "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "++", "--", "**", "=>", "::",
@@ -137,7 +137,7 @@ const OPERATORS: &[&str] = &[
 ];
 
 /// Extracts the NamedTopicKind from topic metadata if it's a named topic
-fn get_named_topic_kind(
+pub(crate) fn get_named_topic_kind(
   metadata: &core::TopicMetadata,
 ) -> Option<core::NamedTopicKind> {
   match metadata {
@@ -150,12 +150,12 @@ fn get_named_topic_kind(
 }
 
 /// Checks if a string is a keyword (Solidity or Rust)
-fn is_keyword(s: &str) -> bool {
+pub(crate) fn is_keyword(s: &str) -> bool {
   SOLIDITY_KEYWORDS.contains(&s) || RUST_KEYWORDS.contains(&s)
 }
 
 /// Tries to match an operator at the current position
-fn match_operator(s: &str) -> Option<&'static str> {
+pub(crate) fn match_operator(s: &str) -> Option<&'static str> {
   for op in OPERATORS {
     if s.starts_with(op) {
       return Some(op);
@@ -1050,7 +1050,7 @@ fn convert_mdast_node(
 /// Searches the AuditData for a declaration with the given value
 /// Search order: topic ID, qualified name, then simple name
 /// This is used to resolve inline code references to solidity declarations
-fn find_declaration_by_name<'a>(
+pub(crate) fn find_declaration_by_name<'a>(
   audit_data: &'a core::AuditData,
   value: &str,
 ) -> Option<&'a crate::core::TopicMetadata> {

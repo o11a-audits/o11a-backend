@@ -302,3 +302,145 @@ fn do_node_to_html(
     }
   }
 }
+
+/// Converts a documentation node to plain text (raw markdown without semantics).
+pub fn node_to_plain_text(
+  node: &DocumentationNode,
+  nodes_map: &BTreeMap<topic::Topic, core::Node>,
+) -> String {
+  do_node_to_plain_text(node, nodes_map)
+}
+
+fn do_node_to_plain_text(
+  node: &DocumentationNode,
+  nodes_map: &BTreeMap<topic::Topic, core::Node>,
+) -> String {
+  let node = node.resolve(nodes_map);
+  match node {
+    DocumentationNode::Root { children, .. } => children
+      .iter()
+      .map(|c| do_node_to_plain_text(c, nodes_map))
+      .collect::<Vec<_>>()
+      .join("\n"),
+
+    DocumentationNode::Section { children, .. } => children
+      .iter()
+      .map(|c| do_node_to_plain_text(c, nodes_map))
+      .collect::<Vec<_>>()
+      .join("\n"),
+
+    DocumentationNode::Heading {
+      level,
+      children,
+      section,
+      ..
+    } => {
+      let prefix = "#".repeat(*level as usize);
+      let text: String = children
+        .iter()
+        .map(|c| do_node_to_plain_text(c, nodes_map))
+        .collect();
+      let heading = format!("{} {}", prefix, text);
+      match section {
+        Some(sec) => {
+          let section_text = do_node_to_plain_text(sec, nodes_map);
+          format!("{}\n{}", heading, section_text)
+        }
+        None => heading,
+      }
+    }
+
+    DocumentationNode::Paragraph { children, .. } => {
+      let content: String = children
+        .iter()
+        .map(|c| do_node_to_plain_text(c, nodes_map))
+        .collect();
+      format!("{}\n", content)
+    }
+
+    DocumentationNode::Sentence { children, .. } => children
+      .iter()
+      .map(|c| do_node_to_plain_text(c, nodes_map))
+      .collect(),
+
+    DocumentationNode::Text { value, .. } => value.clone(),
+
+    DocumentationNode::InlineCode { value, .. } => format!("`{}`", value),
+
+    DocumentationNode::CodeBlock { lang, value, .. } => {
+      let fence_lang = lang.as_deref().unwrap_or("");
+      format!("```{}\n{}\n```", fence_lang, value)
+    }
+
+    DocumentationNode::CodeKeyword { value, .. }
+    | DocumentationNode::CodeOperator { value, .. }
+    | DocumentationNode::CodeIdentifier { value, .. }
+    | DocumentationNode::CodeText { value, .. } => value.clone(),
+
+    DocumentationNode::List {
+      ordered, children, ..
+    } => {
+      let items: Vec<String> = children
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+          let inner = do_node_to_plain_text(c, nodes_map);
+          if *ordered {
+            format!("{}. {}", i + 1, inner)
+          } else {
+            format!("- {}", inner)
+          }
+        })
+        .collect();
+      items.join("\n")
+    }
+
+    DocumentationNode::ListItem { children, .. } => children
+      .iter()
+      .map(|c| do_node_to_plain_text(c, nodes_map))
+      .collect(),
+
+    DocumentationNode::Emphasis { children, .. } => {
+      let content: String = children
+        .iter()
+        .map(|c| do_node_to_plain_text(c, nodes_map))
+        .collect();
+      format!("*{}*", content)
+    }
+
+    DocumentationNode::Strong { children, .. } => {
+      let content: String = children
+        .iter()
+        .map(|c| do_node_to_plain_text(c, nodes_map))
+        .collect();
+      format!("**{}**", content)
+    }
+
+    DocumentationNode::Link {
+      url, children, ..
+    } => {
+      let content: String = children
+        .iter()
+        .map(|c| do_node_to_plain_text(c, nodes_map))
+        .collect();
+      format!("[{}]({})", content, url)
+    }
+
+    DocumentationNode::BlockQuote { children, .. } => {
+      let content = children
+        .iter()
+        .map(|c| do_node_to_plain_text(c, nodes_map))
+        .collect::<Vec<_>>()
+        .join("\n");
+      content
+        .lines()
+        .map(|line| format!("> {}", line))
+        .collect::<Vec<_>>()
+        .join("\n")
+    }
+
+    DocumentationNode::ThematicBreak { .. } => "---".to_string(),
+
+    DocumentationNode::Stub { .. } => String::new(),
+  }
+}

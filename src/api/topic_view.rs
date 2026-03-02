@@ -533,6 +533,13 @@ fn get_source_text(
         },
       )
     }
+    Some(Node::Comment(nodes)) => {
+      crate::collaborator::formatter::render_comment_html(
+        nodes,
+        topic,
+        &audit_data.nodes,
+      )
+    }
     None => format!(
       "<div class=\"error\">Source text not found for {}</div>",
       html_escape(topic.id())

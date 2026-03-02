@@ -1,6 +1,6 @@
 use crate::collaborator::models::*;
 use crate::collaborator::{formatter, parser};
-use crate::core::DataContext;
+use crate::core::{self, DataContext};
 use sqlx::SqlitePool;
 
 // ============================================================================
@@ -97,13 +97,19 @@ pub async fn load_and_parse_all_comments(
   // Parse each comment with its audit's data
   for comment in &comments {
     if let Some(audit_data) = data_context.get_audit_mut(&comment.audit_id) {
-      let (mentions, ast) =
+      let (mentions, nodes) =
         parser::parse_comment(&comment.content_markdown, audit_data);
+      let comment_topic = comment.comment_topic();
       let html = formatter::render_comment_html(
-        &ast,
-        &comment.comment_topic(),
+        &nodes,
+        &comment_topic,
         &audit_data.nodes,
       );
+
+      // Store comment AST in nodes
+      audit_data
+        .nodes
+        .insert(comment_topic.clone(), core::Node::Comment(nodes));
 
       // Parse scope from stored JSON
       let scope: crate::api::ScopeInfo =

@@ -1,6 +1,7 @@
 use serde::Serialize;
 use serde_json::json;
 
+use crate::collaborator::formatter as comment_formatter;
 use crate::core::{
   self, AuditData, BlockAnnotationKind, ControlFlowStatementKind,
   NamedTopicKind, NamedTopicVisibility, Node, Reference, Scope, SourceChild,
@@ -341,15 +342,18 @@ fn render_type_name(node: &ASTNode) -> String {
 fn lookup_node_comments(
   node_id: i32,
   audit_data: &AuditData,
-  source_text_cache: &std::collections::HashMap<String, String>,
 ) -> Vec<serde_json::Value> {
   let node_topic = topic::new_node_topic(&node_id);
   let comment_topics = audit_data.comment_index.get(node_topic.id());
   comment_topics
     .iter()
     .filter_map(|comment_topic| {
-      let content =
-        get_html_content(comment_topic, audit_data, source_text_cache);
+      let content = match audit_data.nodes.get(comment_topic) {
+        Some(Node::Comment(nodes)) => {
+          comment_formatter::render_comment_plain_text(nodes)
+        }
+        _ => return None,
+      };
       let content = content.trim().to_string();
       if content.is_empty() {
         return None;
@@ -397,7 +401,7 @@ fn render_ast_snippet(
     let name =
       resolve_topic_name(topic, audit_data);
     let comments =
-      lookup_node_comments(*node_id, audit_data, source_text_cache);
+      lookup_node_comments(*node_id, audit_data);
     return make_node_json(
       json!({
         "type": "topic_ref",
@@ -411,7 +415,7 @@ fn render_ast_snippet(
   let node_id = resolved.node_id();
   let id = topic::new_node_topic(&node_id).id().to_string();
   let comments =
-    lookup_node_comments(node_id, audit_data, source_text_cache);
+    lookup_node_comments(node_id, audit_data);
 
   // Helper closure for recursive conversion
   let recurse = |child: &ASTNode| -> serde_json::Value {
@@ -1067,8 +1071,12 @@ fn convert_reference(
 
   if let Some(mention_topics) = reference.mention_topics() {
     for mention_topic in mention_topics {
-      let content =
-        get_html_content(mention_topic, audit_data, source_text_cache);
+      let content = match audit_data.nodes.get(mention_topic) {
+        Some(Node::Comment(nodes)) => {
+          comment_formatter::render_comment_plain_text(nodes)
+        }
+        _ => continue,
+      };
       let content = content.trim().to_string();
       if content.is_empty() {
         continue;

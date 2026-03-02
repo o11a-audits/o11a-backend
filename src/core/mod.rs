@@ -207,7 +207,8 @@ pub struct AuditData {
 fn is_common_word(name: &str) -> bool {
   matches!(
     name,
-    "a" | "an"
+    "a"
+      | "an"
       | "as"
       | "at"
       | "be"
@@ -309,11 +310,7 @@ impl CommentIndex {
   }
 
   /// Add a comment targeting a topic.
-  pub fn insert(
-    &mut self,
-    target_topic_id: &str,
-    comment_topic: topic::Topic,
-  ) {
+  pub fn insert(&mut self, target_topic_id: &str, comment_topic: topic::Topic) {
     let comments = self
       .by_target
       .entry(target_topic_id.to_string())
@@ -339,7 +336,8 @@ impl CommentIndex {
 
   /// Get all comment topics targeting a given topic.
   pub fn get(&self, target_topic_id: &str) -> &[topic::Topic] {
-    self.by_target
+    self
+      .by_target
       .get(target_topic_id)
       .map_or(&[], |v| v.as_slice())
   }
@@ -368,6 +366,7 @@ pub struct DataContext {
 pub enum Node {
   Solidity(crate::solidity::parser::ASTNode),
   Documentation(crate::documentation::parser::DocumentationNode),
+  Comment(Vec<crate::collaborator::parser::CommentNode>),
 }
 
 impl Node {
@@ -376,6 +375,7 @@ impl Node {
     match self {
       Node::Solidity(ast_node) => ast_node.src_location().start,
       Node::Documentation(doc_node) => doc_node.position(),
+      Node::Comment(_) => None,
     }
   }
 }
@@ -1222,11 +1222,11 @@ pub enum TopicMetadata {
   /// A comment topic with immutable metadata
   CommentTopic {
     topic: topic::Topic,
-    author_id: i64,
-    comment_type: String,
-    target_topic: topic::Topic,
-    created_at: String,
     scope: Scope,
+    target_topic: topic::Topic,
+    comment_type: String,
+    author_id: i64,
+    created_at: String,
     mentioned_topics: Vec<topic::Topic>,
     context: Vec<SourceContext>,
     mentions: Vec<SourceContext>,

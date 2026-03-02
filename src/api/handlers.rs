@@ -408,6 +408,13 @@ pub async fn get_source_text(
         },
       )
     }
+    Node::Comment(nodes) => {
+      crate::collaborator::formatter::render_comment_html(
+        nodes,
+        &topic,
+        &audit_data.nodes,
+      )
+    }
   };
 
   Ok(Html(source_text))
@@ -451,7 +458,7 @@ pub async fn get_delimiter(
         &audit_data.topic_metadata,
       )
     }
-    core::Node::Documentation(_) => None,
+    core::Node::Documentation(_) | core::Node::Comment(_) => None,
   };
 
   Ok(Json(delimiter.map(|d| TopicDelimiterResponse {
@@ -1360,9 +1367,18 @@ pub async fn create_comment(
     let audit_data =
       ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
 
-    let (mentions, ast) = parser::parse_comment(&payload.content, audit_data);
-    let html =
-      formatter::render_comment_html(&ast, &comment_topic, &audit_data.nodes);
+    let (mentions, nodes) =
+      parser::parse_comment(&payload.content, audit_data);
+    let html = formatter::render_comment_html(
+      &nodes,
+      &comment_topic,
+      &audit_data.nodes,
+    );
+
+    // Store comment AST in nodes
+    audit_data
+      .nodes
+      .insert(comment_topic.clone(), core::Node::Comment(nodes));
 
     store::register_comment_in_audit_data(
       audit_data, &comment, &scope, &mentions,
