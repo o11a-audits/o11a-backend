@@ -6,7 +6,7 @@ use crate::core::{
   Node, Reference, Scope, SourceChild, SourceContext, TitledTopicKind,
   TopicMetadata, UnnamedTopicKind, VariableMutability, topic,
 };
-use crate::documentation::FormatContext;
+
 use crate::formatting::html_escape;
 
 // ============================================================================
@@ -527,10 +527,6 @@ fn get_source_text(
       crate::documentation::formatter::node_to_html(
         doc_node,
         &audit_data.nodes,
-        &FormatContext {
-          comment_formatting: false,
-          target_topic: topic.clone(),
-        },
       )
     }
     Some(Node::Comment(nodes)) => {

@@ -4,54 +4,35 @@ use crate::documentation::parser::DocumentationNode;
 use crate::formatting;
 use std::collections::BTreeMap;
 
-/// Controls how documentation nodes are rendered to HTML.
-pub struct FormatContext {
-  /// When true, omits `id` and `data-topic` attributes on all nodes
-  /// except code identifier references.
-  pub comment_formatting: bool,
-  pub target_topic: topic::Topic,
-}
-
 /// Converts a documentation node to formatted HTML string
 pub fn node_to_html(
   node: &DocumentationNode,
   nodes_map: &BTreeMap<topic::Topic, core::Node>,
-  ctx: &FormatContext,
 ) -> String {
-  do_node_to_html(node, 0, nodes_map, ctx)
+  do_node_to_html(node, 0, nodes_map)
 }
 
 fn do_node_to_html(
   node: &DocumentationNode,
   indent_level: usize,
   nodes_map: &BTreeMap<topic::Topic, core::Node>,
-  ctx: &FormatContext,
 ) -> String {
   match node.resolve(nodes_map) {
     DocumentationNode::Root { children, .. } => {
       let content = children
         .iter()
-        .map(|child| do_node_to_html(child, indent_level, nodes_map, ctx))
+        .map(|child| do_node_to_html(child, indent_level, nodes_map))
         .collect::<Vec<_>>()
         .join("\n");
 
-      if ctx.comment_formatting {
-        formatting::format_topic_block(
-          &ctx.target_topic,
-          &content,
-          "comment-root target-topic",
-          &ctx.target_topic,
-        )
-      } else {
-        formatting::format_block(&content, "documentation-root")
-      }
+      formatting::format_block(&content, "documentation-root")
     }
 
     // Section: renders just the content (no header, since header is parent)
     DocumentationNode::Section { children, .. } => {
       let content = children
         .iter()
-        .map(|child| do_node_to_html(child, indent_level, nodes_map, ctx))
+        .map(|child| do_node_to_html(child, indent_level, nodes_map))
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -68,21 +49,18 @@ fn do_node_to_html(
     } => {
       let heading_content = children
         .iter()
-        .map(|child| do_node_to_html(child, indent_level, nodes_map, ctx))
+        .map(|child| do_node_to_html(child, indent_level, nodes_map))
         .collect::<Vec<_>>()
         .join("");
 
-      let heading_html = if ctx.comment_formatting {
-        formatting::format_heading(*level, &heading_content)
-      } else {
-        let topic_id = topic::new_documentation_topic(*node_id);
-        formatting::format_topic_heading(*level, &topic_id, &heading_content)
-      };
+      let topic_id = topic::new_documentation_topic(*node_id);
+      let heading_html =
+        formatting::format_topic_heading(*level, &topic_id, &heading_content);
 
       // If there's a section child, render it after the heading
       match section {
         Some(sec) => {
-          let section_html = do_node_to_html(sec, indent_level, nodes_map, ctx);
+          let section_html = do_node_to_html(sec, indent_level, nodes_map);
           format!("{}\n{}", heading_html, section_html)
         }
         None => heading_html,
@@ -94,21 +72,17 @@ fn do_node_to_html(
     } => {
       let content = children
         .iter()
-        .map(|child| do_node_to_html(child, indent_level, nodes_map, ctx))
+        .map(|child| do_node_to_html(child, indent_level, nodes_map))
         .collect::<Vec<_>>()
         .join("");
 
-      if ctx.comment_formatting {
-        formatting::format_block(&content, "paragraph")
-      } else {
-        let topic_id = topic::new_documentation_topic(*node_id);
-        formatting::format_topic_block(
-          &topic_id,
-          &content,
-          "paragraph",
-          &topic_id,
-        )
-      }
+      let topic_id = topic::new_documentation_topic(*node_id);
+      formatting::format_topic_block(
+        &topic_id,
+        &content,
+        "paragraph",
+        &topic_id,
+      )
     }
 
     DocumentationNode::Sentence {
@@ -116,18 +90,14 @@ fn do_node_to_html(
     } => {
       let content = children
         .iter()
-        .map(|child| do_node_to_html(child, indent_level, nodes_map, ctx))
+        .map(|child| do_node_to_html(child, indent_level, nodes_map))
         .collect::<Vec<_>>()
         .join("");
 
-      if ctx.comment_formatting {
-        content
-      } else {
-        let topic_id = topic::new_documentation_topic(*node_id);
-        formatting::format_topic_token(
-          &topic_id, &content, "sentence", &topic_id,
-        )
-      }
+      let topic_id = topic::new_documentation_topic(*node_id);
+      formatting::format_topic_token(
+        &topic_id, &content, "sentence", &topic_id,
+      )
     }
 
     DocumentationNode::Text { value, .. } => formatting::html_escape(value),
@@ -135,7 +105,7 @@ fn do_node_to_html(
     DocumentationNode::InlineCode { children, .. } => {
       let inner: String = children
         .iter()
-        .map(|c| do_node_to_html(c, indent_level, nodes_map, ctx))
+        .map(|c| do_node_to_html(c, indent_level, nodes_map))
         .collect();
       formatting::format_inline_code(&inner)
     }
@@ -148,15 +118,11 @@ fn do_node_to_html(
     } => {
       let inner: String = children
         .iter()
-        .map(|c| do_node_to_html(c, indent_level, nodes_map, ctx))
+        .map(|c| do_node_to_html(c, indent_level, nodes_map))
         .collect();
 
-      if ctx.comment_formatting {
-        formatting::format_code_block(lang.as_deref(), &inner)
-      } else {
-        let topic_id = topic::new_documentation_topic(*node_id);
-        formatting::format_topic_code_block(&topic_id, lang.as_deref(), &inner)
-      }
+      let topic_id = topic::new_documentation_topic(*node_id);
+      formatting::format_topic_code_block(&topic_id, lang.as_deref(), &inner)
     }
 
     DocumentationNode::CodeKeyword { value, .. } => {
@@ -210,22 +176,18 @@ fn do_node_to_html(
     } => {
       let list_items = children
         .iter()
-        .map(|child| do_node_to_html(child, indent_level + 1, nodes_map, ctx))
+        .map(|child| do_node_to_html(child, indent_level + 1, nodes_map))
         .collect::<Vec<_>>()
         .join("\n");
 
-      if ctx.comment_formatting {
-        formatting::format_list(*ordered, &list_items)
-      } else {
-        let topic = topic::new_documentation_topic(*node_id);
-        formatting::format_topic_list(&topic, *ordered, &list_items)
-      }
+      let topic = topic::new_documentation_topic(*node_id);
+      formatting::format_topic_list(&topic, *ordered, &list_items)
     }
 
     DocumentationNode::ListItem { children, .. } => {
       let content = children
         .iter()
-        .map(|child| do_node_to_html(child, indent_level, nodes_map, ctx))
+        .map(|child| do_node_to_html(child, indent_level, nodes_map))
         .collect::<Vec<_>>()
         .join("");
 
@@ -235,7 +197,7 @@ fn do_node_to_html(
     DocumentationNode::Emphasis { children, .. } => {
       let content = children
         .iter()
-        .map(|child| do_node_to_html(child, indent_level, nodes_map, ctx))
+        .map(|child| do_node_to_html(child, indent_level, nodes_map))
         .collect::<Vec<_>>()
         .join("");
 
@@ -245,7 +207,7 @@ fn do_node_to_html(
     DocumentationNode::Strong { children, .. } => {
       let content = children
         .iter()
-        .map(|child| do_node_to_html(child, indent_level, nodes_map, ctx))
+        .map(|child| do_node_to_html(child, indent_level, nodes_map))
         .collect::<Vec<_>>()
         .join("");
 
@@ -260,7 +222,7 @@ fn do_node_to_html(
     } => {
       let content = children
         .iter()
-        .map(|child| do_node_to_html(child, indent_level, nodes_map, ctx))
+        .map(|child| do_node_to_html(child, indent_level, nodes_map))
         .collect::<Vec<_>>()
         .join("");
 
@@ -272,34 +234,24 @@ fn do_node_to_html(
     } => {
       let content = children
         .iter()
-        .map(|child| do_node_to_html(child, indent_level + 1, nodes_map, ctx))
+        .map(|child| do_node_to_html(child, indent_level + 1, nodes_map))
         .collect::<Vec<_>>()
         .join("\n");
 
-      if ctx.comment_formatting {
-        formatting::format_block(&content, "blockquote")
-      } else {
-        let topic_id = topic::new_documentation_topic(*node_id);
-        formatting::format_topic_block(
-          &topic_id,
-          &content,
-          "blockquote",
-          &topic_id,
-        )
-      }
+      let topic_id = topic::new_documentation_topic(*node_id);
+      formatting::format_topic_block(
+        &topic_id,
+        &content,
+        "blockquote",
+        &topic_id,
+      )
     }
 
     DocumentationNode::ThematicBreak { .. } => {
       formatting::format_thematic_break()
     }
 
-    DocumentationNode::Stub { topic, .. } => {
-      if ctx.comment_formatting {
-        String::new()
-      } else {
-        formatting::format_stub(topic)
-      }
-    }
+    DocumentationNode::Stub { topic, .. } => formatting::format_stub(topic),
   }
 }
 

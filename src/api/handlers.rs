@@ -9,7 +9,7 @@ use sqlx::FromRow;
 
 use crate::collaborator::{db, formatter, models::*, parser, store};
 use crate::core::{self, Node, project, topic::new_topic};
-use crate::{api::AppState, documentation::FormatContext};
+use crate::api::AppState;
 
 // Health check handler
 pub async fn health_check() -> StatusCode {
@@ -402,10 +402,6 @@ pub async fn get_source_text(
       crate::documentation::formatter::node_to_html(
         doc_node,
         &audit_data.nodes,
-        &FormatContext {
-          comment_formatting: false,
-          target_topic: topic.clone(),
-        },
       )
     }
     Node::Comment(nodes) => {

@@ -7,7 +7,7 @@ use crate::core::{
   NamedTopicKind, NamedTopicVisibility, Node, Reference, Scope, SourceChild,
   SourceContext, TitledTopicKind, TopicMetadata, UnnamedTopicKind, topic,
 };
-use crate::documentation::FormatContext;
+
 use crate::solidity::parser::ASTNode;
 
 // ============================================================================
@@ -101,10 +101,6 @@ fn get_html_content(
       crate::documentation::formatter::node_to_html(
         doc_node,
         &audit_data.nodes,
-        &FormatContext {
-          comment_formatting: false,
-          target_topic: topic.clone(),
-        },
       )
     }
     _ => topic.id().to_string(),

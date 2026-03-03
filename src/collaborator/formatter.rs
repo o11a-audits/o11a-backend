@@ -4,16 +4,24 @@ use crate::core::topic;
 use crate::formatting;
 use std::collections::BTreeMap;
 
-/// Renders comment AST nodes to HTML.
+/// Renders comment AST nodes to HTML, wrapped in a topic block with the
+/// comment's topic data attribute.
 pub fn render_comment_html(
   nodes: &[CommentNode],
   comment_topic: &topic::Topic,
   nodes_map: &BTreeMap<topic::Topic, core::Node>,
 ) -> String {
-  nodes
+  let content: String = nodes
     .iter()
     .map(|node| node_to_html(node, comment_topic, nodes_map))
-    .collect()
+    .collect();
+
+  formatting::format_topic_block(
+    comment_topic,
+    &content,
+    "comment-root target-topic",
+    comment_topic,
+  )
 }
 
 fn node_to_html(
@@ -49,14 +57,17 @@ fn node_to_html(
       let class = kind
         .as_ref()
         .map(formatting::named_topic_kind_to_class)
-        .unwrap_or("identifier");
+        .unwrap_or("unknown");
 
       match referenced_topic {
-        Some(ref_topic) => formatting::format_topic_token(
-          comment_topic,
-          &formatting::html_escape(display_value),
-          class,
-          ref_topic,
+        Some(ref_topic) => format!(
+          "`{}`",
+          formatting::format_topic_token(
+            comment_topic,
+            &formatting::html_escape(display_value),
+            class,
+            ref_topic,
+          )
         ),
         None => formatting::format_token(
           &formatting::html_escape(display_value),
@@ -92,8 +103,16 @@ fn node_to_plain_text(node: &CommentNode) -> String {
     CommentNode::InlineCode { value, .. } => format!("`{}`", value),
     CommentNode::CodeKeyword { value }
     | CommentNode::CodeOperator { value }
-    | CommentNode::CodeIdentifier { value, .. }
-    | CommentNode::CodeText { value } => value.clone(),
+    | CommentNode::CodeText { value }
+    | CommentNode::CodeIdentifier {
+      value,
+      referenced_topic: Option::None,
+      ..
+    } => value.clone(),
+    CommentNode::CodeIdentifier {
+      referenced_topic: Some(topic),
+      ..
+    } => topic.id().to_string(),
     CommentNode::Emphasis { text } => format!("*{}*", text),
     CommentNode::Strong { text } => format!("**{}**", text),
     CommentNode::Link { text, url } => format!("[{}]({})", text, url),
