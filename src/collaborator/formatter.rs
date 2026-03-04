@@ -103,16 +103,12 @@ fn node_to_plain_text(node: &CommentNode) -> String {
     CommentNode::InlineCode { value, .. } => format!("`{}`", value),
     CommentNode::CodeKeyword { value }
     | CommentNode::CodeOperator { value }
-    | CommentNode::CodeText { value }
-    | CommentNode::CodeIdentifier {
-      value,
-      referenced_topic: Option::None,
-      ..
-    } => value.clone(),
+    | CommentNode::CodeText { value } => value.clone(),
     CommentNode::CodeIdentifier {
-      referenced_topic: Some(topic),
+      value,
+      referenced_name,
       ..
-    } => topic.id().to_string(),
+    } => referenced_name.as_deref().unwrap_or(value).to_string(),
     CommentNode::Emphasis { text } => format!("*{}*", text),
     CommentNode::Strong { text } => format!("**{}**", text),
     CommentNode::Link { text, url } => format!("[{}]({})", text, url),
