@@ -9,6 +9,7 @@ use crate::core::{
   VariableMutability, topic,
 };
 
+use crate::documentation::parser::DocumentationNode;
 use crate::solidity::parser::ASTNode;
 
 // ============================================================================
@@ -280,7 +281,7 @@ fn render_condition_ast_snippet(
         target_topic: target_topic.clone(),
         omit_function_and_modifier_bodies: false,
       };
-      Some(render_ast_snippet(
+      Some(render_solidity_ast_snippet(
         node,
         &render_ctx,
         audit_data,
@@ -367,6 +368,14 @@ fn lookup_node_comments(node_id: i32, audit_data: &AuditData) -> Vec<String> {
   lookup_topic_comments(&node_topic, audit_data)
 }
 
+fn lookup_doc_node_comments(
+  node_id: i32,
+  audit_data: &AuditData,
+) -> Vec<String> {
+  let doc_topic = topic::new_documentation_topic(node_id);
+  lookup_topic_comments(&doc_topic, audit_data)
+}
+
 /// Build a JSON object for a node, attaching comments if present.
 fn make_node_json(
   mut obj: serde_json::Value,
@@ -379,7 +388,7 @@ fn make_node_json(
 }
 
 /// Render an ASTNode as a structured AST snippet (JSON value).
-fn render_ast_snippet(
+fn render_solidity_ast_snippet(
   node: &ASTNode,
   render_ctx: &ASTRenderContext,
   audit_data: &AuditData,
@@ -407,7 +416,12 @@ fn render_ast_snippet(
 
   // Helper closure for recursive conversion
   let recurse = |child: &ASTNode| -> serde_json::Value {
-    render_ast_snippet(child, render_ctx, audit_data, source_text_cache)
+    render_solidity_ast_snippet(
+      child,
+      render_ctx,
+      audit_data,
+      source_text_cache,
+    )
   };
 
   // Flatten comment-less SemanticBlocks when rendering statement lists
@@ -424,7 +438,7 @@ fn render_ast_snippet(
             return statements
               .iter()
               .map(|inner| {
-                render_ast_snippet(
+                render_solidity_ast_snippet(
                   inner,
                   render_ctx,
                   audit_data,
@@ -434,7 +448,7 @@ fn render_ast_snippet(
               .collect::<Vec<_>>();
           }
         }
-        vec![render_ast_snippet(
+        vec![render_solidity_ast_snippet(
           s,
           render_ctx,
           audit_data,
@@ -452,7 +466,7 @@ fn render_ast_snippet(
       | ASTNode::SemanticBlock { statements, .. }
       | ASTNode::UncheckedBlock { statements, .. } => statements,
       _ => {
-        return vec![render_ast_snippet(
+        return vec![render_solidity_ast_snippet(
           body,
           render_ctx,
           audit_data,
@@ -824,7 +838,12 @@ fn render_ast_snippet(
       let members: Vec<serde_json::Value> = nodes
         .iter()
         .map(|n| {
-          render_ast_snippet(n, &member_ctx, audit_data, source_text_cache)
+          render_solidity_ast_snippet(
+            n,
+            &member_ctx,
+            audit_data,
+            source_text_cache,
+          )
         })
         .collect();
 
@@ -833,7 +852,7 @@ fn render_ast_snippet(
         "id": id,
         "name": name,
         "kind": kind,
-        "signature": render_ast_snippet(signature, render_ctx, audit_data, source_text_cache),
+        "signature": render_solidity_ast_snippet(signature, render_ctx, audit_data, source_text_cache),
         "members": members,
       })
     }
@@ -854,7 +873,7 @@ fn render_ast_snippet(
         _ => ("unknown".to_string(), "function".to_string()),
       };
 
-      let sig_json = render_ast_snippet(
+      let sig_json = render_solidity_ast_snippet(
         signature,
         render_ctx,
         audit_data,
@@ -893,7 +912,7 @@ fn render_ast_snippet(
         _ => "unknown".to_string(),
       };
 
-      let sig_json = render_ast_snippet(
+      let sig_json = render_solidity_ast_snippet(
         signature,
         render_ctx,
         audit_data,
@@ -1270,6 +1289,245 @@ fn render_ast_snippet(
 }
 
 // ============================================================================
+// Documentation AST Rendering
+// ============================================================================
+
+/// Flattens inline documentation children into a plain markdown text string,
+/// collecting code references along the way.
+fn flatten_inline_content(
+  children: &[DocumentationNode],
+  audit_data: &AuditData,
+) -> (String, Vec<serde_json::Value>) {
+  let mut text = String::new();
+  let mut refs = Vec::new();
+  flatten_inline_recursive(children, audit_data, &mut text, &mut refs);
+  (text, refs)
+}
+
+fn flatten_inline_recursive(
+  children: &[DocumentationNode],
+  audit_data: &AuditData,
+  text: &mut String,
+  refs: &mut Vec<serde_json::Value>,
+) {
+  for child in children {
+    let resolved = child.resolve(&audit_data.nodes);
+    match resolved {
+      DocumentationNode::Text { value, .. } => text.push_str(value),
+
+      DocumentationNode::InlineCode { value, .. } => {
+        text.push('`');
+        text.push_str(value);
+        text.push('`');
+      }
+
+      DocumentationNode::CodeKeyword { value, .. }
+      | DocumentationNode::CodeOperator { value, .. }
+      | DocumentationNode::CodeText { value, .. } => {
+        text.push_str(value);
+      }
+
+      DocumentationNode::CodeIdentifier {
+        value,
+        referenced_topic,
+        ..
+      } => {
+        text.push_str(value);
+        if let Some(t) = referenced_topic {
+          refs.push(json!({"name": value, "topic": t.id()}));
+        }
+      }
+
+      DocumentationNode::Emphasis { children, .. }
+      | DocumentationNode::Strong { children, .. }
+      | DocumentationNode::Link { children, .. }
+      | DocumentationNode::Sentence { children, .. }
+      | DocumentationNode::Paragraph { children, .. }
+      | DocumentationNode::ListItem { children, .. } => {
+        flatten_inline_recursive(children, audit_data, text, refs);
+      }
+
+      _ => {}
+    }
+  }
+}
+
+/// Render a DocumentationNode as a structured AST snippet (JSON value).
+///
+/// Only meaningful structural nodes (Section, Paragraph, List, CodeBlock,
+/// BlockQuote) get their own JSON objects with topic IDs. Everything else
+/// (Root, Heading, Sentence, ListItem, inline content) is flattened
+/// transitively into the parent. Text values use raw markdown formatting.
+fn render_documentation_ast_snippet(
+  node: &DocumentationNode,
+  audit_data: &AuditData,
+) -> serde_json::Value {
+  let resolved = node.resolve(&audit_data.nodes);
+
+  // Unresolved Stub → topic_ref
+  if let DocumentationNode::Stub { topic, node_id, .. } = resolved {
+    let name = resolve_topic_name(topic, audit_data);
+    let comments = lookup_doc_node_comments(*node_id, audit_data);
+    return make_node_json(
+      json!({"type": "topic_ref", "id": topic.id(), "name": name}),
+      comments,
+    );
+  }
+
+  let node_id = resolved.node_id();
+  let id = topic::new_documentation_topic(node_id).id().to_string();
+  let comments = lookup_doc_node_comments(node_id, audit_data);
+
+  let recurse = |child: &DocumentationNode| -> serde_json::Value {
+    render_documentation_ast_snippet(child, audit_data)
+  };
+
+  let render_children =
+    |children: &[DocumentationNode]| -> Vec<serde_json::Value> {
+      children.iter().map(|c| recurse(c)).collect()
+    };
+
+  let obj = match resolved {
+    // === Transparent nodes: flatten into parent ===
+
+    // Root: return array of rendered children
+    DocumentationNode::Root { children, .. } => {
+      return json!(render_children(children));
+    }
+
+    // Heading: render its section child if present, otherwise flatten text
+    DocumentationNode::Heading {
+      section, children, ..
+    } => {
+      if let Some(sec) = section {
+        return recurse(sec);
+      }
+      let (text, _) = flatten_inline_content(children, audit_data);
+      return json!(text);
+    }
+
+    // Sentence: flatten to text
+    DocumentationNode::Sentence { children, .. } => {
+      let (text, _) = flatten_inline_content(children, audit_data);
+      return json!(text);
+    }
+
+    // === Structural nodes with topic IDs ===
+    DocumentationNode::Section {
+      title, children, ..
+    } => json!({
+      "type": "section",
+      "id": id,
+      "title": title,
+      "children": render_children(children),
+    }),
+
+    DocumentationNode::Paragraph { children, .. } => {
+      let (text, refs) = flatten_inline_content(children, audit_data);
+      let mut obj = json!({
+        "type": "paragraph",
+        "id": id,
+        "text": text,
+      });
+      if !refs.is_empty() {
+        obj["references"] = json!(refs);
+      }
+      obj
+    }
+
+    DocumentationNode::List {
+      ordered, children, ..
+    } => {
+      let mut all_refs = Vec::new();
+      let items: Vec<serde_json::Value> = children
+        .iter()
+        .map(|item| {
+          let resolved_item = item.resolve(&audit_data.nodes);
+          match resolved_item {
+            DocumentationNode::ListItem { children, .. } => {
+              let (text, refs) = flatten_inline_content(children, audit_data);
+              all_refs.extend(refs);
+              json!(text)
+            }
+            _ => recurse(item),
+          }
+        })
+        .collect();
+      let mut obj = json!({
+        "type": "list",
+        "id": id,
+        "ordered": ordered,
+        "items": items,
+      });
+      if !all_refs.is_empty() {
+        obj["references"] = json!(all_refs);
+      }
+      obj
+    }
+
+    DocumentationNode::CodeBlock {
+      lang,
+      value,
+      children,
+      ..
+    } => {
+      let (_, refs) = flatten_inline_content(children, audit_data);
+      let mut obj = json!({
+        "type": "code_block",
+        "id": id,
+        "code": value,
+      });
+      if let Some(l) = lang {
+        obj["lang"] = json!(l);
+      }
+      if !refs.is_empty() {
+        obj["references"] = json!(refs);
+      }
+      obj
+    }
+
+    DocumentationNode::BlockQuote { children, .. } => json!({
+      "type": "block_quote",
+      "id": id,
+      "children": render_children(children),
+    }),
+
+    // === Inline/leaf nodes at top level (uncommon) ===
+    DocumentationNode::Text { value, .. } => return json!(value),
+    DocumentationNode::InlineCode { value, .. } => {
+      return json!(format!("`{}`", value));
+    }
+    DocumentationNode::ListItem { children, .. } => {
+      let (text, _) = flatten_inline_content(children, audit_data);
+      return json!(text);
+    }
+    DocumentationNode::Emphasis { children, .. }
+    | DocumentationNode::Strong { children, .. }
+    | DocumentationNode::Link { children, .. } => {
+      let (text, _) = flatten_inline_content(children, audit_data);
+      return json!(text);
+    }
+    DocumentationNode::CodeKeyword { value, .. }
+    | DocumentationNode::CodeOperator { value, .. }
+    | DocumentationNode::CodeText { value, .. } => return json!(value),
+    DocumentationNode::CodeIdentifier {
+      value,
+      referenced_topic,
+      ..
+    } => {
+      if let Some(t) = referenced_topic {
+        return json!({"name": value, "topic": t.id()});
+      }
+      return json!(value);
+    }
+    DocumentationNode::ThematicBreak { .. } => return json!(null),
+    DocumentationNode::Stub { .. } => return json!(null),
+  };
+
+  make_node_json(obj, comments)
+}
+
+// ============================================================================
 // Source Context Conversion
 // ============================================================================
 
@@ -1403,14 +1661,17 @@ fn convert_reference(
         target_topic: target_topic.clone(),
         omit_function_and_modifier_bodies: false,
       };
-      render_ast_snippet(
+      render_solidity_ast_snippet(
         solidity_node,
         &render_ctx,
         audit_data,
         source_text_cache,
       )
     }
-    _ => unimplemented!(),
+    Some(Node::Documentation(doc_node)) => {
+      render_documentation_ast_snippet(doc_node, audit_data)
+    }
+    _ => json!({"type": "unknown_ref", "id": ref_topic.id()}),
   };
 
   // Merge info mention comments into the snippet
@@ -1517,9 +1778,7 @@ pub fn build_agent_context(
       name,
       kind: unnamed_kind_to_string(kind),
       sub_kind: None,
-
       condition: None,
-
       context,
       expanded_context: None,
       mentions,
@@ -1534,7 +1793,7 @@ pub fn build_agent_context(
             target_topic: topic.clone(),
             omit_function_and_modifier_bodies: false,
           };
-          Some(render_ast_snippet(
+          Some(render_solidity_ast_snippet(
             node,
             &render_ctx,
             audit_data,
@@ -1549,9 +1808,7 @@ pub fn build_agent_context(
         name,
         kind: control_flow_kind_to_string(kind).to_string(),
         sub_kind: None,
-
         condition: condition_snippet,
-
         context,
         expanded_context: None,
         mentions,
@@ -1568,9 +1825,7 @@ pub fn build_agent_context(
         name,
         kind: kind_str.to_string(),
         sub_kind: None,
-
         condition: None,
-
         context,
         expanded_context: None,
         mentions,
@@ -1583,9 +1838,7 @@ pub fn build_agent_context(
         name,
         kind: "Comment".to_string(),
         sub_kind: Some(comment_type.clone()),
-
         condition: None,
-
         context,
         expanded_context: None,
         mentions,
