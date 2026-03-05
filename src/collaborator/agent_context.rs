@@ -23,17 +23,7 @@ pub struct AgentTopicContext {
   #[serde(skip_serializing_if = "Option::is_none")]
   pub sub_kind: Option<String>,
   #[serde(skip_serializing_if = "Option::is_none")]
-  pub visibility: Option<String>,
-  #[serde(skip_serializing_if = "Option::is_none")]
-  pub is_mutable: Option<bool>,
-  #[serde(skip_serializing_if = "Option::is_none")]
   pub condition: Option<serde_json::Value>,
-  #[serde(skip_serializing_if = "Option::is_none")]
-  pub ancestors: Option<Vec<String>>,
-  #[serde(skip_serializing_if = "Option::is_none")]
-  pub descendants: Option<Vec<String>>,
-  #[serde(skip_serializing_if = "Option::is_none")]
-  pub relatives: Option<Vec<String>>,
   pub context: Vec<AgentSourceGroup>,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub expanded_context: Option<Vec<AgentSourceGroup>>,
@@ -53,7 +43,7 @@ pub struct AgentSourceGroup {
   pub scope: AgentScopeTitle,
   pub in_scope: bool,
   #[serde(skip_serializing_if = "Vec::is_empty")]
-  pub scope_references: Vec<AgentSourceChild>,
+  pub scope_references: Vec<serde_json::Value>,
   #[serde(skip_serializing_if = "Vec::is_empty")]
   pub nested_references: Vec<AgentNestedGroup>,
 }
@@ -61,50 +51,11 @@ pub struct AgentSourceGroup {
 #[derive(Debug, Serialize)]
 pub struct AgentNestedGroup {
   pub subscope: AgentScopeTitle,
-  pub children: Vec<AgentSourceChild>,
+  pub children: Vec<serde_json::Value>,
 }
 
-#[derive(Debug, Serialize)]
-pub enum AgentSourceChild {
-  #[serde(rename = "reference")]
-  Reference {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    code: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    ast_snippet: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    comments: Option<Vec<String>>,
-  },
-  #[serde(rename = "annotated_block")]
-  AnnotatedBlock {
-    kind: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    condition: Option<serde_json::Value>,
-    children: Vec<AgentSourceChild>,
-  },
-}
-
-// ============================================================================
-// Utility: HTML content retrieval
-// ============================================================================
-
-/// Get rendered HTML content for a comment or documentation topic.
-fn get_html_content(
-  topic: &topic::Topic,
-  audit_data: &AuditData,
-  source_text_cache: &std::collections::HashMap<String, String>,
-) -> String {
-  if let Some(html) = source_text_cache.get(topic.id()) {
-    return html.clone();
-  }
-
-  match audit_data.nodes.get(topic) {
-    Some(Node::Documentation(doc_node)) => {
-      crate::documentation::formatter::node_to_html(doc_node, &audit_data.nodes)
-    }
-    _ => topic.id().to_string(),
-  }
-}
+/// A source child is a raw JSON value — either an AST snippet (for
+/// references) or an annotated block wrapper.
 
 // ============================================================================
 // Utility: Topic name resolution
@@ -298,10 +249,6 @@ fn named_kind_to_string(kind: &NamedTopicKind) -> (String, Option<String>) {
   }
 }
 
-fn visibility_to_string(visibility: &NamedTopicVisibility) -> String {
-  format!("{:?}", visibility)
-}
-
 // ============================================================================
 // Utility: Control flow annotation rendering
 // ============================================================================
@@ -386,10 +333,7 @@ struct ASTRenderContext {
 }
 
 /// Render a type AST node to a plain-text string directly from its fields.
-fn render_type_name(
-  node: &ASTNode,
-  audit_data: &AuditData,
-) -> String {
+fn render_type_name(node: &ASTNode, audit_data: &AuditData) -> String {
   let resolved = node.resolve(&audit_data.nodes);
   match resolved {
     ASTNode::ElementaryTypeName { name, .. } => name.clone(),
@@ -466,26 +410,72 @@ fn render_ast_snippet(
     render_ast_snippet(child, render_ctx, audit_data, source_text_cache)
   };
 
+  // Flatten comment-less SemanticBlocks when rendering statement lists
+  let recurse_statements = |stmts: &[ASTNode]| -> Vec<serde_json::Value> {
+    stmts
+      .iter()
+      .flat_map(|s| {
+        let resolved_s = s.resolve(&audit_data.nodes);
+        if let ASTNode::SemanticBlock { statements, .. } = resolved_s {
+          let node_id = resolved_s.node_id();
+          let comments = lookup_node_comments(node_id, audit_data);
+          if comments.is_empty() {
+            // Flatten: recurse into the inner statements directly
+            return statements
+              .iter()
+              .map(|inner| {
+                render_ast_snippet(
+                  inner,
+                  render_ctx,
+                  audit_data,
+                  source_text_cache,
+                )
+              })
+              .collect::<Vec<_>>();
+          }
+        }
+        vec![render_ast_snippet(
+          s,
+          render_ctx,
+          audit_data,
+          source_text_cache,
+        )]
+      })
+      .collect()
+  };
+
+  // Extract statements from a body node (Block/SemanticBlock/UncheckedBlock)
+  let body_statements = |body: &ASTNode| -> Vec<serde_json::Value> {
+    let resolved_body = body.resolve(&audit_data.nodes);
+    let stmts = match resolved_body {
+      ASTNode::Block { statements, .. }
+      | ASTNode::SemanticBlock { statements, .. }
+      | ASTNode::UncheckedBlock { statements, .. } => statements,
+      _ => {
+        return vec![render_ast_snippet(
+          body,
+          render_ctx,
+          audit_data,
+          source_text_cache,
+        )];
+      }
+    };
+    recurse_statements(stmts)
+  };
+
   let obj = match resolved {
     // === Leaf nodes ===
     ASTNode::Identifier {
       name,
       referenced_declaration,
       ..
-    } => json!({
-      "type": "identifier",
-      "id": id,
-      "name": name,
-      "referenced_declaration": topic::new_node_topic(referenced_declaration).id(),
-    }),
-
-    ASTNode::IdentifierPath {
+    }
+    | ASTNode::IdentifierPath {
       name,
       referenced_declaration,
       ..
     } => json!({
       "type": "identifier",
-      "id": id,
       "name": name,
       "referenced_declaration": topic::new_node_topic(referenced_declaration).id(),
     }),
@@ -713,10 +703,16 @@ fn render_ast_snippet(
       name,
       type_name,
       value,
+      parameter_variable,
       ..
     } => {
+      let decl_type = if parameter_variable.is_some() {
+        "param_variable_declaration"
+      } else {
+        "variable_declaration"
+      };
       let mut obj = json!({
-        "type": "variable_declaration",
+        "type": decl_type,
         "id": id,
         "name": name,
         "type_name": render_type_name(type_name, audit_data),
@@ -731,21 +727,21 @@ fn render_ast_snippet(
     ASTNode::Block { statements, .. } => json!({
       "type": "block",
       "id": id,
-      "statements": statements.iter().map(|s| recurse(s)).collect::<Vec<_>>(),
+      "statements": recurse_statements(statements),
     }),
 
     ASTNode::SemanticBlock { statements, .. } => json!({
       "type": "block",
       "id": id,
       "kind": "semantic",
-      "statements": statements.iter().map(|s| recurse(s)).collect::<Vec<_>>(),
+      "statements": recurse_statements(statements),
     }),
 
     ASTNode::UncheckedBlock { statements, .. } => json!({
       "type": "block",
       "id": id,
       "kind": "unchecked",
-      "statements": statements.iter().map(|s| recurse(s)).collect::<Vec<_>>(),
+      "statements": recurse_statements(statements),
     }),
 
     // === Control flow ===
@@ -760,10 +756,10 @@ fn render_ast_snippet(
         "id": id,
         "kind": "if",
         "condition": recurse(condition),
-        "body": recurse(true_body),
+        "true_body_statements": body_statements(true_body),
       });
       if let Some(fb) = false_body {
-        obj["else_body"] = recurse(fb);
+        obj["false_body_statements"] = json!(body_statements(fb));
       }
       obj
     }
@@ -775,7 +771,7 @@ fn render_ast_snippet(
       "id": id,
       "kind": "for",
       "condition": recurse(condition),
-      "body": recurse(body),
+      "body_statements": body_statements(body),
     }),
 
     ASTNode::WhileStatement {
@@ -788,7 +784,7 @@ fn render_ast_snippet(
         "condition": recurse(condition),
       });
       if let Some(b) = body {
-        obj["body"] = recurse(b);
+        obj["body_statements"] = json!(body_statements(b));
       }
       obj
     }
@@ -803,7 +799,7 @@ fn render_ast_snippet(
         "condition": recurse(condition),
       });
       if let Some(b) = body {
-        obj["body"] = recurse(b);
+        obj["body_statements"] = json!(body_statements(b));
       }
       obj
     }
@@ -866,11 +862,9 @@ fn render_ast_snippet(
       );
 
       let is_target = render_ctx.target_topic == topic::new_node_topic(node_id);
-      let body_json =
+      let body_stmts =
         if !render_ctx.omit_function_and_modifier_bodies || is_target {
-          body.as_ref().map(|b| {
-            render_ast_snippet(b, render_ctx, audit_data, source_text_cache)
-          })
+          body.as_ref().map(|b| body_statements(b))
         } else {
           None
         };
@@ -882,8 +876,8 @@ fn render_ast_snippet(
         "kind": kind,
         "signature": sig_json,
       });
-      if let Some(body_val) = body_json {
-        obj["body"] = body_val;
+      if let Some(stmts) = body_stmts {
+        obj["body_statements"] = json!(stmts);
       }
       obj
     }
@@ -907,14 +901,9 @@ fn render_ast_snippet(
       );
 
       let is_target = render_ctx.target_topic == topic::new_node_topic(node_id);
-      let body_json =
+      let body_stmts =
         if !render_ctx.omit_function_and_modifier_bodies || is_target {
-          Some(render_ast_snippet(
-            body,
-            render_ctx,
-            audit_data,
-            source_text_cache,
-          ))
+          Some(body_statements(body))
         } else {
           None
         };
@@ -926,8 +915,8 @@ fn render_ast_snippet(
         "kind": "modifier",
         "signature": sig_json,
       });
-      if let Some(body_val) = body_json {
-        obj["body"] = body_val;
+      if let Some(stmts) = body_stmts {
+        obj["body_statements"] = json!(stmts);
       }
       obj
     }
@@ -951,18 +940,14 @@ fn render_ast_snippet(
       "parameters": recurse(parameters),
     }),
 
-    ASTNode::StructDefinition {
-      name, members, ..
-    } => json!({
+    ASTNode::StructDefinition { name, members, .. } => json!({
       "type": "struct_definition",
       "id": id,
       "name": name,
       "members": members.iter().map(|m| recurse(m)).collect::<Vec<_>>(),
     }),
 
-    ASTNode::EnumDefinition {
-      name, members, ..
-    } => json!({
+    ASTNode::EnumDefinition { name, members, .. } => json!({
       "type": "enum_definition",
       "id": id,
       "name": name,
@@ -1005,8 +990,12 @@ fn render_ast_snippet(
         obj["abstract"] = json!(true);
       }
       if !base_contracts.is_empty() {
-        obj["base_contracts"] =
-          json!(base_contracts.iter().map(|b| recurse(b)).collect::<Vec<_>>());
+        obj["base_contracts"] = json!(
+          base_contracts
+            .iter()
+            .map(|b| recurse(b))
+            .collect::<Vec<_>>()
+        );
       }
       if !directives.is_empty() {
         obj["directives"] =
@@ -1124,19 +1113,156 @@ fn render_ast_snippet(
       "text": text,
     }),
 
-    // === Fallback: all other node types ===
-    _ => {
-      let children: Vec<serde_json::Value> =
-        resolved.nodes().iter().map(|n| recurse(n)).collect();
+    ASTNode::ElementaryTypeNameExpression { type_name, .. } => json!({
+      "type": "type_name",
+      "id": id,
+      "name": render_type_name(type_name, audit_data),
+    }),
+
+    ASTNode::Argument {
+      parameter,
+      argument,
+      ..
+    } => {
       let mut obj = json!({
-        "type": "other",
+        "type": "argument",
         "id": id,
-        "node_type": resolved.type_name(),
+        "argument": recurse(argument),
       });
-      if !children.is_empty() {
-        obj["children"] = json!(children);
+      if let Some(param) = parameter {
+        obj["parameter"] = recurse(param);
       }
       obj
+    }
+
+    ASTNode::FunctionCallOptions {
+      expression,
+      options,
+      ..
+    } => json!({
+      "type": "function_call_options",
+      "id": id,
+      "expression": recurse(expression),
+      "options": options.iter().map(|o| recurse(o)).collect::<Vec<_>>(),
+    }),
+
+    ASTNode::IndexRangeAccess { nodes, body, .. } => {
+      let mut obj = json!({
+        "type": "index_range_access",
+        "id": id,
+        "nodes": nodes.iter().map(|n| recurse(n)).collect::<Vec<_>>(),
+      });
+      if let Some(b) = body {
+        obj["body"] = recurse(b);
+      }
+      obj
+    }
+
+    ASTNode::NewExpression { type_name, .. } => json!({
+      "type": "new_expression",
+      "id": id,
+      "type_name": render_type_name(type_name, audit_data),
+    }),
+
+    ASTNode::LoopExpression {
+      initialization_expression,
+      condition,
+      loop_expression,
+      is_simple_counter_loop,
+      ..
+    } => {
+      let mut obj = json!({
+        "type": "loop_expression",
+        "id": id,
+        "is_simple_counter_loop": is_simple_counter_loop,
+      });
+      if let Some(init) = initialization_expression {
+        obj["initialization"] = recurse(init);
+      }
+      if let Some(cond) = condition {
+        obj["condition"] = recurse(cond);
+      }
+      if let Some(loop_expr) = loop_expression {
+        obj["loop_expression"] = recurse(loop_expr);
+      }
+      obj
+    }
+
+    ASTNode::InlineAssembly { .. } => json!({
+      "type": "inline_assembly",
+      "id": id,
+    }),
+
+    ASTNode::TryStatement {
+      clauses,
+      external_call,
+      ..
+    } => json!({
+      "type": "control_flow",
+      "id": id,
+      "kind": "try",
+      "external_call": recurse(external_call),
+      "clauses": clauses.iter().map(|c| recurse(c)).collect::<Vec<_>>(),
+    }),
+
+    ASTNode::PragmaDirective { literals, .. } => json!({
+      "type": "pragma_directive",
+      "id": id,
+      "literals": literals,
+    }),
+
+    ASTNode::ImportDirective {
+      absolute_path,
+      file,
+      ..
+    } => json!({
+      "type": "import_directive",
+      "id": id,
+      "file": file,
+      "absolute_path": absolute_path,
+    }),
+
+    ASTNode::SourceUnit { nodes, .. } => json!({
+      "type": "source_unit",
+      "id": id,
+      "nodes": nodes.iter().map(|n| recurse(n)).collect::<Vec<_>>(),
+    }),
+
+    ASTNode::TryCatchClause {
+      error_name,
+      block,
+      parameters,
+      ..
+    } => {
+      let mut obj = json!({
+        "type": "try_catch_clause",
+        "id": id,
+        "error_name": error_name,
+        "body_statements": body_statements(block),
+      });
+      if let Some(params) = parameters {
+        obj["parameters"] = recurse(params);
+      }
+      obj
+    }
+
+    // Note: Stub is handled at the top of the function before id/comments
+    // are computed. This arm handles the unreachable case after resolve().
+    ASTNode::Stub { topic, .. } => {
+      let name = resolve_topic_name(topic, audit_data);
+      json!({
+        "type": "topic_ref",
+        "id": topic.id(),
+        "name": name,
+      })
+    }
+
+    // === Other node type ===
+    ASTNode::Other { .. } => {
+      json!({
+        "type": "other",
+        "id": id,
+      })
     }
   };
 
@@ -1199,22 +1325,36 @@ fn convert_source_group(
   }
 }
 
-/// Recursively convert SourceChild entries to AgentSourceChild entries.
+/// Recursively convert SourceChild entries to JSON values.
 fn convert_source_children(
   children: &[SourceChild],
   target_topic: &topic::Topic,
   audit_data: &AuditData,
   source_text_cache: &std::collections::HashMap<String, String>,
-) -> Vec<AgentSourceChild> {
+) -> Vec<serde_json::Value> {
   children
     .iter()
-    .map(|child| match child {
-      SourceChild::Reference(reference) => convert_reference(
-        reference,
-        target_topic,
-        audit_data,
-        source_text_cache,
-      ),
+    .flat_map(|child| match child {
+      SourceChild::Reference(reference) => {
+        let snippet = convert_reference(
+          reference,
+          target_topic,
+          audit_data,
+          source_text_cache,
+        );
+        // Flatten comment-less semantic blocks
+        if snippet.get("kind").and_then(|v| v.as_str()) == Some("semantic")
+          && snippet.get("type").and_then(|v| v.as_str()) == Some("block")
+          && snippet.get("comments").is_none()
+        {
+          if let Some(stmts) =
+            snippet.get("statements").and_then(|v| v.as_array())
+          {
+            return stmts.clone();
+          }
+        }
+        vec![snippet]
+      }
       SourceChild::AnnotatedBlock(block) => {
         let annotation = block.annotation();
         let kind = annotation_kind_to_string(&annotation.kind).to_string();
@@ -1231,53 +1371,50 @@ fn convert_source_children(
           audit_data,
           source_text_cache,
         );
-        AgentSourceChild::AnnotatedBlock {
-          kind,
-          condition,
-          children,
+        let mut obj = json!({
+          "type": "annotated_block",
+          "kind": kind,
+          "children": children,
+        });
+        if let Some(cond) = condition {
+          obj["condition"] = cond;
         }
+        vec![obj]
       }
     })
     .collect()
 }
 
-/// Convert a single Reference to an AgentSourceChild.
+/// Convert a single Reference to a JSON value.
 ///
-/// For Solidity nodes, produces an `ast_snippet` field with structured AST JSON.
-/// For documentation nodes (and fallbacks), produces a `code` field with HTML.
-///
-/// Info comments from mentions are attached as plain strings.
+/// Renders the referenced Solidity node as a structured AST snippet.
+/// Mention comments (info only) are merged into the snippet.
 fn convert_reference(
   reference: &Reference,
   target_topic: &topic::Topic,
   audit_data: &AuditData,
   source_text_cache: &std::collections::HashMap<String, String>,
-) -> AgentSourceChild {
+) -> serde_json::Value {
   let ref_topic = reference.reference_topic();
 
-  // Determine ast_snippet vs code based on node type
-  let (code, ast_snippet) = match audit_data.nodes.get(ref_topic) {
+  let mut snippet = match audit_data.nodes.get(ref_topic) {
     Some(Node::Solidity(solidity_node)) => {
       let render_ctx = ASTRenderContext {
         target_topic: target_topic.clone(),
         omit_function_and_modifier_bodies: false,
       };
-      let ast_json = render_ast_snippet(
+      render_ast_snippet(
         solidity_node,
         &render_ctx,
         audit_data,
         source_text_cache,
-      );
-      (None, Some(ast_json))
+      )
     }
-    _ => {
-      let code = get_html_content(ref_topic, audit_data, source_text_cache);
-      (Some(code), None)
-    }
+    _ => unimplemented!(),
   };
 
-  // Resolve info mention comments
-  let mut comments = Vec::new();
+  // Merge info mention comments into the snippet
+  let mut mention_comments = Vec::new();
 
   if let Some(mention_topics) = reference.mention_topics() {
     for mention_topic in mention_topics {
@@ -1298,21 +1435,15 @@ fn convert_reference(
       if content.is_empty() {
         continue;
       }
-      comments.push(content);
+      mention_comments.push(content);
     }
   }
 
-  let comments = if comments.is_empty() {
-    None
-  } else {
-    Some(comments)
-  };
-
-  AgentSourceChild::Reference {
-    code,
-    ast_snippet,
-    comments,
+  if !mention_comments.is_empty() {
+    snippet["mention_comments"] = json!(mention_comments);
   }
+
+  snippet
 }
 
 // ============================================================================
@@ -1353,34 +1484,10 @@ pub fn build_agent_context(
   match metadata {
     TopicMetadata::NamedTopic {
       kind,
-      visibility,
-      is_mutable,
-      ancestors,
-      descendants,
-      relatives,
       expanded_context,
       ..
     } => {
       let (kind_str, sub_kind) = named_kind_to_string(kind);
-      let visibility_str = visibility_to_string(visibility);
-
-      let ancestors = if ancestors.is_empty() {
-        None
-      } else {
-        Some(ancestors.iter().map(|t| t.id().to_string()).collect())
-      };
-
-      let descendants = if descendants.is_empty() {
-        None
-      } else {
-        Some(descendants.iter().map(|t| t.id().to_string()).collect())
-      };
-
-      let relatives = if relatives.is_empty() {
-        None
-      } else {
-        Some(relatives.iter().map(|t| t.id().to_string()).collect())
-      };
 
       let expanded = if include_expanded_context {
         Some(convert_source_groups(
@@ -1398,12 +1505,7 @@ pub fn build_agent_context(
         name,
         kind: kind_str,
         sub_kind,
-        visibility: Some(visibility_str),
-        is_mutable: Some(*is_mutable),
         condition: None,
-        ancestors,
-        descendants,
-        relatives,
         context,
         expanded_context: expanded,
         mentions,
@@ -1415,12 +1517,9 @@ pub fn build_agent_context(
       name,
       kind: unnamed_kind_to_string(kind),
       sub_kind: None,
-      visibility: None,
-      is_mutable: None,
+
       condition: None,
-      ancestors: None,
-      descendants: None,
-      relatives: None,
+
       context,
       expanded_context: None,
       mentions,
@@ -1450,12 +1549,9 @@ pub fn build_agent_context(
         name,
         kind: control_flow_kind_to_string(kind).to_string(),
         sub_kind: None,
-        visibility: None,
-        is_mutable: None,
+
         condition: condition_snippet,
-        ancestors: None,
-        descendants: None,
-        relatives: None,
+
         context,
         expanded_context: None,
         mentions,
@@ -1472,12 +1568,9 @@ pub fn build_agent_context(
         name,
         kind: kind_str.to_string(),
         sub_kind: None,
-        visibility: None,
-        is_mutable: None,
+
         condition: None,
-        ancestors: None,
-        descendants: None,
-        relatives: None,
+
         context,
         expanded_context: None,
         mentions,
@@ -1490,12 +1583,9 @@ pub fn build_agent_context(
         name,
         kind: "Comment".to_string(),
         sub_kind: Some(comment_type.clone()),
-        visibility: None,
-        is_mutable: None,
+
         condition: None,
-        ancestors: None,
-        descendants: None,
-        relatives: None,
+
         context,
         expanded_context: None,
         mentions,
