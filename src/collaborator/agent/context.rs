@@ -1717,7 +1717,7 @@ fn convert_reference(
 /// are replaced with human-readable values. Solidity topics are rendered
 /// as structured AST snippets; documentation and comments preserve their
 /// HTML representation.
-pub fn build_agent_context(
+pub fn build_agent_topic_context(
   topic_id: &str,
   audit_data: &AuditData,
   source_text_cache: &std::collections::HashMap<String, String>,

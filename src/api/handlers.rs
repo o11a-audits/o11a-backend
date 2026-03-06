@@ -7,9 +7,9 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
+use crate::api::AppState;
 use crate::collaborator::{db, formatter, models::*, parser, store};
 use crate::core::{self, Node, project, topic::new_topic};
-use crate::api::AppState;
 
 // Health check handler
 pub async fn health_check() -> StatusCode {
@@ -399,10 +399,7 @@ pub async fn get_source_text(
       )
     }
     Node::Documentation(doc_node) => {
-      crate::documentation::formatter::node_to_html(
-        doc_node,
-        &audit_data.nodes,
-      )
+      crate::documentation::formatter::node_to_html(doc_node, &audit_data.nodes)
     }
     Node::Comment(nodes) => {
       crate::collaborator::formatter::render_comment_html(
@@ -1215,10 +1212,7 @@ pub async fn get_comment_thread(
     &source_text_cache,
   )
   .ok_or_else(|| {
-    eprintln!(
-      "Topic '{}' not found in audit '{}'",
-      topic_id, audit_id
-    );
+    eprintln!("Topic '{}' not found in audit '{}'", topic_id, audit_id);
     StatusCode::NOT_FOUND
   })?;
 
@@ -1363,13 +1357,9 @@ pub async fn create_comment(
     let audit_data =
       ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
 
-    let (mentions, nodes) =
-      parser::parse_comment(&payload.content, audit_data);
-    let html = formatter::render_comment_html(
-      &nodes,
-      &comment_topic,
-      &audit_data.nodes,
-    );
+    let (mentions, nodes) = parser::parse_comment(&payload.content, audit_data);
+    let html =
+      formatter::render_comment_html(&nodes, &comment_topic, &audit_data.nodes);
 
     // Store comment AST in nodes
     audit_data
@@ -1528,13 +1518,9 @@ pub async fn update_comment_status(
         .map(|t| t.id().to_string())
       {
         if payload.status == CommentStatus::Hidden {
-          audit_data
-            .comment_index
-            .remove(&target_id, &comment_topic);
+          audit_data.comment_index.remove(&target_id, &comment_topic);
         } else {
-          audit_data
-            .comment_index
-            .insert(&target_id, comment_topic);
+          audit_data.comment_index.insert(&target_id, comment_topic);
         }
       }
     }
@@ -1688,12 +1674,11 @@ pub async fn get_agent_context(
   State(state): State<AppState>,
   Path((audit_id, topic_id)): Path<(String, String)>,
   Query(params): Query<AgentContextQuery>,
-) -> Result<Json<crate::collaborator::agent_context::AgentTopicContext>, StatusCode>
-{
-  println!(
-    "GET /api/v1/audits/{}/agent_context/{}",
-    audit_id, topic_id
-  );
+) -> Result<
+  Json<crate::collaborator::agent::context::AgentTopicContext>,
+  StatusCode,
+> {
+  println!("GET /api/v1/audits/{}/agent_context/{}", audit_id, topic_id);
 
   let ctx = state.data_context.lock().map_err(|e| {
     eprintln!("Mutex poisoned in get_agent_context: {}", e);
@@ -1708,17 +1693,14 @@ pub async fn get_agent_context(
     .cloned()
     .unwrap_or_default();
 
-  let response = crate::collaborator::agent_context::build_agent_context(
+  let response = crate::collaborator::agent::context::build_agent_topic_context(
     &topic_id,
     audit_data,
     &source_text_cache,
     params.include_expanded_context,
   )
   .ok_or_else(|| {
-    eprintln!(
-      "Topic '{}' not found in audit '{}'",
-      topic_id, audit_id
-    );
+    eprintln!("Topic '{}' not found in audit '{}'", topic_id, audit_id);
     StatusCode::NOT_FOUND
   })?;
 
