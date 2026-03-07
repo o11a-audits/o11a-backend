@@ -1358,7 +1358,7 @@ fn flatten_inline_recursive(
 /// BlockQuote) get their own JSON objects with topic IDs. Everything else
 /// (Root, Heading, Sentence, ListItem, inline content) is flattened
 /// transitively into the parent. Text values use raw markdown formatting.
-fn render_documentation_ast_snippet(
+pub fn render_documentation_ast_snippet(
   node: &DocumentationNode,
   audit_data: &AuditData,
 ) -> serde_json::Value {

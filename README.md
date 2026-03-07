@@ -242,9 +242,9 @@ Patterns annotate type constraint checks and can be checked by a constraint algo
 
 General audit flow is:
  1. Read and understand the docs and the purpose of the project
- 2. Brainstorm invariants
- 3. Read the code, noting what every variable is, is used for, and its type and specification properties, cross-referencing the docs
- 4. Identify attack vectors
+ 2. List out project features, linking each section of the documentation that informs the feature
+ 3. Brainstorm invariants for each feature, linking them
+ 4. Read the code, noting what every variable is, is used for, and its type and specification properties, linking them to the feature invariants they uphold and listing the attack vectors they are subject to
  5. Step through all convergences, checking that the properties hold up correctly (types and specifications), and noting the invariants that uphold the attack vectors as functional requirements
 
 ### Managing Convergences

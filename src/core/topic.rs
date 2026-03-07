@@ -1,6 +1,6 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash, Serialize)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash, Serialize, Deserialize)]
 pub struct Topic {
   pub id: String,
 }
@@ -53,5 +53,11 @@ pub fn new_invariant_topic(invariant_id: i32) -> Topic {
 pub fn new_attack_vector_topic(id: i32) -> Topic {
   Topic {
     id: format!("A{}", id),
+  }
+}
+
+pub fn new_feature_topic(id: i32) -> Topic {
+  Topic {
+    id: format!("F{}", id),
   }
 }

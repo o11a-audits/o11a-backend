@@ -1706,3 +1706,121 @@ pub async fn get_agent_context(
 
   Ok(Json(response))
 }
+
+// ============================================
+// Feature routes
+// ============================================
+
+#[derive(Debug, Serialize)]
+pub struct FeatureResponse {
+  pub topic: String,
+  pub name: String,
+  pub description: String,
+  pub documentation_topics: Vec<String>,
+  pub source_topics: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct FeaturesResponse {
+  pub features: Vec<FeatureResponse>,
+}
+
+/// Get all features for an audit.
+pub async fn get_features(
+  State(state): State<AppState>,
+  Path(audit_id): Path<String>,
+) -> Result<Json<FeaturesResponse>, StatusCode> {
+  println!("GET /api/v1/audits/{}/features", audit_id);
+
+  let ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in get_features: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+
+  let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+
+  let features = audit_data
+    .features
+    .iter()
+    .map(|(topic, feature)| FeatureResponse {
+      topic: topic.id().to_string(),
+      name: feature.name.clone(),
+      description: feature.description.clone(),
+      documentation_topics: feature
+        .documentation_topics
+        .iter()
+        .map(|t| t.id().to_string())
+        .collect(),
+      source_topics: feature
+        .source_topics
+        .iter()
+        .map(|t| t.id().to_string())
+        .collect(),
+    })
+    .collect();
+
+  Ok(Json(FeaturesResponse { features }))
+}
+
+/// Trigger the agent to build features from documentation.
+pub async fn build_features(
+  State(state): State<AppState>,
+  Path(audit_id): Path<String>,
+) -> Result<Json<FeaturesResponse>, StatusCode> {
+  println!("POST /api/v1/audits/{}/features/build", audit_id);
+
+  // Render documentation JSON while holding the lock, then release it
+  let documentation_json = {
+    let ctx = state.data_context.lock().map_err(|e| {
+      eprintln!("Mutex poisoned in build_features: {}", e);
+      StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+    crate::collaborator::agent::task::render_all_documentation(audit_data)
+  };
+
+  // Run the async LLM task (lock is released)
+  let features =
+    crate::collaborator::agent::task::build_features_from_documentation(
+      &documentation_json,
+    )
+    .await
+    .map_err(|e| {
+      eprintln!("build_features failed: {}", e);
+      StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+  // Build response before storing
+  let response: Vec<FeatureResponse> = features
+    .iter()
+    .map(|(topic, feature)| FeatureResponse {
+      topic: topic.id().to_string(),
+      name: feature.name.clone(),
+      description: feature.description.clone(),
+      documentation_topics: feature
+        .documentation_topics
+        .iter()
+        .map(|t| t.id().to_string())
+        .collect(),
+      source_topics: feature
+        .source_topics
+        .iter()
+        .map(|t| t.id().to_string())
+        .collect(),
+    })
+    .collect();
+
+  // Store features in audit data
+  {
+    let mut ctx = state.data_context.lock().map_err(|e| {
+      eprintln!("Mutex poisoned in build_features (store): {}", e);
+      StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let audit_data = ctx
+      .get_audit_mut(&audit_id)
+      .ok_or(StatusCode::NOT_FOUND)?;
+    audit_data.features = features;
+  }
+
+  Ok(Json(FeaturesResponse { features: response }))
+}

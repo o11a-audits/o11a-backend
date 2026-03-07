@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 pub mod project;
 pub mod topic;
 
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 // ============================================================================
@@ -176,6 +177,19 @@ pub enum ContractKind {
   Interface,
 }
 
+/// A project feature extracted from documentation.
+/// Links documentation sections to a named capability,
+/// and later links to source code topics that implement it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Feature {
+  pub name: String,
+  pub description: String,
+  /// D-prefixed topic IDs of documentation sections/paragraphs that inform this feature
+  pub documentation_topics: Vec<topic::Topic>,
+  /// N-prefixed topic IDs of source code topics that implement this feature (filled later)
+  pub source_topics: Vec<topic::Topic>,
+}
+
 /// Contains all data for a single audit
 pub struct AuditData {
   // The name of the audit being audited, like "Chainlink"
@@ -198,6 +212,8 @@ pub struct AuditData {
   /// Reverse index: target topic ID → non-hidden comment topics.
   /// Updated on comment create and status change.
   pub comment_index: CommentIndex,
+  /// Features extracted from documentation, keyed by F-prefixed topic ID.
+  pub features: BTreeMap<topic::Topic, Feature>,
 }
 
 /// Common short English words that should not match as simple topic names.
@@ -1669,6 +1685,7 @@ pub fn new_audit_data(
     variable_types: BTreeMap::new(),
     name_index: TopicNameIndex::empty(),
     comment_index: CommentIndex::empty(),
+    features: BTreeMap::new(),
   }
 }
 
