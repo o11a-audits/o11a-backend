@@ -1,5 +1,15 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TopicKind {
+  Node,
+  Documentation,
+  Comment,
+  Invariant,
+  AttackVector,
+  Feature,
+}
+
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash, Serialize, Deserialize)]
 pub struct Topic {
   pub id: String,
@@ -10,15 +20,36 @@ impl Topic {
     &self.id
   }
 
-  pub fn underlying_id(&self) -> Result<i32, ()> {
-    // Check if the topic ID starts with "N" (node topic)
-    if self.id.starts_with("N") || self.id.starts_with("D") {
-      // Try to parse the numeric part after "N" or "D"
-      if let Ok(node_id) = self.id[1..].parse::<i32>() {
-        return Ok(node_id);
-      }
+  /// Returns the kind of this topic based on its prefix, or `None` for
+  /// ad-hoc topics created via `new_topic`.
+  pub fn kind(&self) -> Option<TopicKind> {
+    match self.id.as_bytes().first() {
+      Some(b'N') => Some(TopicKind::Node),
+      Some(b'D') => Some(TopicKind::Documentation),
+      Some(b'C') => Some(TopicKind::Comment),
+      Some(b'I') => Some(TopicKind::Invariant),
+      Some(b'A') => Some(TopicKind::AttackVector),
+      Some(b'F') => Some(TopicKind::Feature),
+      _ => None,
     }
-    Err(())
+  }
+
+  /// Extracts the numeric suffix of this topic ID, regardless of kind.
+  pub fn numeric_id(&self) -> Option<i64> {
+    if self.id.len() > 1 && self.kind().is_some() {
+      self.id[1..].parse::<i64>().ok()
+    } else {
+      None
+    }
+  }
+
+  /// Extracts the numeric ID as i32. Kept for compatibility with the
+  /// many solidity analyzer call sites that expect `Result<i32, ()>`.
+  pub fn underlying_id(&self) -> Result<i32, ()> {
+    self
+      .numeric_id()
+      .and_then(|id| i32::try_from(id).ok())
+      .ok_or(())
   }
 }
 

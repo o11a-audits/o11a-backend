@@ -9,7 +9,10 @@ use sqlx::FromRow;
 
 use crate::api::AppState;
 use crate::collaborator::{db, formatter, models::*, parser, store};
-use crate::core::{self, Node, project, topic::new_topic};
+use crate::core::{
+  self, Node, project,
+  topic::{self, TopicKind, new_topic},
+};
 
 // Health check handler
 pub async fn health_check() -> StatusCode {
@@ -1315,13 +1318,11 @@ pub async fn create_comment(
   // Determine the scope from the target topic
   // If target is a comment (starts with "C"), copy scope from parent comment
   // Otherwise, get scope from the topic's metadata in audit data
-  let scope = if payload.topic_id.starts_with('C') {
+  let target_topic = new_topic(&payload.topic_id);
+  let scope = if target_topic.kind() == Some(TopicKind::Comment) {
     // Target is a comment - get scope from parent comment
-    let parent_comment_id: i64 = payload
-      .topic_id
-      .trim_start_matches('C')
-      .parse()
-      .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let parent_comment_id: i64 =
+      target_topic.numeric_id().ok_or(StatusCode::BAD_REQUEST)?;
     let parent_comment = db::get_comment_raw(&state.db, parent_comment_id)
       .await
       .map_err(|_| StatusCode::NOT_FOUND)?;
@@ -1693,16 +1694,17 @@ pub async fn get_agent_context(
     .cloned()
     .unwrap_or_default();
 
-  let response = crate::collaborator::agent::context::build_agent_topic_context(
-    &topic_id,
-    audit_data,
-    &source_text_cache,
-    params.include_expanded_context,
-  )
-  .ok_or_else(|| {
-    eprintln!("Topic '{}' not found in audit '{}'", topic_id, audit_id);
-    StatusCode::NOT_FOUND
-  })?;
+  let response =
+    crate::collaborator::agent::context::build_agent_topic_context(
+      &topic_id,
+      audit_data,
+      &source_text_cache,
+      params.include_expanded_context,
+    )
+    .ok_or_else(|| {
+      eprintln!("Topic '{}' not found in audit '{}'", topic_id, audit_id);
+      StatusCode::NOT_FOUND
+    })?;
 
   Ok(Json(response))
 }
@@ -1816,9 +1818,8 @@ pub async fn build_features(
       eprintln!("Mutex poisoned in build_features (store): {}", e);
       StatusCode::INTERNAL_SERVER_ERROR
     })?;
-    let audit_data = ctx
-      .get_audit_mut(&audit_id)
-      .ok_or(StatusCode::NOT_FOUND)?;
+    let audit_data =
+      ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
     audit_data.features = features;
   }
 

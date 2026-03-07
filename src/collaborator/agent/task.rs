@@ -15,7 +15,7 @@ struct LLMFeature {
 }
 
 /// Render all documentation ASTs into a single JSON string for the LLM prompt.
-fn render_all_documentation(audit_data: &AuditData) -> String {
+pub fn render_all_documentation(audit_data: &AuditData) -> String {
   let mut doc_sections = Vec::new();
 
   for (path, ast) in &audit_data.asts {
@@ -110,20 +110,19 @@ fn parse_features_response(
   Ok(features)
 }
 
-/// Read all documentation and extract project features via LLM.
+/// Extract project features from pre-rendered documentation JSON via LLM.
 ///
-/// Returns a map of F-prefixed feature topics to Feature structs,
-/// with `source_topics` left empty for later population by `document_contracts`.
-pub async fn build_features(
-  audit_data: &AuditData,
+/// This variant does not require holding a lock on `AuditData` — the caller
+/// renders documentation while holding the lock, then passes the JSON string
+/// to this function after releasing it.
+pub async fn build_features_from_documentation(
+  documentation_json: &str,
 ) -> Result<BTreeMap<topic::Topic, Feature>, String> {
-  let documentation_json = render_all_documentation(audit_data);
-
   if documentation_json == "[]" {
     return Err("No documentation found in audit".to_string());
   }
 
-  let prompt = build_prompt(&documentation_json);
+  let prompt = build_prompt(documentation_json);
   let response = router::chat_completion(TaskSize::Large, &prompt).await?;
 
   parse_features_response(&response)
