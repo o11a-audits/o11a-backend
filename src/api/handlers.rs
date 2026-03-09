@@ -11,7 +11,7 @@ use crate::api::AppState;
 use crate::collaborator::{db, formatter, models::*, parser, store};
 use crate::core::{
   self, Node, project,
-  topic::{self, TopicKind, new_topic},
+  topic::{TopicKind, new_topic},
 };
 
 // Health check handler

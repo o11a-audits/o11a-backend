@@ -40,10 +40,32 @@ struct ResponseMessage {
 }
 
 /// Send a prompt to the OpenRouter API with the audit system message prepended.
+///
+/// When `AGENT_DRY_RUN` is set to a file path, the full prompt (system + user
+/// messages) is written to that file and the function returns an error
+/// indicating dry run mode, without making any API call.
 pub async fn chat_completion(
   task_size: TaskSize,
   prompt: &str,
 ) -> Result<String, String> {
+  if let Ok(path) = std::env::var("AGENT_DRY_RUN") {
+    let model = match task_size {
+      TaskSize::Large => LARGE_MODEL,
+      TaskSize::Small => SMALL_MODEL,
+    };
+    let output = format!(
+      "=== DRY RUN ===\nModel: {}\n\n\
+       === SYSTEM MESSAGE ===\n{}\n\n\
+       === USER PROMPT ===\n{}",
+      model, SYSTEM_MESSAGE, prompt
+    );
+    std::fs::write(&path, &output).map_err(|e| {
+      format!("Failed to write dry run to '{}': {}", path, e)
+    })?;
+    println!("Dry run prompt written to: {}", path);
+    return Err("dry run — prompt written, no API call made".to_string());
+  }
+
   let api_key = std::env::var("OPENROUTER_API_KEY").map_err(|_| {
     "OPENROUTER_API_KEY environment variable not set".to_string()
   })?;
