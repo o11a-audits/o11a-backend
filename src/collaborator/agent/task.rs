@@ -4,7 +4,7 @@ use serde::Deserialize;
 
 use crate::collaborator::agent::context;
 use crate::collaborator::agent::router::{self, TaskSize};
-use crate::core::{AuditData, Feature, AST, topic};
+use crate::core::{AST, AuditData, Feature, topic};
 
 /// Raw feature as returned by the LLM (no topic ID yet).
 #[derive(Deserialize)]
@@ -45,10 +45,14 @@ fn build_prompt(documentation_json: &str) -> String {
     "Below is the complete documentation for a smart contract project, \
      rendered as structured JSON with topic IDs (D-prefixed, like \"D42\") \
      on each section, paragraph, list, and code block.\n\n\
-     Your task is to identify all distinct **features** of the project \
-     based on the documentation. A feature is a discrete capability or \
-     behavior of the system (e.g., \"Token Minting\", \"Access Control\", \
-     \"Fee Distribution\").\n\n\
+     Your task is to identify all distinct smart contract **features** \
+     (or **goals**) of the project based on the documentation. A feature is \
+     a discrete capability or behavior of the system. Be specific with the \
+     features, avoiding overlap where one \"feature\" encompasses multiple \
+     distinct implementations (e.g., \"Access Control\" being a feature to \
+     represent both admin operations and permissioned user actions, or \
+     \"Fee Distribution\" being a feature to represent two distinct kinds of \
+     fee distribution within the project).\n\n\
      For each feature, provide:\n\
      - `name`: a short, descriptive name\n\
      - `description`: a one-to-two sentence summary of the feature\n\
@@ -56,13 +60,18 @@ fn build_prompt(documentation_json: &str) -> String {
      (e.g., [\"D12\", \"D34\"]) for every documentation section, paragraph, \
      list, or code block that informs or describes this feature\n\n\
      Rules:\n\
-     - Every documentation topic ID that contains substantive content \
-     should appear in at least one feature.\n\
-     - Choose the most specific section topic IDs to describe each feature, as \
-     the documentation has nested sections.\n\
+     - Every documentation topic ID that describes system behavior, \
+     requirements, or constraints should appear in at least one feature. \
+     Exclude boilerplate like tables of contents, version history, or \
+     author credits.\n\
+     - Choose the most specific section topic IDs to describe each feature, \
+     preferring paragraphs over sections, but choosing sections where all \
+     contained paragraphs are relevant.\n\
      - A documentation topic may appear in multiple features if it is \
      relevant to more than one.\n\
      - Do not invent topic IDs. Only use IDs present in the documentation.\n\
+     - When in doubt whether something is one feature or two, prefer \
+     splitting into more specific features.\n\
      - Return ONLY a JSON array of feature objects, no other text.\n\n\
      Documentation:\n{documentation_json}"
   )
@@ -78,10 +87,7 @@ fn parse_features_response(
     .strip_prefix("```json")
     .or_else(|| response.trim().strip_prefix("```"))
     .unwrap_or(response.trim());
-  let json_str = json_str
-    .strip_suffix("```")
-    .unwrap_or(json_str)
-    .trim();
+  let json_str = json_str.strip_suffix("```").unwrap_or(json_str).trim();
 
   let raw_features: Vec<LLMFeature> = serde_json::from_str(json_str)
     .map_err(|e| format!("Failed to parse features JSON: {}", e))?;
@@ -123,7 +129,12 @@ pub async fn build_features_from_documentation(
   }
 
   let prompt = build_prompt(documentation_json);
-  let response = router::chat_completion(TaskSize::Large, &prompt).await?;
+  let response = router::chat_completion(
+    TaskSize::Large,
+    router::SYSTEM_MESSAGE_DOCUMENTATION,
+    &prompt,
+  )
+  .await?;
 
   parse_features_response(&response)
 }

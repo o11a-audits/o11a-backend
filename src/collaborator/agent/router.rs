@@ -3,15 +3,25 @@ use serde::{Deserialize, Serialize};
 const LARGE_MODEL: &str = "anthropic/claude-opus-4.6";
 const SMALL_MODEL: &str = "z-ai/glm-5";
 
-const SYSTEM_MESSAGE: &str = "\
+pub const SYSTEM_MESSAGE_CODE: &str = "\
 You are an expert smart contract security auditor. \
 Analyze the provided Solidity smart contract code with extreme rigor and precision. \
-Adherance to documentation is critical — verify every assertion, invariant, and contract requirement based on the documentation. \
+Adherence to documentation is critical — verify every assertion, invariant, and contract requirement based on the documentation. \
 Consider how each piece of code interacts with the broader documented system, \
 paying close attention to access control, reentrancy, integer arithmetic, \
 external calls, state mutations, and protocol-level logic. \
 Do not gloss over details — if something is subtle or ambiguous, call it out. \
 Be thorough but concise in your response.";
+
+pub const SYSTEM_MESSAGE_DOCUMENTATION: &str = "\
+You are an expert smart contract technical lead. \
+Analyze the provided smart contract project documentation with insight into project goals and requirements. \
+Consider the system's architecture, access control, and protocol-level logic. \
+Consider goals for the customer-facing interface and logic, \
+as well as goals for api interactions, admin operations, and security guarantees. \
+Think not only about the happy path feature set, \
+but also about how the project is designed to handle the edge cases, error conditions, and deliberate attacks. \
+Provide precise, structured analysis when requested.";
 
 pub enum TaskSize {
   Large,
@@ -46,6 +56,7 @@ struct ResponseMessage {
 /// indicating dry run mode, without making any API call.
 pub async fn chat_completion(
   task_size: TaskSize,
+  system_message: &str,
   prompt: &str,
 ) -> Result<String, String> {
   if let Ok(path) = std::env::var("AGENT_DRY_RUN") {
@@ -57,7 +68,7 @@ pub async fn chat_completion(
       "=== DRY RUN ===\nModel: {}\n\n\
        === SYSTEM MESSAGE ===\n{}\n\n\
        === USER PROMPT ===\n{}",
-      model, SYSTEM_MESSAGE, prompt
+      model, system_message, prompt
     );
     std::fs::write(&path, &output).map_err(|e| {
       format!("Failed to write dry run to '{}': {}", path, e)
@@ -78,7 +89,7 @@ pub async fn chat_completion(
   let messages = vec![
     ChatMessage {
       role: "system",
-      content: SYSTEM_MESSAGE.to_string(),
+      content: system_message.to_string(),
     },
     ChatMessage {
       role: "user",
