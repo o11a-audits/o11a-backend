@@ -273,7 +273,6 @@ pub async fn get_documents(
       crate::core::TopicMetadata::UnnamedTopic { kind, .. }
         if *kind == crate::core::UnnamedTopicKind::DocumentationRoot =>
       {
-        // Documents don't have comment mentions (they're unnamed topics)
         documents.push(topic_metadata_to_response(topic, metadata));
       }
       _ => (),
@@ -324,7 +323,6 @@ pub async fn get_contracts(
         continue;
       }
 
-      // Contracts list doesn't include comment mentions for performance
       contracts.push(topic_metadata_to_response(topic, metadata));
     }
   }
@@ -791,7 +789,6 @@ pub struct NamedTopicResponse {
   pub context: Vec<SourceContextResponse>,
   pub expanded_context: Vec<SourceContextResponse>,
   pub ancestry: Vec<SourceContextResponse>,
-  pub mentions: Vec<SourceContextResponse>,
   pub ancestors: Vec<String>,
   pub descendants: Vec<String>,
   pub relatives: Vec<String>,
@@ -826,7 +823,6 @@ pub struct ControlFlowTopicResponse {
   pub scope: ScopeInfo,
   pub condition: String,
   pub context: Vec<SourceContextResponse>,
-  pub mentions: Vec<SourceContextResponse>,
 }
 
 /// Response for CommentTopic metadata
@@ -840,7 +836,6 @@ pub struct CommentTopicResponse {
   pub scope: ScopeInfo,
   pub mentioned_topics: Vec<String>,
   pub context: Vec<SourceContextResponse>,
-  pub mentions: Vec<SourceContextResponse>,
 }
 
 /// Enum for different topic metadata response types
@@ -989,7 +984,6 @@ fn topic_metadata_to_response(
           .collect(),
         relatives: metadata.relatives().iter().map(|t| t.id.clone()).collect(),
         mutations: mutations_response,
-        mentions: convert_source_context(metadata.mentions()),
       })
     }
 
@@ -1020,7 +1014,6 @@ fn topic_metadata_to_response(
       scope: scope_info,
       condition: condition.id.clone(),
       context: convert_source_context(metadata.context()),
-      mentions: convert_source_context(metadata.mentions()),
     }),
 
     crate::core::TopicMetadata::CommentTopic {
@@ -1039,7 +1032,6 @@ fn topic_metadata_to_response(
       scope: scope_info,
       mentioned_topics: mentioned_topics.iter().map(|t| t.id.clone()).collect(),
       context: convert_source_context(metadata.context()),
-      mentions: convert_source_context(metadata.mentions()),
     }),
   }
 }
@@ -1387,10 +1379,10 @@ pub async fn create_comment(
 
       for topic_id in mentioned_ids {
         let topic = new_topic(topic_id);
-        if let Some(topic_meta) = audit_data.topic_metadata.get(&topic) {
+        if let Some(topic_mentions) = audit_data.topic_mentions.get(&topic) {
           mentions_updates.push((
             topic_id.to_string(),
-            convert_source_context(topic_meta.mentions()),
+            convert_source_context(topic_mentions),
           ));
         }
       }
@@ -1438,14 +1430,16 @@ pub async fn get_comments_mentioning_topic(
   let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
 
   let mentioned_topic = new_topic(&mentioned_topic_id);
-  let topic_meta = audit_data
-    .topic_metadata
-    .get(&mentioned_topic)
-    .ok_or(StatusCode::NOT_FOUND)?;
+
+  // Verify the topic exists
+  if !audit_data.topic_metadata.contains_key(&mentioned_topic) {
+    return Err(StatusCode::NOT_FOUND);
+  }
 
   // Collect comment topic IDs from the mentions reference groups
+  let mentions = audit_data.topic_mentions.get(&mentioned_topic).map(|v| v.as_slice()).unwrap_or(&[]);
   let mut comment_topic_ids: Vec<String> = Vec::new();
-  for group in topic_meta.mentions() {
+  for group in mentions {
     for reference in group.scope_references() {
       if let Some(mention_topics) = reference.mention_topics() {
         for t in mention_topics {

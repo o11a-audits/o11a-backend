@@ -63,9 +63,9 @@ pub fn analyze(
     }
   }
 
-  // Build SourceContexts for each referenced topic and update their mentions field
+  // Build SourceContexts for each referenced topic and store in topic_mentions
   populate_mentions(
-    &mut audit_data.topic_metadata,
+    &mut audit_data.topic_mentions,
     mentions_by_topic,
     &audit_data.nodes,
   );
@@ -116,7 +116,6 @@ fn process_documentation_node(
           kind: UnnamedTopicKind::DocumentationRoot,
           scope: scope.clone(),
           context,
-          mentions: vec![],
         },
       );
 
@@ -152,7 +151,6 @@ fn process_documentation_node(
           kind: UnnamedTopicKind::DocumentationHeading,
           scope: scope.clone(),
           context,
-          mentions: vec![],
         },
       );
 
@@ -195,7 +193,6 @@ fn process_documentation_node(
           kind: TitledTopicKind::DocumentationSection,
           title: title.clone(),
           context,
-          mentions: vec![],
         },
       );
 
@@ -233,7 +230,6 @@ fn process_documentation_node(
           kind: UnnamedTopicKind::DocumentationParagraph,
           scope: scope.clone(),
           context,
-          mentions: vec![],
         },
       );
 
@@ -264,7 +260,6 @@ fn process_documentation_node(
           kind: UnnamedTopicKind::DocumentationSentence,
           scope: scope.clone(),
           context,
-          mentions: vec![],
         },
       );
 
@@ -295,7 +290,6 @@ fn process_documentation_node(
           kind: UnnamedTopicKind::DocumentationCodeBlock,
           scope: scope.clone(),
           context,
-          mentions: vec![],
         },
       );
 
@@ -325,7 +319,6 @@ fn process_documentation_node(
           kind: UnnamedTopicKind::DocumentationList,
           scope: scope.clone(),
           context,
-          mentions: vec![],
         },
       );
 
@@ -355,7 +348,6 @@ fn process_documentation_node(
           kind: UnnamedTopicKind::DocumentationBlockQuote,
           scope: scope.clone(),
           context,
-          mentions: vec![],
         },
       );
 
@@ -385,7 +377,6 @@ fn process_documentation_node(
           kind: UnnamedTopicKind::DocumentationInlineCode,
           scope: scope.clone(),
           context,
-          mentions: vec![],
         },
       );
 
@@ -541,10 +532,10 @@ fn build_self_context(
   groups
 }
 
-/// Builds SourceContexts from collected mentions and updates the referenced topics' mentions field.
+/// Builds SourceContexts from collected mentions and stores them in topic_mentions.
 /// Groups mentions by component (H1 section), with member-level (sub-H1) and containing_block-level (paragraph) sub-groups.
 fn populate_mentions(
-  topic_metadata: &mut BTreeMap<topic::Topic, TopicMetadata>,
+  topic_mentions: &mut BTreeMap<topic::Topic, Vec<core::SourceContext>>,
   mentions_by_topic: BTreeMap<topic::Topic, Vec<core::Scope>>,
   nodes: &BTreeMap<topic::Topic, Node>,
 ) {
@@ -607,11 +598,8 @@ fn populate_mentions(
       }
     }
 
-    // Update the referenced topic's mentions field
-    if let Some(TopicMetadata::NamedTopic { mentions, .. }) =
-      topic_metadata.get_mut(&referenced_topic)
-    {
-      *mentions = mention_groups;
+    if !mention_groups.is_empty() {
+      topic_mentions.insert(referenced_topic, mention_groups);
     }
   }
 }

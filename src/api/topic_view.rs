@@ -1242,10 +1242,12 @@ pub fn build_mentions_panel(
   source_text_cache: &std::collections::HashMap<String, String>,
 ) -> Option<MentionsPanelResponse> {
   let topic = topic::new_topic(topic_id);
-  let metadata = audit_data.topic_metadata.get(&topic)?;
+  // Verify the topic exists
+  audit_data.topic_metadata.get(&topic)?;
 
+  let mentions = audit_data.topic_mentions.get(&topic).map(|v| v.as_slice()).unwrap_or(&[]);
   let mentions_panel_html = render_grouped_source_panel(
-    metadata.mentions(),
+    mentions,
     audit_data,
     source_text_cache,
     true,

@@ -1499,7 +1499,6 @@ fn process_second_pass_nodes(
         ancestors: ancestor_topics,
         descendants: descendant_topics,
         relatives: relative_topics,
-        mentions: vec![], // Populated during documentation analysis
       };
 
       topic_metadata.insert(topic.clone(), topic_metadata_entry);
@@ -1595,7 +1594,6 @@ fn process_second_pass_nodes(
             kind,
             condition,
             context: vec![],
-            mentions: vec![],
           },
         );
       } else {
@@ -1681,7 +1679,6 @@ fn process_second_pass_nodes(
             scope: scope.clone(),
             kind,
             context: vec![],
-            mentions: vec![],
           },
         );
       }

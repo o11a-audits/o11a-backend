@@ -1735,8 +1735,9 @@ pub fn build_agent_topic_context(
     audit_data,
     source_text_cache,
   );
+  let topic_mentions = audit_data.topic_mentions.get(&topic).map(|v| v.as_slice()).unwrap_or(&[]);
   let mentions = convert_source_groups(
-    metadata.mentions(),
+    topic_mentions,
     &topic,
     audit_data,
     source_text_cache,

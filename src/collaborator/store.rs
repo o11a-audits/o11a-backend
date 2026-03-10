@@ -34,7 +34,6 @@ pub fn register_comment_in_audit_data(
       scope: scope.to_scope(),
       mentioned_topics,
       context: vec![],
-      mentions: vec![],
     },
   );
 
@@ -56,7 +55,7 @@ pub fn register_comment_in_audit_data(
 }
 
 /// Inserts a CommentMention reference into the mentioned topic's
-/// `TopicMetadata.mentions` SourceContexts.
+/// mentions in `audit_data.topic_mentions`.
 ///
 /// Uses the comment's target topic as the reference_topic and
 /// the comment's scope to determine the correct group (component) and
@@ -102,16 +101,12 @@ fn insert_comment_mention(
     ref_sort_key,
   );
 
-  // Get the mentioned topic's metadata and insert into its mentions field
+  // Insert into the mentioned topic's mentions
   let mentioned_topic = new_topic(mentioned_topic_id);
-  let mentions = match audit_data.topic_metadata.get_mut(&mentioned_topic) {
-    Some(core::TopicMetadata::NamedTopic { mentions, .. })
-    | Some(core::TopicMetadata::UnnamedTopic { mentions, .. })
-    | Some(core::TopicMetadata::TitledTopic { mentions, .. })
-    | Some(core::TopicMetadata::ControlFlow { mentions, .. })
-    | Some(core::TopicMetadata::CommentTopic { mentions, .. }) => mentions,
-    None => return,
-  };
+  let mentions = audit_data
+    .topic_mentions
+    .entry(mentioned_topic)
+    .or_default();
   insert_into_context(
     mentions,
     component_topic,

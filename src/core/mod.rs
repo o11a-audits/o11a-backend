@@ -228,6 +228,9 @@ pub struct AuditData {
   pub features: BTreeMap<topic::Topic, Feature>,
   /// Requirements keyed by R-prefixed topic ID. Each belongs to one feature.
   pub requirements: BTreeMap<topic::Topic, Requirement>,
+  /// Mentions for each topic: documentation sections or comments that reference a topic.
+  /// Stored separately from TopicMetadata so that metadata never needs to be mutated.
+  pub topic_mentions: BTreeMap<topic::Topic, Vec<SourceContext>>,
 }
 
 /// Common short English words that should not match as simple topic names.
@@ -1219,16 +1222,12 @@ pub enum TopicMetadata {
     /// 3. Are involved in this variable's assignment (RHS of assignments)
     /// Only populated for variable declarations.
     relatives: Vec<topic::Topic>,
-    /// Documentation sections that mention this topic via code identifiers.
-    /// Grouped by file (container), with section-level and paragraph-level sub-groups.
-    mentions: Vec<SourceContext>,
   },
   UnnamedTopic {
     topic: topic::Topic,
     scope: Scope,
     kind: UnnamedTopicKind,
     context: Vec<SourceContext>,
-    mentions: Vec<SourceContext>,
   },
   /// A control flow statement (if/for/while/do-while) with its condition topic.
   ControlFlow {
@@ -1238,7 +1237,6 @@ pub enum TopicMetadata {
     /// The condition expression topic.
     condition: topic::Topic,
     context: Vec<SourceContext>,
-    mentions: Vec<SourceContext>,
   },
   /// A topic with a title (like documentation sections) but not a full declaration
   TitledTopic {
@@ -1247,7 +1245,6 @@ pub enum TopicMetadata {
     kind: TitledTopicKind,
     title: String,
     context: Vec<SourceContext>,
-    mentions: Vec<SourceContext>,
   },
   /// A comment topic with immutable metadata
   CommentTopic {
@@ -1259,7 +1256,6 @@ pub enum TopicMetadata {
     created_at: String,
     mentioned_topics: Vec<topic::Topic>,
     context: Vec<SourceContext>,
-    mentions: Vec<SourceContext>,
   },
 }
 
@@ -1405,16 +1401,6 @@ impl TopicMetadata {
         Some(created_at.as_str())
       }
       _ => None,
-    }
-  }
-
-  pub fn mentions(&self) -> &[SourceContext] {
-    match self {
-      TopicMetadata::NamedTopic { mentions, .. }
-      | TopicMetadata::UnnamedTopic { mentions, .. }
-      | TopicMetadata::ControlFlow { mentions, .. }
-      | TopicMetadata::TitledTopic { mentions, .. }
-      | TopicMetadata::CommentTopic { mentions, .. } => mentions,
     }
   }
 
@@ -1641,7 +1627,6 @@ pub fn new_audit_data(
       ancestors: Vec::new(),
       descendants: Vec::new(),
       relatives: Vec::new(),
-      mentions: Vec::new(),
     },
   );
 
@@ -1663,7 +1648,6 @@ pub fn new_audit_data(
       ancestors: Vec::new(),
       descendants: Vec::new(),
       relatives: Vec::new(),
-      mentions: Vec::new(),
     },
   );
 
@@ -1685,7 +1669,6 @@ pub fn new_audit_data(
       ancestors: Vec::new(),
       descendants: Vec::new(),
       relatives: Vec::new(),
-      mentions: Vec::new(),
     },
   );
 
@@ -1701,6 +1684,7 @@ pub fn new_audit_data(
     comment_index: CommentIndex::empty(),
     features: BTreeMap::new(),
     requirements: BTreeMap::new(),
+    topic_mentions: BTreeMap::new(),
   }
 }
 
