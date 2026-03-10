@@ -1,6 +1,6 @@
 use crate::collaborator::models::*;
 use crate::collaborator::{formatter, parser};
-use crate::core::{self, DataContext};
+use crate::core::{self, topic, DataContext, Feature};
 use sqlx::SqlitePool;
 
 // ============================================================================
@@ -66,6 +66,48 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
   .await?;
   sqlx::query(
     "CREATE INDEX IF NOT EXISTS idx_votes_user ON comment_votes(user_id)",
+  )
+  .execute(pool)
+  .await?;
+
+  // Features table
+  sqlx::query(
+    r#"
+        CREATE TABLE IF NOT EXISTS features (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            audit_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+        "#,
+  )
+  .execute(pool)
+  .await?;
+
+  sqlx::query(
+    "CREATE INDEX IF NOT EXISTS idx_features_audit ON features(audit_id)",
+  )
+  .execute(pool)
+  .await?;
+
+  // Feature-topic associations
+  sqlx::query(
+    r#"
+        CREATE TABLE IF NOT EXISTS feature_topics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            feature_id INTEGER NOT NULL,
+            topic_id TEXT NOT NULL,
+            relation TEXT NOT NULL,
+            UNIQUE(feature_id, topic_id, relation)
+        )
+        "#,
+  )
+  .execute(pool)
+  .await?;
+
+  sqlx::query(
+    "CREATE INDEX IF NOT EXISTS idx_feature_topics_feature ON feature_topics(feature_id)",
   )
   .execute(pool)
   .await?;
@@ -375,4 +417,175 @@ pub async fn get_unvoted_comment_ids(
   .bind(user_id)
   .fetch_all(pool)
   .await
+}
+
+// ============================================================================
+// Feature CRUD operations
+// ============================================================================
+
+/// Database row for a feature
+#[derive(Debug, sqlx::FromRow)]
+pub struct FeatureRow {
+  pub id: i64,
+  pub audit_id: String,
+  pub name: String,
+  pub description: String,
+  pub created_at: String,
+}
+
+/// Database row for a feature-topic association
+#[derive(Debug, sqlx::FromRow)]
+pub struct FeatureTopicRow {
+  pub id: i64,
+  pub feature_id: i64,
+  pub topic_id: String,
+  pub relation: String,
+}
+
+/// Creates a new feature and returns the row
+pub async fn create_feature(
+  pool: &SqlitePool,
+  audit_id: &str,
+  name: &str,
+  description: &str,
+) -> Result<FeatureRow, sqlx::Error> {
+  let result = sqlx::query(
+    r#"
+        INSERT INTO features (audit_id, name, description)
+        VALUES (?, ?, ?)
+        "#,
+  )
+  .bind(audit_id)
+  .bind(name)
+  .bind(description)
+  .execute(pool)
+  .await?;
+
+  let id = result.last_insert_rowid();
+  sqlx::query_as::<_, FeatureRow>("SELECT * FROM features WHERE id = ?")
+    .bind(id)
+    .fetch_one(pool)
+    .await
+}
+
+/// Adds a topic association to a feature
+pub async fn add_feature_topic(
+  pool: &SqlitePool,
+  feature_id: i64,
+  topic_id: &str,
+  relation: &str,
+) -> Result<(), sqlx::Error> {
+  sqlx::query(
+    r#"
+        INSERT OR IGNORE INTO feature_topics (feature_id, topic_id, relation)
+        VALUES (?, ?, ?)
+        "#,
+  )
+  .bind(feature_id)
+  .bind(topic_id)
+  .bind(relation)
+  .execute(pool)
+  .await?;
+  Ok(())
+}
+
+/// Removes a topic association from a feature
+pub async fn remove_feature_topic(
+  pool: &SqlitePool,
+  feature_id: i64,
+  topic_id: &str,
+  relation: &str,
+) -> Result<(), sqlx::Error> {
+  sqlx::query(
+    "DELETE FROM feature_topics WHERE feature_id = ? AND topic_id = ? AND relation = ?",
+  )
+  .bind(feature_id)
+  .bind(topic_id)
+  .bind(relation)
+  .execute(pool)
+  .await?;
+  Ok(())
+}
+
+/// Deletes all features and their topic associations for an audit.
+/// Used before re-inserting LLM-generated features.
+pub async fn delete_all_features_for_audit(
+  pool: &SqlitePool,
+  audit_id: &str,
+) -> Result<(), sqlx::Error> {
+  // Delete topic associations for all features in this audit
+  sqlx::query(
+    r#"
+        DELETE FROM feature_topics WHERE feature_id IN (
+            SELECT id FROM features WHERE audit_id = ?
+        )
+        "#,
+  )
+  .bind(audit_id)
+  .execute(pool)
+  .await?;
+
+  // Delete the features themselves
+  sqlx::query("DELETE FROM features WHERE audit_id = ?")
+    .bind(audit_id)
+    .execute(pool)
+    .await?;
+
+  Ok(())
+}
+
+/// Load all features from the database and populate audit_data.features.
+/// Returns the number of features loaded.
+pub async fn load_all_features(
+  pool: &SqlitePool,
+  data_context: &mut DataContext,
+) -> Result<usize, sqlx::Error> {
+  let features = sqlx::query_as::<_, FeatureRow>("SELECT * FROM features")
+    .fetch_all(pool)
+    .await?;
+
+  let feature_topics =
+    sqlx::query_as::<_, FeatureTopicRow>("SELECT * FROM feature_topics")
+      .fetch_all(pool)
+      .await?;
+
+  // Group topic associations by feature_id
+  let mut topics_by_feature: std::collections::HashMap<i64, Vec<&FeatureTopicRow>> =
+    std::collections::HashMap::new();
+  for ft in &feature_topics {
+    topics_by_feature.entry(ft.feature_id).or_default().push(ft);
+  }
+
+  let count = features.len();
+
+  for row in &features {
+    if let Some(audit_data) = data_context.get_audit_mut(&row.audit_id) {
+      let mut doc_topics = Vec::new();
+      let mut src_topics = Vec::new();
+
+      if let Some(assocs) = topics_by_feature.get(&row.id) {
+        for ft in assocs {
+          let t = topic::new_topic(&ft.topic_id);
+          match ft.relation.as_str() {
+            "documentation" => doc_topics.push(t),
+            "source" => src_topics.push(t),
+            _ => {}
+          }
+        }
+      }
+
+      let feature_topic = topic::new_feature_topic(row.id as i32);
+      audit_data.features.insert(
+        feature_topic,
+        Feature {
+          name: row.name.clone(),
+          description: row.description.clone(),
+          documentation_topics: doc_topics,
+          source_topics: src_topics,
+        },
+      );
+    }
+  }
+
+  Ok(count)
 }

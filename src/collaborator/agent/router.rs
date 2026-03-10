@@ -21,7 +21,8 @@ Consider goals for the customer-facing interface and logic, \
 as well as goals for api interactions, admin operations, and security guarantees. \
 Think not only about the happy path feature set, \
 but also about how the project is designed to handle the edge cases, error conditions, and deliberate attacks. \
-Provide precise, structured analysis when requested.";
+Provide precise, structured analysis when requested. Only respond with \
+structured JSON, do not include any additional text or explanations in your response.";
 
 pub enum TaskSize {
   Large,
@@ -51,9 +52,11 @@ struct ResponseMessage {
 
 /// Send a prompt to the OpenRouter API with the audit system message prepended.
 ///
-/// When `AGENT_DRY_RUN` is set to a file path, the full prompt (system + user
-/// messages) is written to that file and the function returns an error
-/// indicating dry run mode, without making any API call.
+/// When `AGENT_DRY_RUN` is set to a file path (set via
+/// `export AGENT_DRY_RUN=./agent_prompt.txt`, unset via `unset AGENT_DRY_RUN`),
+/// the full prompt (system + user messages) is written to that file and the
+/// function returns an error indicating dry run mode, without making any
+/// API call.
 pub async fn chat_completion(
   task_size: TaskSize,
   system_message: &str,
@@ -70,9 +73,8 @@ pub async fn chat_completion(
        === USER PROMPT ===\n{}",
       model, system_message, prompt
     );
-    std::fs::write(&path, &output).map_err(|e| {
-      format!("Failed to write dry run to '{}': {}", path, e)
-    })?;
+    std::fs::write(&path, &output)
+      .map_err(|e| format!("Failed to write dry run to '{}': {}", path, e))?;
     println!("Dry run prompt written to: {}", path);
     return Err("dry run — prompt written, no API call made".to_string());
   }

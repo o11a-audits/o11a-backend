@@ -10,8 +10,8 @@ use sqlx::FromRow;
 use crate::api::AppState;
 use crate::collaborator::{db, formatter, models::*, parser, store};
 use crate::core::{
-  self, Node, project,
-  topic::{TopicKind, new_topic},
+  self, Feature, Node, project,
+  topic::{self, TopicKind, new_topic},
 };
 
 // Health check handler
@@ -1812,6 +1812,30 @@ pub async fn build_features(
     })
     .collect();
 
+  // Persist to database: clear old features, insert new ones
+  db::delete_all_features_for_audit(&state.db, &audit_id)
+    .await
+    .map_err(|e| {
+      eprintln!("delete_all_features_for_audit failed: {}", e);
+      StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+  for (_feat_topic, feature) in &features {
+    let row =
+      db::create_feature(&state.db, &audit_id, &feature.name, &feature.description)
+        .await
+        .map_err(|e| {
+          eprintln!("create_feature failed: {}", e);
+          StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    for dt in &feature.documentation_topics {
+      let _ = db::add_feature_topic(&state.db, row.id, dt.id(), "documentation").await;
+    }
+    for st in &feature.source_topics {
+      let _ = db::add_feature_topic(&state.db, row.id, st.id(), "source").await;
+    }
+  }
+
   // Store features in audit data
   {
     let mut ctx = state.data_context.lock().map_err(|e| {
@@ -1824,4 +1848,255 @@ pub async fn build_features(
   }
 
   Ok(Json(FeaturesResponse { features: response }))
+}
+
+fn feature_to_response(
+  topic: &core::topic::Topic,
+  feature: &Feature,
+) -> FeatureResponse {
+  FeatureResponse {
+    topic: topic.id().to_string(),
+    name: feature.name.clone(),
+    description: feature.description.clone(),
+    documentation_topics: feature
+      .documentation_topics
+      .iter()
+      .map(|t| t.id().to_string())
+      .collect(),
+    source_topics: feature
+      .source_topics
+      .iter()
+      .map(|t| t.id().to_string())
+      .collect(),
+  }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateFeatureRequest {
+  pub name: String,
+  pub description: String,
+}
+
+/// POST /api/v1/audits/:audit_id/features
+/// Creates a new user-defined feature.
+pub async fn create_feature(
+  State(state): State<AppState>,
+  Path(audit_id): Path<String>,
+  Json(payload): Json<CreateFeatureRequest>,
+) -> Result<Json<FeatureResponse>, StatusCode> {
+  println!("POST /api/v1/audits/{}/features", audit_id);
+
+  let row =
+    db::create_feature(&state.db, &audit_id, &payload.name, &payload.description)
+      .await
+      .map_err(|e| {
+        eprintln!("create_feature failed: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+      })?;
+
+  let feature_topic = topic::new_feature_topic(row.id as i32);
+  let feature = Feature {
+    name: row.name,
+    description: row.description,
+    documentation_topics: Vec::new(),
+    source_topics: Vec::new(),
+  };
+
+  let response = feature_to_response(&feature_topic, &feature);
+
+  // Store in memory
+  {
+    let mut ctx = state.data_context.lock().map_err(|e| {
+      eprintln!("Mutex poisoned in create_feature: {}", e);
+      StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let audit_data =
+      ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+    audit_data.features.insert(feature_topic, feature);
+  }
+
+  Ok(Json(response))
+}
+
+/// GET /api/v1/audits/:audit_id/features/:feature_id
+/// Gets a single feature by its numeric ID.
+pub async fn get_feature(
+  State(state): State<AppState>,
+  Path((audit_id, feature_id)): Path<(String, i32)>,
+) -> Result<Json<FeatureResponse>, StatusCode> {
+  println!(
+    "GET /api/v1/audits/{}/features/{}",
+    audit_id, feature_id
+  );
+
+  let ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in get_feature: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+
+  let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+  let feature_topic = topic::new_feature_topic(feature_id);
+  let feature = audit_data
+    .features
+    .get(&feature_topic)
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+  Ok(Json(feature_to_response(&feature_topic, feature)))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AddFeatureTopicRequest {
+  pub topic_id: String,
+}
+
+/// POST /api/v1/audits/:audit_id/features/:feature_id/documentation_topics
+/// Adds a documentation topic to a feature.
+pub async fn add_feature_documentation_topic(
+  State(state): State<AppState>,
+  Path((audit_id, feature_id)): Path<(String, i64)>,
+  Json(payload): Json<AddFeatureTopicRequest>,
+) -> Result<Json<FeatureResponse>, StatusCode> {
+  println!(
+    "POST /api/v1/audits/{}/features/{}/documentation_topics",
+    audit_id, feature_id
+  );
+
+  // Persist to DB
+  db::add_feature_topic(&state.db, feature_id, &payload.topic_id, "documentation")
+    .await
+    .map_err(|e| {
+      eprintln!("add_feature_topic failed: {}", e);
+      StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+  // Update in memory
+  let mut ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in add_feature_documentation_topic: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+  let audit_data =
+    ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+  let feature_topic = topic::new_feature_topic(feature_id as i32);
+  let feature = audit_data
+    .features
+    .get_mut(&feature_topic)
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+  let new_topic = topic::new_topic(&payload.topic_id);
+  if !feature.documentation_topics.contains(&new_topic) {
+    feature.documentation_topics.push(new_topic);
+  }
+
+  Ok(Json(feature_to_response(&feature_topic, feature)))
+}
+
+/// POST /api/v1/audits/:audit_id/features/:feature_id/source_topics
+/// Adds a source topic to a feature.
+pub async fn add_feature_source_topic(
+  State(state): State<AppState>,
+  Path((audit_id, feature_id)): Path<(String, i64)>,
+  Json(payload): Json<AddFeatureTopicRequest>,
+) -> Result<Json<FeatureResponse>, StatusCode> {
+  println!(
+    "POST /api/v1/audits/{}/features/{}/source_topics",
+    audit_id, feature_id
+  );
+
+  db::add_feature_topic(&state.db, feature_id, &payload.topic_id, "source")
+    .await
+    .map_err(|e| {
+      eprintln!("add_feature_topic failed: {}", e);
+      StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+  let mut ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in add_feature_source_topic: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+  let audit_data =
+    ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+  let feature_topic = topic::new_feature_topic(feature_id as i32);
+  let feature = audit_data
+    .features
+    .get_mut(&feature_topic)
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+  let new_topic = topic::new_topic(&payload.topic_id);
+  if !feature.source_topics.contains(&new_topic) {
+    feature.source_topics.push(new_topic);
+  }
+
+  Ok(Json(feature_to_response(&feature_topic, feature)))
+}
+
+/// DELETE /api/v1/audits/:audit_id/features/:feature_id/documentation_topics/:topic_id
+/// Removes a documentation topic from a feature.
+pub async fn remove_feature_documentation_topic(
+  State(state): State<AppState>,
+  Path((audit_id, feature_id, topic_id)): Path<(String, i64, String)>,
+) -> Result<Json<FeatureResponse>, StatusCode> {
+  println!(
+    "DELETE /api/v1/audits/{}/features/{}/documentation_topics/{}",
+    audit_id, feature_id, topic_id
+  );
+
+  db::remove_feature_topic(&state.db, feature_id, &topic_id, "documentation")
+    .await
+    .map_err(|e| {
+      eprintln!("remove_feature_topic failed: {}", e);
+      StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+  let mut ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in remove_feature_documentation_topic: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+  let audit_data =
+    ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+  let feature_topic = topic::new_feature_topic(feature_id as i32);
+  let feature = audit_data
+    .features
+    .get_mut(&feature_topic)
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+  let remove_topic = topic::new_topic(&topic_id);
+  feature.documentation_topics.retain(|t| t != &remove_topic);
+
+  Ok(Json(feature_to_response(&feature_topic, feature)))
+}
+
+/// DELETE /api/v1/audits/:audit_id/features/:feature_id/source_topics/:topic_id
+/// Removes a source topic from a feature.
+pub async fn remove_feature_source_topic(
+  State(state): State<AppState>,
+  Path((audit_id, feature_id, topic_id)): Path<(String, i64, String)>,
+) -> Result<Json<FeatureResponse>, StatusCode> {
+  println!(
+    "DELETE /api/v1/audits/{}/features/{}/source_topics/{}",
+    audit_id, feature_id, topic_id
+  );
+
+  db::remove_feature_topic(&state.db, feature_id, &topic_id, "source")
+    .await
+    .map_err(|e| {
+      eprintln!("remove_feature_topic failed: {}", e);
+      StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+  let mut ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in remove_feature_source_topic: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+  let audit_data =
+    ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+  let feature_topic = topic::new_feature_topic(feature_id as i32);
+  let feature = audit_data
+    .features
+    .get_mut(&feature_topic)
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+  let remove_topic = topic::new_topic(&topic_id);
+  feature.source_topics.retain(|t| t != &remove_topic);
+
+  Ok(Json(feature_to_response(&feature_topic, feature)))
 }

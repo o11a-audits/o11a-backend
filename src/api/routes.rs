@@ -99,11 +99,31 @@ pub fn create_router(state: AppState) -> Router {
     // ============================================
     .route(
       "/api/v1/audits/:audit_id/features",
-      get(handlers::get_features),
+      get(handlers::get_features).post(handlers::create_feature),
     )
     .route(
       "/api/v1/audits/:audit_id/features/build",
       post(handlers::build_features),
+    )
+    .route(
+      "/api/v1/audits/:audit_id/features/:feature_id",
+      get(handlers::get_feature),
+    )
+    .route(
+      "/api/v1/audits/:audit_id/features/:feature_id/documentation_topics",
+      post(handlers::add_feature_documentation_topic),
+    )
+    .route(
+      "/api/v1/audits/:audit_id/features/:feature_id/documentation_topics/:topic_id",
+      delete(handlers::remove_feature_documentation_topic),
+    )
+    .route(
+      "/api/v1/audits/:audit_id/features/:feature_id/source_topics",
+      post(handlers::add_feature_source_topic),
+    )
+    .route(
+      "/api/v1/audits/:audit_id/features/:feature_id/source_topics/:topic_id",
+      delete(handlers::remove_feature_source_topic),
     )
     // WebSocket for real-time comment updates
     .route(

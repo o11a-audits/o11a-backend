@@ -73,6 +73,20 @@ async fn main() {
 
   println!("Loaded {} comments", comment_count);
 
+  // Load and restore all features
+  println!("Loading features...");
+  let feature_count = {
+    let mut ctx = data_context.lock().unwrap();
+    collab_db::load_all_features(&pool, &mut ctx)
+      .await
+      .unwrap_or_else(|e| {
+        eprintln!("Warning: Failed to load features: {}", e);
+        0
+      })
+  };
+
+  println!("Loaded {} features", feature_count);
+
   // Extract DataContext from Arc<Mutex<>> for AppState
   let data_context = Arc::try_unwrap(data_context)
     .ok()
