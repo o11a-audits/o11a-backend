@@ -905,30 +905,6 @@ fn convert_source_context(
     .collect()
 }
 
-/// Recursively collects comment topic IDs from all children (references and nested blocks).
-fn collect_comment_topics_from_children(
-  children: &[crate::core::SourceChild],
-  comment_topic_ids: &mut Vec<String>,
-) {
-  for child in children {
-    match child {
-      crate::core::SourceChild::Reference(reference) => {
-        if let Some(mention_topics) = reference.mention_topics() {
-          for t in mention_topics {
-            comment_topic_ids.push(t.id.clone());
-          }
-        }
-      }
-      crate::core::SourceChild::AnnotatedBlock(block) => {
-        collect_comment_topics_from_children(
-          block.children(),
-          comment_topic_ids,
-        );
-      }
-    }
-  }
-}
-
 // Helper function to convert TopicMetadata to TopicMetadataResponse
 fn topic_metadata_to_response(
   topic: &crate::core::topic::Topic,
@@ -1155,16 +1131,9 @@ pub async fn get_mentions_panel(
 
   let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
 
-  let source_text_cache = ctx
-    .source_text_cache
-    .get(&audit_id)
-    .cloned()
-    .unwrap_or_default();
-
   let response = super::topic_view::build_mentions_panel(
     &topic_id,
     audit_data,
-    &source_text_cache,
   )
   .ok_or_else(|| {
     eprintln!(
@@ -1248,9 +1217,12 @@ pub async fn get_topic_comments(
   })?;
   let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
 
+  let target_topic = new_topic(&topic_id);
   let comments = audit_data
     .comment_index
-    .get(&topic_id)
+    .get(&target_topic)
+    .map(|v| v.as_slice())
+    .unwrap_or(&[])
     .iter()
     .filter_map(|comment_topic| {
       let metadata = audit_data.topic_metadata.get(comment_topic)?;
@@ -1339,8 +1311,7 @@ pub async fn create_comment(
   let comment_topic = comment.comment_topic();
 
   // Parse mentions, render HTML, register in audit_data, and cache source text
-  let mut mentions_updates: Vec<(String, Vec<SourceContextResponse>)> =
-    Vec::new();
+  let mut mentions_updates: Vec<(String, Vec<String>)> = Vec::new();
   let mut comment_metadata_json = serde_json::Value::Null;
   {
     let mut ctx = state
@@ -1379,11 +1350,9 @@ pub async fn create_comment(
 
       for topic_id in mentioned_ids {
         let topic = new_topic(topic_id);
-        if let Some(topic_mentions) = audit_data.topic_mentions.get(&topic) {
-          mentions_updates.push((
-            topic_id.to_string(),
-            convert_source_context(topic_mentions),
-          ));
+        if let Some(comment_topics) = audit_data.mentions_index.get(&topic) {
+          let ids: Vec<String> = comment_topics.iter().map(|t| t.id.clone()).collect();
+          mentions_updates.push((topic_id.to_string(), ids));
         }
       }
     }
@@ -1405,7 +1374,7 @@ pub async fn create_comment(
     let _ = state.comment_broadcast.send(CommentEvent::MentionsUpdated {
       audit_id: audit_id.clone(),
       topic_id,
-      mentions: updated_mentions,
+      comment_topic_ids: updated_mentions,
     });
   }
 
@@ -1436,27 +1405,11 @@ pub async fn get_comments_mentioning_topic(
     return Err(StatusCode::NOT_FOUND);
   }
 
-  // Collect comment topic IDs from the mentions reference groups
-  let mentions = audit_data.topic_mentions.get(&mentioned_topic).map(|v| v.as_slice()).unwrap_or(&[]);
-  let mut comment_topic_ids: Vec<String> = Vec::new();
-  for group in mentions {
-    for reference in group.scope_references() {
-      if let Some(mention_topics) = reference.mention_topics() {
-        for t in mention_topics {
-          comment_topic_ids.push(t.id.clone());
-        }
-      }
-    }
-    for nested in group.nested_references() {
-      collect_comment_topics_from_children(
-        nested.children(),
-        &mut comment_topic_ids,
-      );
-    }
-  }
-
-  comment_topic_ids.sort_unstable();
-  comment_topic_ids.dedup();
+  let comment_topic_ids: Vec<String> = audit_data
+    .mentions_index
+    .get(&mentioned_topic)
+    .map(|topics| topics.iter().map(|t| t.id.clone()).collect())
+    .unwrap_or_default();
 
   Ok(Json(CommentListResponse { comment_topic_ids }))
 }
@@ -1506,16 +1459,21 @@ pub async fn update_comment_status(
       StatusCode::INTERNAL_SERVER_ERROR
     })?;
     if let Some(audit_data) = ctx.get_audit_mut(&audit_id) {
-      if let Some(target_id) = audit_data
+      if let Some(target_topic) = audit_data
         .topic_metadata
         .get(&comment_topic)
         .and_then(|m| m.target_topic())
-        .map(|t| t.id().to_string())
+        .cloned()
       {
         if payload.status == CommentStatus::Hidden {
-          audit_data.comment_index.remove(&target_id, &comment_topic);
+          if let Some(comments) = audit_data.comment_index.get_mut(&target_topic) {
+            comments.retain(|t| t != &comment_topic);
+          }
         } else {
-          audit_data.comment_index.insert(&target_id, comment_topic);
+          let comments = audit_data.comment_index.entry(target_topic).or_default();
+          if !comments.contains(&comment_topic) {
+            comments.push(comment_topic);
+          }
         }
       }
     }

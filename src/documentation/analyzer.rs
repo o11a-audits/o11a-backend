@@ -2,7 +2,7 @@ use crate::core;
 use crate::core::topic;
 use crate::core::{
   AST, AuditData, DataContext, Node, Scope, TitledTopicKind, TopicMetadata,
-  UnnamedTopicKind, ensure_context, insert_into_context,
+  UnnamedTopicKind, insert_into_context,
 };
 use crate::documentation::parser::{self, DocumentationAST, DocumentationNode};
 use std::collections::BTreeMap;
@@ -63,12 +63,26 @@ pub fn analyze(
     }
   }
 
-  // Build SourceContexts for each referenced topic and store in topic_mentions
-  populate_mentions(
-    &mut audit_data.topic_mentions,
-    mentions_by_topic,
-    &audit_data.nodes,
-  );
+  // Populate mentions_index: for each referenced topic, record the most specific
+  // doc topic (member if present, otherwise component) that mentions it.
+  for (referenced_topic, scopes) in mentions_by_topic {
+    let entries = audit_data
+      .mentions_index
+      .entry(referenced_topic)
+      .or_default();
+    for scope in scopes {
+      let mentioning_topic = match &scope {
+        Scope::Member { member, .. } | Scope::ContainingBlock { member, .. } => {
+          member.clone()
+        }
+        Scope::Component { component, .. } => component.clone(),
+        Scope::Global | Scope::Container { .. } => continue,
+      };
+      if !entries.contains(&mentioning_topic) {
+        entries.push(mentioning_topic);
+      }
+    }
+  }
 
   Ok(())
 }
@@ -530,78 +544,6 @@ fn build_self_context(
   }
 
   groups
-}
-
-/// Builds SourceContexts from collected mentions and stores them in topic_mentions.
-/// Groups mentions by component (H1 section), with member-level (sub-H1) and containing_block-level (paragraph) sub-groups.
-fn populate_mentions(
-  topic_mentions: &mut BTreeMap<topic::Topic, Vec<core::SourceContext>>,
-  mentions_by_topic: BTreeMap<topic::Topic, Vec<core::Scope>>,
-  nodes: &BTreeMap<topic::Topic, Node>,
-) {
-  for (referenced_topic, scopes) in mentions_by_topic {
-    let mut mention_groups: Vec<core::SourceContext> = Vec::new();
-
-    for scope in scopes {
-      match scope {
-        core::Scope::Global | core::Scope::Container { .. } => {
-          // Global/Container scope shouldn't have documentation mentions, skip
-        }
-        core::Scope::Component { component, .. } => {
-          // Component-level reference - ensure group exists (no reference to add)
-          let scope_sort_key = get_source_location_start(&component, nodes);
-          ensure_context(&mut mention_groups, component, scope_sort_key, true);
-        }
-        core::Scope::Member {
-          component, member, ..
-        } => {
-          // Member-level reference - add member as a scope-level reference
-          let component_sort_key = get_source_location_start(&component, nodes);
-          let member_sort_key = get_source_location_start(&member, nodes);
-          insert_into_context(
-            &mut mention_groups,
-            component,
-            component_sort_key,
-            true,
-            None,
-            &[],
-            core::Reference::project_reference(member, member_sort_key),
-          );
-        }
-        core::Scope::ContainingBlock {
-          component,
-          member,
-          containing_blocks,
-          ..
-        } => {
-          // ContainingBlock-level reference - nested under member
-          // Use the innermost (last) containing block
-          if let Some(layer) = containing_blocks.last() {
-            let component_sort_key =
-              get_source_location_start(&component, nodes);
-            let member_sort_key = get_source_location_start(&member, nodes);
-            let cb_sort_key = get_source_location_start(&layer.block, nodes);
-            insert_into_context(
-              &mut mention_groups,
-              component,
-              component_sort_key,
-              true,
-              Some((member, member_sort_key)),
-              &[],
-              core::Reference::project_reference(
-                layer.block.clone(),
-                cb_sort_key,
-              ),
-            );
-          }
-        }
-      }
-    }
-
-    if !mention_groups.is_empty() {
-      topic_mentions.insert(referenced_topic, mention_groups);
-    }
-  }
 }
 
 /// Gets the source location start for a topic from the nodes map.

@@ -223,14 +223,14 @@ pub struct AuditData {
   pub name_index: TopicNameIndex,
   /// Reverse index: target topic ID → non-hidden comment topics.
   /// Updated on comment create and status change.
-  pub comment_index: CommentIndex,
+  pub comment_index: HashMap<topic::Topic, Vec<topic::Topic>>,
   /// Features extracted from documentation, keyed by F-prefixed topic ID.
   pub features: BTreeMap<topic::Topic, Feature>,
   /// Requirements keyed by R-prefixed topic ID. Each belongs to one feature.
   pub requirements: BTreeMap<topic::Topic, Requirement>,
-  /// Mentions for each topic: documentation sections or comments that reference a topic.
-  /// Stored separately from TopicMetadata so that metadata never needs to be mutated.
-  pub topic_mentions: BTreeMap<topic::Topic, Vec<SourceContext>>,
+  /// Reverse index: mentioned topic → comment topics that mention it.
+  /// Updated on comment create.
+  pub mentions_index: HashMap<topic::Topic, Vec<topic::Topic>>,
 }
 
 /// Common short English words that should not match as simple topic names.
@@ -329,52 +329,6 @@ impl TopicNameIndex {
   }
 }
 
-/// Reverse index from target topic ID to non-hidden comment topics.
-/// Updated incrementally on comment create and status change.
-pub struct CommentIndex {
-  by_target: HashMap<String, Vec<topic::Topic>>,
-}
-
-impl CommentIndex {
-  pub fn empty() -> Self {
-    CommentIndex {
-      by_target: HashMap::new(),
-    }
-  }
-
-  /// Add a comment targeting a topic.
-  pub fn insert(&mut self, target_topic_id: &str, comment_topic: topic::Topic) {
-    let comments = self
-      .by_target
-      .entry(target_topic_id.to_string())
-      .or_default();
-    if !comments.contains(&comment_topic) {
-      comments.push(comment_topic);
-    }
-  }
-
-  /// Remove a comment (when hidden).
-  pub fn remove(
-    &mut self,
-    target_topic_id: &str,
-    comment_topic: &topic::Topic,
-  ) {
-    if let Some(comments) = self.by_target.get_mut(target_topic_id) {
-      comments.retain(|t| t != comment_topic);
-      if comments.is_empty() {
-        self.by_target.remove(target_topic_id);
-      }
-    }
-  }
-
-  /// Get all comment topics targeting a given topic.
-  pub fn get(&self, target_topic_id: &str) -> &[topic::Topic] {
-    self
-      .by_target
-      .get(target_topic_id)
-      .map_or(&[], |v| v.as_slice())
-  }
-}
 
 /// Cached static parts of a topic view (AST-derived, never invalidated).
 #[derive(Debug, Clone)]
@@ -1681,10 +1635,10 @@ pub fn new_audit_data(
     function_properties: BTreeMap::new(),
     variable_types: BTreeMap::new(),
     name_index: TopicNameIndex::empty(),
-    comment_index: CommentIndex::empty(),
+    comment_index: HashMap::new(),
     features: BTreeMap::new(),
     requirements: BTreeMap::new(),
-    topic_mentions: BTreeMap::new(),
+    mentions_index: HashMap::new(),
   }
 }
 

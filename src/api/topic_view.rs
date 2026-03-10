@@ -23,7 +23,7 @@ pub struct TopicViewResponse {
 
 #[derive(Debug, Serialize)]
 pub struct MentionsPanelResponse {
-  pub mentions_panel_html: String,
+  pub comment_topic_ids: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1239,23 +1239,18 @@ pub fn build_topic_view(
 pub fn build_mentions_panel(
   topic_id: &str,
   audit_data: &AuditData,
-  source_text_cache: &std::collections::HashMap<String, String>,
 ) -> Option<MentionsPanelResponse> {
   let topic = topic::new_topic(topic_id);
   // Verify the topic exists
   audit_data.topic_metadata.get(&topic)?;
 
-  let mentions = audit_data.topic_mentions.get(&topic).map(|v| v.as_slice()).unwrap_or(&[]);
-  let mentions_panel_html = render_grouped_source_panel(
-    mentions,
-    audit_data,
-    source_text_cache,
-    true,
-  );
+  let comment_topic_ids: Vec<String> = audit_data
+    .mentions_index
+    .get(&topic)
+    .map(|topics| topics.iter().map(|t| t.id.clone()).collect())
+    .unwrap_or_default();
 
-  Some(MentionsPanelResponse {
-    mentions_panel_html,
-  })
+  Some(MentionsPanelResponse { comment_topic_ids })
 }
 
 // ============================================================================

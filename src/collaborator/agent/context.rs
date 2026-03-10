@@ -28,7 +28,7 @@ pub struct AgentTopicContext {
   pub context: Vec<AgentSourceGroup>,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub expanded_context: Option<Vec<AgentSourceGroup>>,
-  pub mentions: Vec<AgentSourceGroup>,
+  pub mentions: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -204,7 +204,7 @@ fn lookup_topic_comments(
   topic: &topic::Topic,
   audit_data: &AuditData,
 ) -> Vec<String> {
-  let comment_topics = audit_data.comment_index.get(topic.id());
+  let comment_topics = audit_data.comment_index.get(topic).map(|v| v.as_slice()).unwrap_or(&[]);
   comment_topics
     .iter()
     .filter_map(|comment_topic| {
@@ -1735,13 +1735,11 @@ pub fn build_agent_topic_context(
     audit_data,
     source_text_cache,
   );
-  let topic_mentions = audit_data.topic_mentions.get(&topic).map(|v| v.as_slice()).unwrap_or(&[]);
-  let mentions = convert_source_groups(
-    topic_mentions,
-    &topic,
-    audit_data,
-    source_text_cache,
-  );
+  let mentions: Vec<String> = audit_data
+    .mentions_index
+    .get(&topic)
+    .map(|topics| topics.iter().map(|t| t.id.clone()).collect())
+    .unwrap_or_default();
 
   match metadata {
     TopicMetadata::NamedTopic {

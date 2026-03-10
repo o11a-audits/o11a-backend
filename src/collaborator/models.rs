@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
-pub use crate::api::{ScopeInfo, SourceContextResponse};
+pub use crate::api::ScopeInfo;
 use crate::core::topic;
 
 /// Reserved author IDs
@@ -280,12 +280,12 @@ pub enum CommentEvent {
     upvotes: i64,
     downvotes: i64,
   },
-  /// A topic's mentions field was updated (e.g. due to a new comment mentioning it).
-  /// Contains the full replacement payload for the topic's mentions.
+  /// A topic's mentions index was updated (e.g. due to a new comment mentioning it).
+  /// Contains the comment topic IDs that mention this topic.
   MentionsUpdated {
     audit_id: String,
     topic_id: String,
-    mentions: Vec<SourceContextResponse>,
+    comment_topic_ids: Vec<String>,
   },
 }
 

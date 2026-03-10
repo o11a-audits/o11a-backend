@@ -1,17 +1,16 @@
-use crate::api::ScopeInfo;
 use crate::collaborator::models::Comment;
 use crate::core::topic::Topic;
-use crate::core::{self, insert_into_context, topic::new_topic};
+use crate::core::{self, topic::new_topic};
 
-/// Registers a comment in audit_data's topic_metadata and wires up mentions.
+/// Registers a comment in audit_data's topic_metadata, comment_index, and mentions_index.
 ///
 /// 1. Inserts a `TopicMetadata::CommentTopic` entry for this comment
-/// 2. For each mention, inserts a `CommentMention` reference into the
-///    mentioned topic's `mentions` field
+/// 2. Adds the comment to the comment_index for its target topic
+/// 3. Adds the comment to the mentions_index for each mentioned topic
 pub fn register_comment_in_audit_data(
   audit_data: &mut core::AuditData,
   comment: &Comment,
-  scope: &ScopeInfo,
+  scope: &crate::api::ScopeInfo,
   mentions: &[Topic],
 ) {
   let comment_topic_id = comment.comment_topic_id();
@@ -38,82 +37,23 @@ pub fn register_comment_in_audit_data(
   );
 
   // Update comment index
-  audit_data
+  let target_topic = new_topic(&comment.topic_id);
+  let comments = audit_data
     .comment_index
-    .insert(&comment.topic_id, comment_topic.clone());
-
-  // Insert mention references into each mentioned topic's mentions field
-  for mention in mentions {
-    insert_comment_mention(
-      audit_data,
-      scope,
-      &comment.topic_id,
-      &mention.id,
-      comment_topic.clone(),
-    );
-  }
-}
-
-/// Inserts a CommentMention reference into the mentioned topic's
-/// mentions in `audit_data.topic_mentions`.
-///
-/// Uses the comment's target topic as the reference_topic and
-/// the comment's scope to determine the correct group (component) and
-/// nested group (member).
-fn insert_comment_mention(
-  audit_data: &mut core::AuditData,
-  scope: &ScopeInfo,
-  target_topic_id: &str,
-  mentioned_topic_id: &str,
-  mention_topic: Topic,
-) {
-  // Use the comment's target topic as the reference_topic
-  let reference_topic = new_topic(target_topic_id);
-  let ref_sort_key = audit_data
-    .nodes
-    .get(&reference_topic)
-    .and_then(|n| n.source_location_start());
-
-  // Determine component (group scope) — fall back to reference_topic if no component
-  let component_id = match &scope.component {
-    Some(id) => id.clone(),
-    None => return, // No component means we can't group it
-  };
-  let component_topic = new_topic(&component_id);
-  let component_sort_key = audit_data
-    .nodes
-    .get(&component_topic)
-    .and_then(|n| n.source_location_start());
-
-  // Determine subscope (nested group) from member, if present
-  let subscope = scope.member.as_ref().map(|member_id| {
-    let member_topic = new_topic(member_id);
-    let member_sort_key = audit_data
-      .nodes
-      .get(&member_topic)
-      .and_then(|n| n.source_location_start());
-    (member_topic, member_sort_key)
-  });
-
-  let reference = core::Reference::comment_mention(
-    reference_topic,
-    mention_topic,
-    ref_sort_key,
-  );
-
-  // Insert into the mentioned topic's mentions
-  let mentioned_topic = new_topic(mentioned_topic_id);
-  let mentions = audit_data
-    .topic_mentions
-    .entry(mentioned_topic)
+    .entry(target_topic)
     .or_default();
-  insert_into_context(
-    mentions,
-    component_topic,
-    component_sort_key,
-    true,
-    subscope,
-    &[],
-    reference,
-  );
+  if !comments.contains(&comment_topic) {
+    comments.push(comment_topic.clone());
+  }
+
+  // Update mentions index
+  for mention in mentions {
+    let entries = audit_data
+      .mentions_index
+      .entry(mention.clone())
+      .or_default();
+    if !entries.contains(&comment_topic) {
+      entries.push(comment_topic.clone());
+    }
+  }
 }
