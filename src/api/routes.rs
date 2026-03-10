@@ -117,13 +117,28 @@ pub fn create_router(state: AppState) -> Router {
       "/api/v1/audits/:audit_id/features/:feature_id/documentation_topics/:topic_id",
       delete(handlers::remove_feature_documentation_topic),
     )
+    // ============================================
+    // Requirement routes
+    // ============================================
     .route(
-      "/api/v1/audits/:audit_id/features/:feature_id/source_topics",
-      post(handlers::add_feature_source_topic),
+      "/api/v1/audits/:audit_id/features/:feature_id/requirements",
+      post(handlers::create_requirement),
     )
     .route(
-      "/api/v1/audits/:audit_id/features/:feature_id/source_topics/:topic_id",
-      delete(handlers::remove_feature_source_topic),
+      "/api/v1/audits/:audit_id/features/:feature_id/requirements/:requirement_id",
+      delete(handlers::delete_requirement),
+    )
+    .route(
+      "/api/v1/audits/:audit_id/requirements/:requirement_id",
+      get(handlers::get_requirement),
+    )
+    .route(
+      "/api/v1/audits/:audit_id/requirements/:requirement_id/source_topics",
+      post(handlers::add_requirement_source_topic),
+    )
+    .route(
+      "/api/v1/audits/:audit_id/requirements/:requirement_id/source_topics/:topic_id",
+      delete(handlers::remove_requirement_source_topic),
     )
     // WebSocket for real-time comment updates
     .route(

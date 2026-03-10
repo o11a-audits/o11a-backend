@@ -1714,17 +1714,62 @@ pub async fn get_agent_context(
 // ============================================
 
 #[derive(Debug, Serialize)]
+pub struct RequirementResponse {
+  pub topic: String,
+  pub description: String,
+  pub feature_topic: String,
+  pub source_topics: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct FeatureResponse {
   pub topic: String,
   pub name: String,
   pub description: String,
   pub documentation_topics: Vec<String>,
-  pub source_topics: Vec<String>,
+  pub requirement_topics: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct FeaturesResponse {
   pub features: Vec<FeatureResponse>,
+}
+
+fn feature_to_response(
+  feat_topic: &core::topic::Topic,
+  feature: &Feature,
+) -> FeatureResponse {
+  FeatureResponse {
+    topic: feat_topic.id().to_string(),
+    name: feature.name.clone(),
+    description: feature.description.clone(),
+    documentation_topics: feature
+      .documentation_topics
+      .iter()
+      .map(|t| t.id().to_string())
+      .collect(),
+    requirement_topics: feature
+      .requirement_topics
+      .iter()
+      .map(|t| t.id().to_string())
+      .collect(),
+  }
+}
+
+fn requirement_to_response(
+  req_topic: &core::topic::Topic,
+  requirement: &core::Requirement,
+) -> RequirementResponse {
+  RequirementResponse {
+    topic: req_topic.id().to_string(),
+    description: requirement.description.clone(),
+    feature_topic: requirement.feature_topic.id().to_string(),
+    source_topics: requirement
+      .source_topics
+      .iter()
+      .map(|t| t.id().to_string())
+      .collect(),
+  }
 }
 
 /// Get all features for an audit.
@@ -1744,21 +1789,7 @@ pub async fn get_features(
   let features = audit_data
     .features
     .iter()
-    .map(|(topic, feature)| FeatureResponse {
-      topic: topic.id().to_string(),
-      name: feature.name.clone(),
-      description: feature.description.clone(),
-      documentation_topics: feature
-        .documentation_topics
-        .iter()
-        .map(|t| t.id().to_string())
-        .collect(),
-      source_topics: feature
-        .source_topics
-        .iter()
-        .map(|t| t.id().to_string())
-        .collect(),
-    })
+    .map(|(t, f)| feature_to_response(t, f))
     .collect();
 
   Ok(Json(FeaturesResponse { features }))
@@ -1782,7 +1813,7 @@ pub async fn build_features(
   };
 
   // Run the async LLM task (lock is released)
-  let features =
+  let parsed =
     crate::collaborator::agent::task::build_features_from_documentation(
       &documentation_json,
     )
@@ -1793,23 +1824,10 @@ pub async fn build_features(
     })?;
 
   // Build response before storing
-  let response: Vec<FeatureResponse> = features
+  let response: Vec<FeatureResponse> = parsed
+    .features
     .iter()
-    .map(|(topic, feature)| FeatureResponse {
-      topic: topic.id().to_string(),
-      name: feature.name.clone(),
-      description: feature.description.clone(),
-      documentation_topics: feature
-        .documentation_topics
-        .iter()
-        .map(|t| t.id().to_string())
-        .collect(),
-      source_topics: feature
-        .source_topics
-        .iter()
-        .map(|t| t.id().to_string())
-        .collect(),
-    })
+    .map(|(t, f)| feature_to_response(t, f))
     .collect();
 
   // Persist to database: clear old features, insert new ones
@@ -1820,7 +1838,7 @@ pub async fn build_features(
       StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-  for (_feat_topic, feature) in &features {
+  for (_feat_topic, feature) in &parsed.features {
     let row =
       db::create_feature(&state.db, &audit_id, &feature.name, &feature.description)
         .await
@@ -1831,12 +1849,24 @@ pub async fn build_features(
     for dt in &feature.documentation_topics {
       let _ = db::add_feature_topic(&state.db, row.id, dt.id(), "documentation").await;
     }
-    for st in &feature.source_topics {
-      let _ = db::add_feature_topic(&state.db, row.id, st.id(), "source").await;
+    // Persist requirements for this feature
+    for req_topic in &feature.requirement_topics {
+      if let Some(req) = parsed.requirements.get(req_topic) {
+        let req_row = db::create_requirement(&state.db, row.id, &req.description)
+          .await
+          .map_err(|e| {
+            eprintln!("create_requirement failed: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+          })?;
+        for st in &req.source_topics {
+          let _ =
+            db::add_requirement_source_topic(&state.db, req_row.id, st.id()).await;
+        }
+      }
     }
   }
 
-  // Store features in audit data
+  // Store in audit data
   {
     let mut ctx = state.data_context.lock().map_err(|e| {
       eprintln!("Mutex poisoned in build_features (store): {}", e);
@@ -1844,31 +1874,11 @@ pub async fn build_features(
     })?;
     let audit_data =
       ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
-    audit_data.features = features;
+    audit_data.features = parsed.features;
+    audit_data.requirements = parsed.requirements;
   }
 
   Ok(Json(FeaturesResponse { features: response }))
-}
-
-fn feature_to_response(
-  topic: &core::topic::Topic,
-  feature: &Feature,
-) -> FeatureResponse {
-  FeatureResponse {
-    topic: topic.id().to_string(),
-    name: feature.name.clone(),
-    description: feature.description.clone(),
-    documentation_topics: feature
-      .documentation_topics
-      .iter()
-      .map(|t| t.id().to_string())
-      .collect(),
-    source_topics: feature
-      .source_topics
-      .iter()
-      .map(|t| t.id().to_string())
-      .collect(),
-  }
 }
 
 #[derive(Debug, Deserialize)]
@@ -1899,12 +1909,11 @@ pub async fn create_feature(
     name: row.name,
     description: row.description,
     documentation_topics: Vec::new(),
-    source_topics: Vec::new(),
+    requirement_topics: Vec::new(),
   };
 
   let response = feature_to_response(&feature_topic, &feature);
 
-  // Store in memory
   {
     let mut ctx = state.data_context.lock().map_err(|e| {
       eprintln!("Mutex poisoned in create_feature: {}", e);
@@ -1961,7 +1970,6 @@ pub async fn add_feature_documentation_topic(
     audit_id, feature_id
   );
 
-  // Persist to DB
   db::add_feature_topic(&state.db, feature_id, &payload.topic_id, "documentation")
     .await
     .map_err(|e| {
@@ -1969,7 +1977,6 @@ pub async fn add_feature_documentation_topic(
       StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-  // Update in memory
   let mut ctx = state.data_context.lock().map_err(|e| {
     eprintln!("Mutex poisoned in add_feature_documentation_topic: {}", e);
     StatusCode::INTERNAL_SERVER_ERROR
@@ -1985,45 +1992,6 @@ pub async fn add_feature_documentation_topic(
   let new_topic = topic::new_topic(&payload.topic_id);
   if !feature.documentation_topics.contains(&new_topic) {
     feature.documentation_topics.push(new_topic);
-  }
-
-  Ok(Json(feature_to_response(&feature_topic, feature)))
-}
-
-/// POST /api/v1/audits/:audit_id/features/:feature_id/source_topics
-/// Adds a source topic to a feature.
-pub async fn add_feature_source_topic(
-  State(state): State<AppState>,
-  Path((audit_id, feature_id)): Path<(String, i64)>,
-  Json(payload): Json<AddFeatureTopicRequest>,
-) -> Result<Json<FeatureResponse>, StatusCode> {
-  println!(
-    "POST /api/v1/audits/{}/features/{}/source_topics",
-    audit_id, feature_id
-  );
-
-  db::add_feature_topic(&state.db, feature_id, &payload.topic_id, "source")
-    .await
-    .map_err(|e| {
-      eprintln!("add_feature_topic failed: {}", e);
-      StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-  let mut ctx = state.data_context.lock().map_err(|e| {
-    eprintln!("Mutex poisoned in add_feature_source_topic: {}", e);
-    StatusCode::INTERNAL_SERVER_ERROR
-  })?;
-  let audit_data =
-    ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
-  let feature_topic = topic::new_feature_topic(feature_id as i32);
-  let feature = audit_data
-    .features
-    .get_mut(&feature_topic)
-    .ok_or(StatusCode::NOT_FOUND)?;
-
-  let new_topic = topic::new_topic(&payload.topic_id);
-  if !feature.source_topics.contains(&new_topic) {
-    feature.source_topics.push(new_topic);
   }
 
   Ok(Json(feature_to_response(&feature_topic, feature)))
@@ -2065,38 +2033,210 @@ pub async fn remove_feature_documentation_topic(
   Ok(Json(feature_to_response(&feature_topic, feature)))
 }
 
-/// DELETE /api/v1/audits/:audit_id/features/:feature_id/source_topics/:topic_id
-/// Removes a source topic from a feature.
-pub async fn remove_feature_source_topic(
+// ============================================
+// Requirement routes
+// ============================================
+
+#[derive(Debug, Deserialize)]
+pub struct CreateRequirementRequest {
+  pub description: String,
+}
+
+/// POST /api/v1/audits/:audit_id/features/:feature_id/requirements
+/// Creates a new requirement on a feature.
+pub async fn create_requirement(
   State(state): State<AppState>,
-  Path((audit_id, feature_id, topic_id)): Path<(String, i64, String)>,
-) -> Result<Json<FeatureResponse>, StatusCode> {
+  Path((audit_id, feature_id)): Path<(String, i64)>,
+  Json(payload): Json<CreateRequirementRequest>,
+) -> Result<Json<RequirementResponse>, StatusCode> {
   println!(
-    "DELETE /api/v1/audits/{}/features/{}/source_topics/{}",
-    audit_id, feature_id, topic_id
+    "POST /api/v1/audits/{}/features/{}/requirements",
+    audit_id, feature_id
   );
 
-  db::remove_feature_topic(&state.db, feature_id, &topic_id, "source")
+  let row = db::create_requirement(&state.db, feature_id, &payload.description)
     .await
     .map_err(|e| {
-      eprintln!("remove_feature_topic failed: {}", e);
+      eprintln!("create_requirement failed: {}", e);
+      StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+  let feature_topic = topic::new_feature_topic(feature_id as i32);
+  let req_topic = topic::new_requirement_topic(row.id as i32);
+
+  let requirement = core::Requirement {
+    description: row.description,
+    feature_topic: feature_topic.clone(),
+    source_topics: Vec::new(),
+  };
+
+  let response = requirement_to_response(&req_topic, &requirement);
+
+  {
+    let mut ctx = state.data_context.lock().map_err(|e| {
+      eprintln!("Mutex poisoned in create_requirement: {}", e);
+      StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let audit_data =
+      ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+
+    // Add requirement topic to parent feature
+    let feature = audit_data
+      .features
+      .get_mut(&feature_topic)
+      .ok_or(StatusCode::NOT_FOUND)?;
+    feature.requirement_topics.push(req_topic.clone());
+
+    // Store requirement
+    audit_data.requirements.insert(req_topic, requirement);
+  }
+
+  Ok(Json(response))
+}
+
+/// DELETE /api/v1/audits/:audit_id/features/:feature_id/requirements/:requirement_id
+/// Deletes a requirement from a feature.
+pub async fn delete_requirement(
+  State(state): State<AppState>,
+  Path((audit_id, feature_id, requirement_id)): Path<(String, i64, i64)>,
+) -> Result<StatusCode, StatusCode> {
+  println!(
+    "DELETE /api/v1/audits/{}/features/{}/requirements/{}",
+    audit_id, feature_id, requirement_id
+  );
+
+  db::delete_requirement(&state.db, requirement_id)
+    .await
+    .map_err(|e| {
+      eprintln!("delete_requirement failed: {}", e);
+      StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+  let req_topic = topic::new_requirement_topic(requirement_id as i32);
+  let feature_topic = topic::new_feature_topic(feature_id as i32);
+
+  {
+    let mut ctx = state.data_context.lock().map_err(|e| {
+      eprintln!("Mutex poisoned in delete_requirement: {}", e);
+      StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let audit_data =
+      ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+
+    // Remove from parent feature's requirement list
+    if let Some(feature) = audit_data.features.get_mut(&feature_topic) {
+      feature.requirement_topics.retain(|t| t != &req_topic);
+    }
+
+    // Remove requirement itself
+    audit_data.requirements.remove(&req_topic);
+  }
+
+  Ok(StatusCode::NO_CONTENT)
+}
+
+/// GET /api/v1/audits/:audit_id/requirements/:requirement_id
+/// Gets a single requirement.
+pub async fn get_requirement(
+  State(state): State<AppState>,
+  Path((audit_id, requirement_id)): Path<(String, i32)>,
+) -> Result<Json<RequirementResponse>, StatusCode> {
+  println!(
+    "GET /api/v1/audits/{}/requirements/{}",
+    audit_id, requirement_id
+  );
+
+  let ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in get_requirement: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+
+  let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+  let req_topic = topic::new_requirement_topic(requirement_id);
+  let requirement = audit_data
+    .requirements
+    .get(&req_topic)
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+  Ok(Json(requirement_to_response(&req_topic, requirement)))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AddSourceTopicRequest {
+  pub topic_id: String,
+}
+
+/// POST /api/v1/audits/:audit_id/requirements/:requirement_id/source_topics
+/// Links a source topic to a requirement.
+pub async fn add_requirement_source_topic(
+  State(state): State<AppState>,
+  Path((audit_id, requirement_id)): Path<(String, i64)>,
+  Json(payload): Json<AddSourceTopicRequest>,
+) -> Result<Json<RequirementResponse>, StatusCode> {
+  println!(
+    "POST /api/v1/audits/{}/requirements/{}/source_topics",
+    audit_id, requirement_id
+  );
+
+  db::add_requirement_source_topic(&state.db, requirement_id, &payload.topic_id)
+    .await
+    .map_err(|e| {
+      eprintln!("add_requirement_source_topic failed: {}", e);
       StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
   let mut ctx = state.data_context.lock().map_err(|e| {
-    eprintln!("Mutex poisoned in remove_feature_source_topic: {}", e);
+    eprintln!("Mutex poisoned in add_requirement_source_topic: {}", e);
     StatusCode::INTERNAL_SERVER_ERROR
   })?;
   let audit_data =
     ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
-  let feature_topic = topic::new_feature_topic(feature_id as i32);
-  let feature = audit_data
-    .features
-    .get_mut(&feature_topic)
+  let req_topic = topic::new_requirement_topic(requirement_id as i32);
+  let requirement = audit_data
+    .requirements
+    .get_mut(&req_topic)
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+  let new_topic = topic::new_topic(&payload.topic_id);
+  if !requirement.source_topics.contains(&new_topic) {
+    requirement.source_topics.push(new_topic);
+  }
+
+  Ok(Json(requirement_to_response(&req_topic, requirement)))
+}
+
+/// DELETE /api/v1/audits/:audit_id/requirements/:requirement_id/source_topics/:topic_id
+/// Unlinks a source topic from a requirement.
+pub async fn remove_requirement_source_topic(
+  State(state): State<AppState>,
+  Path((audit_id, requirement_id, topic_id)): Path<(String, i64, String)>,
+) -> Result<Json<RequirementResponse>, StatusCode> {
+  println!(
+    "DELETE /api/v1/audits/{}/requirements/{}/source_topics/{}",
+    audit_id, requirement_id, topic_id
+  );
+
+  db::remove_requirement_source_topic(&state.db, requirement_id, &topic_id)
+    .await
+    .map_err(|e| {
+      eprintln!("remove_requirement_source_topic failed: {}", e);
+      StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+  let mut ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in remove_requirement_source_topic: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+  let audit_data =
+    ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+  let req_topic = topic::new_requirement_topic(requirement_id as i32);
+  let requirement = audit_data
+    .requirements
+    .get_mut(&req_topic)
     .ok_or(StatusCode::NOT_FOUND)?;
 
   let remove_topic = topic::new_topic(&topic_id);
-  feature.source_topics.retain(|t| t != &remove_topic);
+  requirement.source_topics.retain(|t| t != &remove_topic);
 
-  Ok(Json(feature_to_response(&feature_topic, feature)))
+  Ok(Json(requirement_to_response(&req_topic, requirement)))
 }

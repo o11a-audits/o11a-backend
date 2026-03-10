@@ -1,6 +1,6 @@
 use crate::collaborator::models::*;
 use crate::collaborator::{formatter, parser};
-use crate::core::{self, topic, DataContext, Feature};
+use crate::core::{self, topic, DataContext, Feature, Requirement};
 use sqlx::SqlitePool;
 
 // ============================================================================
@@ -108,6 +108,46 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
   sqlx::query(
     "CREATE INDEX IF NOT EXISTS idx_feature_topics_feature ON feature_topics(feature_id)",
+  )
+  .execute(pool)
+  .await?;
+
+  // Requirements table
+  sqlx::query(
+    r#"
+        CREATE TABLE IF NOT EXISTS requirements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            feature_id INTEGER NOT NULL,
+            description TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+        "#,
+  )
+  .execute(pool)
+  .await?;
+
+  sqlx::query(
+    "CREATE INDEX IF NOT EXISTS idx_requirements_feature ON requirements(feature_id)",
+  )
+  .execute(pool)
+  .await?;
+
+  // Requirement source topic associations
+  sqlx::query(
+    r#"
+        CREATE TABLE IF NOT EXISTS requirement_source_topics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            requirement_id INTEGER NOT NULL,
+            topic_id TEXT NOT NULL,
+            UNIQUE(requirement_id, topic_id)
+        )
+        "#,
+  )
+  .execute(pool)
+  .await?;
+
+  sqlx::query(
+    "CREATE INDEX IF NOT EXISTS idx_req_source_topics_req ON requirement_source_topics(requirement_id)",
   )
   .execute(pool)
   .await?;
@@ -507,13 +547,39 @@ pub async fn remove_feature_topic(
   Ok(())
 }
 
-/// Deletes all features and their topic associations for an audit.
-/// Used before re-inserting LLM-generated features.
+/// Deletes all features and their associated data for an audit.
+/// Cascades: requirement_source_topics → requirements → feature_topics → features.
 pub async fn delete_all_features_for_audit(
   pool: &SqlitePool,
   audit_id: &str,
 ) -> Result<(), sqlx::Error> {
-  // Delete topic associations for all features in this audit
+  // Delete requirement source topic associations
+  sqlx::query(
+    r#"
+        DELETE FROM requirement_source_topics WHERE requirement_id IN (
+            SELECT r.id FROM requirements r
+            JOIN features f ON r.feature_id = f.id
+            WHERE f.audit_id = ?
+        )
+        "#,
+  )
+  .bind(audit_id)
+  .execute(pool)
+  .await?;
+
+  // Delete requirements
+  sqlx::query(
+    r#"
+        DELETE FROM requirements WHERE feature_id IN (
+            SELECT id FROM features WHERE audit_id = ?
+        )
+        "#,
+  )
+  .bind(audit_id)
+  .execute(pool)
+  .await?;
+
+  // Delete feature topic associations
   sqlx::query(
     r#"
         DELETE FROM feature_topics WHERE feature_id IN (
@@ -525,7 +591,7 @@ pub async fn delete_all_features_for_audit(
   .execute(pool)
   .await?;
 
-  // Delete the features themselves
+  // Delete features
   sqlx::query("DELETE FROM features WHERE audit_id = ?")
     .bind(audit_id)
     .execute(pool)
@@ -534,7 +600,7 @@ pub async fn delete_all_features_for_audit(
   Ok(())
 }
 
-/// Load all features from the database and populate audit_data.features.
+/// Load all features and requirements from the database.
 /// Returns the number of features loaded.
 pub async fn load_all_features(
   pool: &SqlitePool,
@@ -549,11 +615,37 @@ pub async fn load_all_features(
       .fetch_all(pool)
       .await?;
 
-  // Group topic associations by feature_id
+  let requirements =
+    sqlx::query_as::<_, RequirementRow>("SELECT * FROM requirements")
+      .fetch_all(pool)
+      .await?;
+
+  let req_source_topics =
+    sqlx::query_as::<_, RequirementSourceTopicRow>(
+      "SELECT * FROM requirement_source_topics",
+    )
+    .fetch_all(pool)
+    .await?;
+
+  // Group feature topic associations by feature_id
   let mut topics_by_feature: std::collections::HashMap<i64, Vec<&FeatureTopicRow>> =
     std::collections::HashMap::new();
   for ft in &feature_topics {
     topics_by_feature.entry(ft.feature_id).or_default().push(ft);
+  }
+
+  // Group requirements by feature_id
+  let mut reqs_by_feature: std::collections::HashMap<i64, Vec<&RequirementRow>> =
+    std::collections::HashMap::new();
+  for r in &requirements {
+    reqs_by_feature.entry(r.feature_id).or_default().push(r);
+  }
+
+  // Group requirement source topics by requirement_id
+  let mut src_by_req: std::collections::HashMap<i64, Vec<&RequirementSourceTopicRow>> =
+    std::collections::HashMap::new();
+  for rst in &req_source_topics {
+    src_by_req.entry(rst.requirement_id).or_default().push(rst);
   }
 
   let count = features.len();
@@ -561,31 +653,149 @@ pub async fn load_all_features(
   for row in &features {
     if let Some(audit_data) = data_context.get_audit_mut(&row.audit_id) {
       let mut doc_topics = Vec::new();
-      let mut src_topics = Vec::new();
 
       if let Some(assocs) = topics_by_feature.get(&row.id) {
         for ft in assocs {
-          let t = topic::new_topic(&ft.topic_id);
-          match ft.relation.as_str() {
-            "documentation" => doc_topics.push(t),
-            "source" => src_topics.push(t),
-            _ => {}
+          if ft.relation == "documentation" {
+            doc_topics.push(topic::new_topic(&ft.topic_id));
           }
         }
       }
 
       let feature_topic = topic::new_feature_topic(row.id as i32);
+
+      // Load requirements for this feature
+      let mut requirement_topics = Vec::new();
+      if let Some(reqs) = reqs_by_feature.get(&row.id) {
+        for req in reqs {
+          let req_topic = topic::new_requirement_topic(req.id as i32);
+          requirement_topics.push(req_topic.clone());
+
+          let mut source_topics = Vec::new();
+          if let Some(srcs) = src_by_req.get(&req.id) {
+            for s in srcs {
+              source_topics.push(topic::new_topic(&s.topic_id));
+            }
+          }
+
+          audit_data.requirements.insert(
+            req_topic,
+            Requirement {
+              description: req.description.clone(),
+              feature_topic: feature_topic.clone(),
+              source_topics,
+            },
+          );
+        }
+      }
+
       audit_data.features.insert(
         feature_topic,
         Feature {
           name: row.name.clone(),
           description: row.description.clone(),
           documentation_topics: doc_topics,
-          source_topics: src_topics,
+          requirement_topics,
         },
       );
     }
   }
 
   Ok(count)
+}
+
+// ============================================================================
+// Requirement CRUD operations
+// ============================================================================
+
+/// Database row for a requirement
+#[derive(Debug, sqlx::FromRow)]
+pub struct RequirementRow {
+  pub id: i64,
+  pub feature_id: i64,
+  pub description: String,
+  pub created_at: String,
+}
+
+/// Database row for a requirement source topic association
+#[derive(Debug, sqlx::FromRow)]
+pub struct RequirementSourceTopicRow {
+  pub id: i64,
+  pub requirement_id: i64,
+  pub topic_id: String,
+}
+
+/// Creates a new requirement and returns the row
+pub async fn create_requirement(
+  pool: &SqlitePool,
+  feature_id: i64,
+  description: &str,
+) -> Result<RequirementRow, sqlx::Error> {
+  let result = sqlx::query(
+    r#"
+        INSERT INTO requirements (feature_id, description)
+        VALUES (?, ?)
+        "#,
+  )
+  .bind(feature_id)
+  .bind(description)
+  .execute(pool)
+  .await?;
+
+  let id = result.last_insert_rowid();
+  sqlx::query_as::<_, RequirementRow>("SELECT * FROM requirements WHERE id = ?")
+    .bind(id)
+    .fetch_one(pool)
+    .await
+}
+
+/// Deletes a requirement and its source topic associations
+pub async fn delete_requirement(
+  pool: &SqlitePool,
+  requirement_id: i64,
+) -> Result<(), sqlx::Error> {
+  sqlx::query("DELETE FROM requirement_source_topics WHERE requirement_id = ?")
+    .bind(requirement_id)
+    .execute(pool)
+    .await?;
+  sqlx::query("DELETE FROM requirements WHERE id = ?")
+    .bind(requirement_id)
+    .execute(pool)
+    .await?;
+  Ok(())
+}
+
+/// Adds a source topic to a requirement
+pub async fn add_requirement_source_topic(
+  pool: &SqlitePool,
+  requirement_id: i64,
+  topic_id: &str,
+) -> Result<(), sqlx::Error> {
+  sqlx::query(
+    r#"
+        INSERT OR IGNORE INTO requirement_source_topics (requirement_id, topic_id)
+        VALUES (?, ?)
+        "#,
+  )
+  .bind(requirement_id)
+  .bind(topic_id)
+  .execute(pool)
+  .await?;
+  Ok(())
+}
+
+/// Removes a source topic from a requirement
+pub async fn remove_requirement_source_topic(
+  pool: &SqlitePool,
+  requirement_id: i64,
+  topic_id: &str,
+) -> Result<(), sqlx::Error> {
+  sqlx::query(
+    "DELETE FROM requirement_source_topics WHERE requirement_id = ? AND topic_id = ?",
+  )
+  .bind(requirement_id)
+  .bind(topic_id)
+  .execute(pool)
+  .await?;
+  Ok(())
 }

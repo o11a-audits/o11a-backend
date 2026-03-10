@@ -4,7 +4,7 @@ use serde::Deserialize;
 
 use crate::collaborator::agent::context;
 use crate::collaborator::agent::router::{self, TaskSize};
-use crate::core::{AST, AuditData, Feature, topic};
+use crate::core::{AST, AuditData, Feature, Requirement, topic};
 
 /// Raw feature as returned by the LLM (no topic ID yet).
 #[derive(Deserialize)]
@@ -12,6 +12,8 @@ struct LLMFeature {
   name: String,
   description: String,
   documentation_topics: Vec<String>,
+  #[serde(default)]
+  requirements: Vec<String>,
 }
 
 /// Render all documentation ASTs into a single JSON string for the LLM prompt.
@@ -56,7 +58,15 @@ For each feature, provide:\n\
 - `description`: a one-to-two sentence summary of the feature\n\
 - `documentation_topics`: an array of D-prefixed topic ID strings \
 (e.g., [\"D12\", \"D34\"]) for every documentation section, paragraph, \
-list, or code block that informs or describes this feature\n\n\
+list, or code block that informs or describes this feature\n\
+- `requirements`: an array of strings, where each string is a \
+behavioral requirement that the implementation must satisfy. \
+Include both **happy-path** requirements (what the system should \
+do, e.g., \"Users can deposit tokens into the vault\") and \
+**non-happy-path** requirements (what the system must prevent, \
+e.g., \"Do not allow a user to withdraw another user's funds\"). \
+Each requirement should be a single, specific, testable \
+statement.\n\n\
 Rules:\n\
 - Every documentation topic ID that describes system behavior, \
 requirements, or constraints should appear in at least one feature. \
@@ -70,13 +80,19 @@ relevant to more than one.\n\
 - Do not invent topic IDs. Only use IDs present in the documentation.\n\
 - When in doubt whether something is one feature or two, prefer \
 splitting into more specific features.\n\
+- Each feature should have at least one requirement.\n\
 - Return ONLY a JSON array of feature objects, no other text.\n\n\
 Documentation:\n";
 
-/// Parse the LLM response into features, assigning sequential F-prefixed topic IDs.
-fn parse_features_response(
-  response: &str,
-) -> Result<BTreeMap<topic::Topic, Feature>, String> {
+/// Result of parsing LLM features: features and their requirements as separate maps.
+pub struct ParsedFeatures {
+  pub features: BTreeMap<topic::Topic, Feature>,
+  pub requirements: BTreeMap<topic::Topic, Requirement>,
+}
+
+/// Parse the LLM response into features and requirements,
+/// assigning sequential F-prefixed and R-prefixed topic IDs.
+fn parse_features_response(response: &str) -> Result<ParsedFeatures, String> {
   // Strip markdown code fences if present
   let json_str = response
     .trim()
@@ -89,6 +105,8 @@ fn parse_features_response(
     .map_err(|e| format!("Failed to parse features JSON: {}", e))?;
 
   let mut features = BTreeMap::new();
+  let mut requirements = BTreeMap::new();
+  let mut req_counter = 0i32;
 
   for (i, raw) in raw_features.into_iter().enumerate() {
     let feature_topic = topic::new_feature_topic((i + 1) as i32);
@@ -98,28 +116,46 @@ fn parse_features_response(
       .map(|id| topic::new_topic(&id))
       .collect();
 
+    let mut requirement_topics = Vec::new();
+    for description in raw.requirements {
+      req_counter += 1;
+      let req_topic = topic::new_requirement_topic(req_counter);
+      requirement_topics.push(req_topic.clone());
+      requirements.insert(
+        req_topic,
+        Requirement {
+          description,
+          feature_topic: feature_topic.clone(),
+          source_topics: Vec::new(),
+        },
+      );
+    }
+
     features.insert(
       feature_topic,
       Feature {
         name: raw.name,
         description: raw.description,
         documentation_topics: doc_topics,
-        source_topics: Vec::new(),
+        requirement_topics,
       },
     );
   }
 
-  Ok(features)
+  Ok(ParsedFeatures {
+    features,
+    requirements,
+  })
 }
 
-/// Extract project features from pre-rendered documentation JSON via LLM.
+/// Extract project features and requirements from pre-rendered documentation JSON via LLM.
 ///
 /// This variant does not require holding a lock on `AuditData` — the caller
 /// renders documentation while holding the lock, then passes the JSON string
 /// to this function after releasing it.
 pub async fn build_features_from_documentation(
   documentation_json: &str,
-) -> Result<BTreeMap<topic::Topic, Feature>, String> {
+) -> Result<ParsedFeatures, String> {
   if documentation_json == "[]" {
     return Err("No documentation found in audit".to_string());
   }

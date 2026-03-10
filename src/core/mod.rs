@@ -179,14 +179,26 @@ pub enum ContractKind {
 
 /// A project feature extracted from documentation.
 /// Links documentation sections to a named capability,
-/// and later links to source code topics that implement it.
+/// with requirements that describe expected behaviors.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Feature {
   pub name: String,
   pub description: String,
   /// D-prefixed topic IDs of documentation sections/paragraphs that inform this feature
   pub documentation_topics: Vec<topic::Topic>,
-  /// N-prefixed topic IDs of source code topics that implement this feature (filled later)
+  /// R-prefixed topic IDs of requirements belonging to this feature
+  pub requirement_topics: Vec<topic::Topic>,
+}
+
+/// A behavioral requirement belonging to a feature.
+/// Can be happy-path ("Users can deposit tokens") or non-happy-path
+/// ("Do not allow a user to withdraw another user's funds").
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Requirement {
+  pub description: String,
+  /// F-prefixed topic ID of the parent feature
+  pub feature_topic: topic::Topic,
+  /// N-prefixed topic IDs of source code topics that satisfy this requirement
   pub source_topics: Vec<topic::Topic>,
 }
 
@@ -214,6 +226,8 @@ pub struct AuditData {
   pub comment_index: CommentIndex,
   /// Features extracted from documentation, keyed by F-prefixed topic ID.
   pub features: BTreeMap<topic::Topic, Feature>,
+  /// Requirements keyed by R-prefixed topic ID. Each belongs to one feature.
+  pub requirements: BTreeMap<topic::Topic, Requirement>,
 }
 
 /// Common short English words that should not match as simple topic names.
@@ -1686,6 +1700,7 @@ pub fn new_audit_data(
     name_index: TopicNameIndex::empty(),
     comment_index: CommentIndex::empty(),
     features: BTreeMap::new(),
+    requirements: BTreeMap::new(),
   }
 }
 
