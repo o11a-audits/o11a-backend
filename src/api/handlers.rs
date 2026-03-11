@@ -1115,50 +1115,20 @@ pub async fn get_topic_view(
   Ok(Json(response))
 }
 
-pub async fn get_mentions_panel(
+/// GET /api/v1/audits/:audit_id/conversation/:topic_id
+/// Returns the conversation for a topic: direct comments and mentions,
+/// each with metadata and rendered thread HTML.
+pub async fn get_conversation(
   State(state): State<AppState>,
   Path((audit_id, topic_id)): Path<(String, String)>,
-) -> Result<Json<super::topic_view::MentionsPanelResponse>, StatusCode> {
+) -> Result<Json<super::topic_view::ConversationResponse>, StatusCode> {
   println!(
-    "GET /api/v1/audits/{}/mentions_panel/{}",
+    "GET /api/v1/audits/{}/conversation/{}",
     audit_id, topic_id
   );
 
   let ctx = state.data_context.lock().map_err(|e| {
-    eprintln!("Mutex poisoned in get_mentions_panel: {}", e);
-    StatusCode::INTERNAL_SERVER_ERROR
-  })?;
-
-  let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
-
-  let response = super::topic_view::build_mentions_panel(
-    &topic_id,
-    audit_data,
-  )
-  .ok_or_else(|| {
-    eprintln!(
-      "Metadata for topic '{}' not found in audit '{}'",
-      topic_id, audit_id
-    );
-    StatusCode::NOT_FOUND
-  })?;
-
-  Ok(Json(response))
-}
-
-/// GET /api/v1/audits/:audit_id/comment_thread/:topic_id
-/// Returns the comment and its recursive children as a thread HTML.
-pub async fn get_comment_thread(
-  State(state): State<AppState>,
-  Path((audit_id, topic_id)): Path<(String, String)>,
-) -> Result<Json<super::topic_view::CommentThreadResponse>, StatusCode> {
-  println!(
-    "GET /api/v1/audits/{}/comment_thread/{}",
-    audit_id, topic_id
-  );
-
-  let ctx = state.data_context.lock().map_err(|e| {
-    eprintln!("Mutex poisoned in get_comment_thread: {}", e);
+    eprintln!("Mutex poisoned in get_conversation: {}", e);
     StatusCode::INTERNAL_SERVER_ERROR
   })?;
 
@@ -1170,7 +1140,7 @@ pub async fn get_comment_thread(
     .cloned()
     .unwrap_or_default();
 
-  let response = super::topic_view::build_comment_thread(
+  let response = super::topic_view::build_conversation(
     &topic_id,
     audit_data,
     &source_text_cache,
@@ -1181,6 +1151,36 @@ pub async fn get_comment_thread(
   })?;
 
   Ok(Json(response))
+}
+
+/// GET /api/v1/audits/:audit_id/thread/:topic_id
+/// Returns thread HTML for a single topic. Used to refetch after invalidation.
+pub async fn get_thread(
+  State(state): State<AppState>,
+  Path((audit_id, topic_id)): Path<(String, String)>,
+) -> Result<impl IntoResponse, StatusCode> {
+  println!("GET /api/v1/audits/{}/thread/{}", audit_id, topic_id);
+
+  let ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in get_thread: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+
+  let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+
+  let source_text_cache = ctx
+    .source_text_cache
+    .get(&audit_id)
+    .cloned()
+    .unwrap_or_default();
+
+  let html = super::topic_view::build_thread(&topic_id, audit_data, &source_text_cache)
+    .ok_or_else(|| {
+      eprintln!("Topic '{}' not found in audit '{}'", topic_id, audit_id);
+      StatusCode::NOT_FOUND
+    })?;
+
+  Ok(Html(html))
 }
 
 // ============================================================================
@@ -1202,36 +1202,6 @@ pub struct OptionalUserIdQuery {
 // ============================================================================
 
 /// GET /api/v1/audits/:audit_id/topics/:topic_id/comments
-/// Returns comment topic IDs and types for comments on this topic.
-pub async fn get_topic_comments(
-  State(state): State<AppState>,
-  Path((audit_id, topic_id)): Path<(String, String)>,
-) -> Result<Json<TopicCommentsResponse>, StatusCode> {
-  println!(
-    "GET /api/v1/audits/{}/topics/{}/comments",
-    audit_id, topic_id
-  );
-  let ctx = state.data_context.lock().map_err(|e| {
-    eprintln!("Mutex poisoned in get_topic_comments: {}", e);
-    StatusCode::INTERNAL_SERVER_ERROR
-  })?;
-  let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
-
-  let target_topic = new_topic(&topic_id);
-  let comments = audit_data
-    .comment_index
-    .get(&target_topic)
-    .map(|v| v.as_slice())
-    .unwrap_or(&[])
-    .iter()
-    .filter_map(|comment_topic| {
-      let metadata = audit_data.topic_metadata.get(comment_topic)?;
-      Some(topic_metadata_to_response(comment_topic, metadata))
-    })
-    .collect();
-
-  Ok(Json(TopicCommentsResponse { comments }))
-}
 
 /// GET /api/v1/audits/:audit_id/comments/:comment_type/:status
 /// Returns topic IDs of comments matching both the specified type and status.
@@ -1310,9 +1280,10 @@ pub async fn create_comment(
   let comment_topic_id = comment.comment_topic_id();
   let comment_topic = comment.comment_topic();
 
-  // Parse mentions, render HTML, register in audit_data, and cache source text
-  let mut mentions_updates: Vec<(String, Vec<String>)> = Vec::new();
-  let mut comment_metadata_json = serde_json::Value::Null;
+  // Parse mentions, render HTML, register in audit_data, and cache source text.
+  // Build ConversationEntry objects for WebSocket broadcasting.
+  let mut conversation_events: Vec<(String, super::topic_view::ConversationEntry, Vec<String>)> =
+    Vec::new();
   {
     let mut ctx = state
       .data_context
@@ -1334,84 +1305,84 @@ pub async fn create_comment(
       audit_data, &comment, &scope, &mentions,
     );
 
-    // Build full metadata response for the new comment (for WebSocket broadcast)
-    if let Some(metadata) = audit_data.topic_metadata.get(&comment_topic) {
-      let response = topic_metadata_to_response(&comment_topic, metadata);
-      comment_metadata_json =
-        serde_json::to_value(&response).unwrap_or(serde_json::Value::Null);
+    // Cache rendered HTML
+    ctx.cache_source_text(&audit_id, &comment_topic_id, html);
+
+    // Build conversation entries for broadcasting
+    let source_text_cache = ctx
+      .source_text_cache
+      .get(&audit_id)
+      .cloned()
+      .unwrap_or_default();
+    let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+
+    // Collect parent comment chain for thread invalidation.
+    // If the target is a comment, its thread (and all ancestor comment threads)
+    // are invalidated because they now include the new reply.
+    let invalidated_thread_ids: Vec<String> = {
+      let mut ids = Vec::new();
+      let mut current = new_topic(&payload.topic_id);
+      while current.kind() == Some(TopicKind::Comment) {
+        ids.push(current.id().to_string());
+        match audit_data
+          .topic_metadata
+          .get(&current)
+          .and_then(|m| m.target_topic())
+        {
+          Some(parent) if parent.kind() == Some(TopicKind::Comment) => {
+            current = parent.clone();
+          }
+          _ => break,
+        }
+      }
+      ids
+    };
+
+    // 1. ConversationUpdated for the target topic (comment entry)
+    if let Some(entry) = super::topic_view::build_conversation_entry(
+      &comment_topic,
+      super::topic_view::ConversationEntryKind::Comment,
+      audit_data,
+      &source_text_cache,
+    ) {
+      conversation_events.push((
+        payload.topic_id.clone(),
+        entry,
+        invalidated_thread_ids.clone(),
+      ));
     }
 
-    // Read back updated mentions for broadcasting
+    // 2. ConversationUpdated for each mentioned topic (mention entry)
     if !mentions.is_empty() {
       let mut mentioned_ids: Vec<&str> =
         mentions.iter().map(|m| m.id.as_str()).collect();
       mentioned_ids.sort_unstable();
       mentioned_ids.dedup();
 
-      for topic_id in mentioned_ids {
-        let topic = new_topic(topic_id);
-        if let Some(comment_topics) = audit_data.mentions_index.get(&topic) {
-          let ids: Vec<String> = comment_topics.iter().map(|t| t.id.clone()).collect();
-          mentions_updates.push((topic_id.to_string(), ids));
+      for mentioned_id in mentioned_ids {
+        if let Some(entry) = super::topic_view::build_conversation_entry(
+          &comment_topic,
+          super::topic_view::ConversationEntryKind::Mention,
+          audit_data,
+          &source_text_cache,
+        ) {
+          conversation_events.push((mentioned_id.to_string(), entry, vec![]));
         }
       }
     }
-
-    // Cache rendered HTML
-    ctx.cache_source_text(&audit_id, &comment_topic_id, html);
   }
 
   // Broadcast via WebSocket
-  let _ = state.comment_broadcast.send(CommentEvent::Created {
-    audit_id: audit_id.clone(),
-    comment_topic_id: comment_topic_id.clone(),
-    target_topic: payload.topic_id.clone(),
-    comment_type: payload.comment_type.clone(),
-    metadata: comment_metadata_json,
-  });
-
-  for (topic_id, updated_mentions) in mentions_updates {
-    let _ = state.comment_broadcast.send(CommentEvent::MentionsUpdated {
+  for (topic_id, entry, invalidated_thread_ids) in conversation_events {
+    let _ = state.comment_broadcast.send(CommentEvent::ConversationUpdated {
       audit_id: audit_id.clone(),
       topic_id,
-      comment_topic_ids: updated_mentions,
+      entry,
+      invalidated_thread_ids,
     });
   }
 
   Ok(Json(CommentCreatedResponse { comment_topic_id }))
-}
-
-/// GET /api/v1/audits/:audit_id/mentions/:topic_id
-/// Returns topic IDs of comments that mention the given topic.
-pub async fn get_comments_mentioning_topic(
-  State(state): State<AppState>,
-  Path((audit_id, mentioned_topic_id)): Path<(String, String)>,
-) -> Result<Json<CommentListResponse>, StatusCode> {
-  println!(
-    "GET /api/v1/audits/{}/mentions/{}",
-    audit_id, mentioned_topic_id
-  );
-
-  let ctx = state.data_context.lock().map_err(|e| {
-    eprintln!("Mutex poisoned in get_comments_mentioning_topic: {}", e);
-    StatusCode::INTERNAL_SERVER_ERROR
-  })?;
-  let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
-
-  let mentioned_topic = new_topic(&mentioned_topic_id);
-
-  // Verify the topic exists
-  if !audit_data.topic_metadata.contains_key(&mentioned_topic) {
-    return Err(StatusCode::NOT_FOUND);
-  }
-
-  let comment_topic_ids: Vec<String> = audit_data
-    .mentions_index
-    .get(&mentioned_topic)
-    .map(|topics| topics.iter().map(|t| t.id.clone()).collect())
-    .unwrap_or_default();
-
-  Ok(Json(CommentListResponse { comment_topic_ids }))
 }
 
 // ============================================================================
@@ -1466,11 +1437,14 @@ pub async fn update_comment_status(
         .cloned()
       {
         if payload.status == CommentStatus::Hidden {
-          if let Some(comments) = audit_data.comment_index.get_mut(&target_topic) {
+          if let Some(comments) =
+            audit_data.comment_index.get_mut(&target_topic)
+          {
             comments.retain(|t| t != &comment_topic);
           }
         } else {
-          let comments = audit_data.comment_index.entry(target_topic).or_default();
+          let comments =
+            audit_data.comment_index.entry(target_topic).or_default();
           if !comments.contains(&comment_topic) {
             comments.push(comment_topic);
           }
@@ -1791,28 +1765,36 @@ pub async fn build_features(
     })?;
 
   for (_feat_topic, feature) in &parsed.features {
-    let row =
-      db::create_feature(&state.db, &audit_id, &feature.name, &feature.description)
-        .await
-        .map_err(|e| {
-          eprintln!("create_feature failed: {}", e);
-          StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let row = db::create_feature(
+      &state.db,
+      &audit_id,
+      &feature.name,
+      &feature.description,
+    )
+    .await
+    .map_err(|e| {
+      eprintln!("create_feature failed: {}", e);
+      StatusCode::INTERNAL_SERVER_ERROR
+    })?;
     for dt in &feature.documentation_topics {
-      let _ = db::add_feature_topic(&state.db, row.id, dt.id(), "documentation").await;
+      let _ =
+        db::add_feature_topic(&state.db, row.id, dt.id(), "documentation")
+          .await;
     }
     // Persist requirements for this feature
     for req_topic in &feature.requirement_topics {
       if let Some(req) = parsed.requirements.get(req_topic) {
-        let req_row = db::create_requirement(&state.db, row.id, &req.description)
-          .await
-          .map_err(|e| {
-            eprintln!("create_requirement failed: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-          })?;
+        let req_row =
+          db::create_requirement(&state.db, row.id, &req.description)
+            .await
+            .map_err(|e| {
+              eprintln!("create_requirement failed: {}", e);
+              StatusCode::INTERNAL_SERVER_ERROR
+            })?;
         for st in &req.source_topics {
           let _ =
-            db::add_requirement_source_topic(&state.db, req_row.id, st.id()).await;
+            db::add_requirement_source_topic(&state.db, req_row.id, st.id())
+              .await;
         }
       }
     }
@@ -1848,13 +1830,17 @@ pub async fn create_feature(
 ) -> Result<Json<FeatureResponse>, StatusCode> {
   println!("POST /api/v1/audits/{}/features", audit_id);
 
-  let row =
-    db::create_feature(&state.db, &audit_id, &payload.name, &payload.description)
-      .await
-      .map_err(|e| {
-        eprintln!("create_feature failed: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-      })?;
+  let row = db::create_feature(
+    &state.db,
+    &audit_id,
+    &payload.name,
+    &payload.description,
+  )
+  .await
+  .map_err(|e| {
+    eprintln!("create_feature failed: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
 
   let feature_topic = topic::new_feature_topic(row.id as i32);
   let feature = Feature {
@@ -1885,10 +1871,7 @@ pub async fn get_feature(
   State(state): State<AppState>,
   Path((audit_id, feature_id)): Path<(String, i32)>,
 ) -> Result<Json<FeatureResponse>, StatusCode> {
-  println!(
-    "GET /api/v1/audits/{}/features/{}",
-    audit_id, feature_id
-  );
+  println!("GET /api/v1/audits/{}/features/{}", audit_id, feature_id);
 
   let ctx = state.data_context.lock().map_err(|e| {
     eprintln!("Mutex poisoned in get_feature: {}", e);
@@ -1922,19 +1905,23 @@ pub async fn add_feature_documentation_topic(
     audit_id, feature_id
   );
 
-  db::add_feature_topic(&state.db, feature_id, &payload.topic_id, "documentation")
-    .await
-    .map_err(|e| {
-      eprintln!("add_feature_topic failed: {}", e);
-      StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+  db::add_feature_topic(
+    &state.db,
+    feature_id,
+    &payload.topic_id,
+    "documentation",
+  )
+  .await
+  .map_err(|e| {
+    eprintln!("add_feature_topic failed: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
 
   let mut ctx = state.data_context.lock().map_err(|e| {
     eprintln!("Mutex poisoned in add_feature_documentation_topic: {}", e);
     StatusCode::INTERNAL_SERVER_ERROR
   })?;
-  let audit_data =
-    ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+  let audit_data = ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
   let feature_topic = topic::new_feature_topic(feature_id as i32);
   let feature = audit_data
     .features
@@ -1968,11 +1955,13 @@ pub async fn remove_feature_documentation_topic(
     })?;
 
   let mut ctx = state.data_context.lock().map_err(|e| {
-    eprintln!("Mutex poisoned in remove_feature_documentation_topic: {}", e);
+    eprintln!(
+      "Mutex poisoned in remove_feature_documentation_topic: {}",
+      e
+    );
     StatusCode::INTERNAL_SERVER_ERROR
   })?;
-  let audit_data =
-    ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+  let audit_data = ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
   let feature_topic = topic::new_feature_topic(feature_id as i32);
   let feature = audit_data
     .features
@@ -2130,19 +2119,22 @@ pub async fn add_requirement_source_topic(
     audit_id, requirement_id
   );
 
-  db::add_requirement_source_topic(&state.db, requirement_id, &payload.topic_id)
-    .await
-    .map_err(|e| {
-      eprintln!("add_requirement_source_topic failed: {}", e);
-      StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+  db::add_requirement_source_topic(
+    &state.db,
+    requirement_id,
+    &payload.topic_id,
+  )
+  .await
+  .map_err(|e| {
+    eprintln!("add_requirement_source_topic failed: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
 
   let mut ctx = state.data_context.lock().map_err(|e| {
     eprintln!("Mutex poisoned in add_requirement_source_topic: {}", e);
     StatusCode::INTERNAL_SERVER_ERROR
   })?;
-  let audit_data =
-    ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+  let audit_data = ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
   let req_topic = topic::new_requirement_topic(requirement_id as i32);
   let requirement = audit_data
     .requirements
@@ -2179,8 +2171,7 @@ pub async fn remove_requirement_source_topic(
     eprintln!("Mutex poisoned in remove_requirement_source_topic: {}", e);
     StatusCode::INTERNAL_SERVER_ERROR
   })?;
-  let audit_data =
-    ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+  let audit_data = ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
   let req_topic = topic::new_requirement_topic(requirement_id as i32);
   let requirement = audit_data
     .requirements

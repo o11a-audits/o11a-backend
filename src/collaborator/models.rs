@@ -226,12 +226,6 @@ pub struct CommentListResponse {
   pub comment_topic_ids: Vec<String>, // ["C1", "C2", "C3"]
 }
 
-/// Response for listing comments on a topic
-#[derive(Debug, Serialize)]
-pub struct TopicCommentsResponse {
-  pub comments: Vec<crate::api::handlers::TopicMetadataResponse>,
-}
-
 /// Response for status queries
 #[derive(Debug, Clone, Serialize)]
 pub struct CommentStatusResponse {
@@ -258,13 +252,17 @@ pub struct CommentVoteSummary {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type")]
 pub enum CommentEvent {
-  /// New comment created — includes full topic metadata (same shape as /metadata/:topic_id)
-  Created {
+  /// A conversation entry was added to a topic's conversation.
+  /// The `topic_id` is the topic whose conversation was updated.
+  /// The `entry` is the new conversation entry to append.
+  /// `invalidated_thread_ids` lists parent comment topic IDs whose cached
+  /// thread HTML is now stale and should be refetched via the thread endpoint.
+  ConversationUpdated {
     audit_id: String,
-    comment_topic_id: String,
-    target_topic: String,
-    comment_type: CommentType,
-    metadata: serde_json::Value,
+    topic_id: String,
+    entry: crate::api::topic_view::ConversationEntry,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    invalidated_thread_ids: Vec<String>,
   },
   /// Status updated - includes new status directly (no need to refetch)
   StatusUpdated {
@@ -280,22 +278,14 @@ pub enum CommentEvent {
     upvotes: i64,
     downvotes: i64,
   },
-  /// A topic's mentions index was updated (e.g. due to a new comment mentioning it).
-  /// Contains the comment topic IDs that mention this topic.
-  MentionsUpdated {
-    audit_id: String,
-    topic_id: String,
-    comment_topic_ids: Vec<String>,
-  },
 }
 
 impl CommentEvent {
   pub fn audit_id(&self) -> &str {
     match self {
-      CommentEvent::Created { audit_id, .. }
+      CommentEvent::ConversationUpdated { audit_id, .. }
       | CommentEvent::StatusUpdated { audit_id, .. }
-      | CommentEvent::VoteUpdated { audit_id, .. }
-      | CommentEvent::MentionsUpdated { audit_id, .. } => audit_id,
+      | CommentEvent::VoteUpdated { audit_id, .. } => audit_id,
     }
   }
 }

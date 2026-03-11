@@ -60,12 +60,12 @@ pub fn create_router(state: AppState) -> Router {
       get(handlers::get_topic_view),
     )
     .route(
-      "/api/v1/audits/:audit_id/mentions_panel/:topic_id",
-      get(handlers::get_mentions_panel),
+      "/api/v1/audits/:audit_id/conversation/:topic_id",
+      get(handlers::get_conversation),
     )
     .route(
-      "/api/v1/audits/:audit_id/comment_thread/:topic_id",
-      get(handlers::get_comment_thread),
+      "/api/v1/audits/:audit_id/thread/:topic_id",
+      get(handlers::get_thread),
     )
     .route(
       "/api/v1/audits/:audit_id/agent_context/:topic_id",
@@ -85,14 +85,6 @@ pub fn create_router(state: AppState) -> Router {
     .route(
       "/api/v1/audits/:audit_id/comments/:comment_id/status",
       get(handlers::get_comment_status).put(handlers::update_comment_status),
-    )
-    .route(
-      "/api/v1/audits/:audit_id/topics/:topic_id/comments",
-      get(handlers::get_topic_comments),
-    )
-    .route(
-      "/api/v1/audits/:audit_id/mentions/:topic_id",
-      get(handlers::get_comments_mentioning_topic),
     )
     // ============================================
     // Feature routes

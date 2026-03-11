@@ -22,13 +22,24 @@ pub struct TopicViewResponse {
 }
 
 #[derive(Debug, Serialize)]
-pub struct MentionsPanelResponse {
-  pub comment_topic_ids: Vec<String>,
+pub struct ConversationResponse {
+  pub entries: Vec<ConversationEntry>,
 }
 
-#[derive(Debug, Serialize)]
-pub struct CommentThreadResponse {
-  pub thread_html: String,
+#[derive(Debug, Clone, Serialize)]
+pub struct ConversationEntry {
+  pub topic_id: String,
+  pub kind: ConversationEntryKind,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub created_at: Option<String>,
+  pub html: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConversationEntryKind {
+  Comment,
+  Mention,
 }
 
 // ============================================================================
@@ -524,10 +535,7 @@ fn get_source_text(
       )
     }
     Some(Node::Documentation(doc_node)) => {
-      crate::documentation::formatter::node_to_html(
-        doc_node,
-        &audit_data.nodes,
-      )
+      crate::documentation::formatter::node_to_html(doc_node, &audit_data.nodes)
     }
     Some(Node::Comment(nodes)) => {
       crate::collaborator::formatter::render_comment_html(
@@ -1234,23 +1242,92 @@ pub fn build_topic_view(
   })
 }
 
-/// Build the MentionsPanelResponse for a given topic.
-/// Mentions are dynamic (depend on user-created comments) and are never cached.
-pub fn build_mentions_panel(
+/// Build the conversation for a topic: direct comments + mentions, each with thread HTML.
+pub fn build_conversation(
   topic_id: &str,
   audit_data: &AuditData,
-) -> Option<MentionsPanelResponse> {
+  source_text_cache: &std::collections::HashMap<String, String>,
+) -> Option<ConversationResponse> {
   let topic = topic::new_topic(topic_id);
   // Verify the topic exists
   audit_data.topic_metadata.get(&topic)?;
 
-  let comment_topic_ids: Vec<String> = audit_data
-    .mentions_index
-    .get(&topic)
-    .map(|topics| topics.iter().map(|t| t.id.clone()).collect())
-    .unwrap_or_default();
+  let mut entries: Vec<ConversationEntry> = Vec::new();
 
-  Some(MentionsPanelResponse { comment_topic_ids })
+  // Direct comments on this topic
+  if let Some(comment_topics) = audit_data.comment_index.get(&topic) {
+    for comment_topic in comment_topics {
+      if let Some(entry) = build_conversation_entry(
+        comment_topic,
+        ConversationEntryKind::Comment,
+        audit_data,
+        source_text_cache,
+      ) {
+        entries.push(entry);
+      }
+    }
+  }
+
+  // Topics that mention this topic (comments or doc sections)
+  if let Some(mentioning_topics) = audit_data.mentions_index.get(&topic) {
+    for mentioning_topic in mentioning_topics {
+      if let Some(entry) = build_conversation_entry(
+        mentioning_topic,
+        ConversationEntryKind::Mention,
+        audit_data,
+        source_text_cache,
+      ) {
+        entries.push(entry);
+      }
+    }
+  }
+
+  Some(ConversationResponse { entries })
+}
+
+/// Build a single conversation entry: metadata + rendered thread HTML.
+pub fn build_conversation_entry(
+  entry_topic: &topic::Topic,
+  kind: ConversationEntryKind,
+  audit_data: &AuditData,
+  source_text_cache: &std::collections::HashMap<String, String>,
+) -> Option<ConversationEntry> {
+  let metadata = audit_data.topic_metadata.get(entry_topic)?;
+
+  let html = match entry_topic.kind() {
+    Some(topic::TopicKind::Comment) => {
+      build_comment_thread_html(entry_topic, metadata, audit_data, source_text_cache)
+    }
+    _ => render_topic_node(metadata, audit_data, source_text_cache),
+  };
+
+  Some(ConversationEntry {
+    topic_id: entry_topic.id().to_string(),
+    kind,
+    created_at: metadata.created_at().map(|s| s.to_string()),
+    html,
+  })
+}
+
+/// Build thread HTML for a single topic.
+/// For comment topics: renders the comment thread (root + recursive children).
+/// For non-comment topics: renders a topic header + source text content.
+pub fn build_thread(
+  topic_id: &str,
+  audit_data: &AuditData,
+  source_text_cache: &std::collections::HashMap<String, String>,
+) -> Option<String> {
+  let topic = topic::new_topic(topic_id);
+  let metadata = audit_data.topic_metadata.get(&topic)?;
+
+  let html = match topic.kind() {
+    Some(topic::TopicKind::Comment) => {
+      build_comment_thread_html(&topic, metadata, audit_data, source_text_cache)
+    }
+    _ => render_topic_node(metadata, audit_data, source_text_cache),
+  };
+
+  Some(html)
 }
 
 // ============================================================================
@@ -1353,33 +1430,112 @@ fn collect_children_recursive<'a>(
   }
 }
 
-/// Build the comment thread HTML for a comment topic.
-/// Renders the comment itself at the top, then recursively renders
-/// all reply children below it with increasing indent depth.
-/// Returns `None` if the topic is not found or is not a comment.
-pub fn build_comment_thread(
-  topic_id: &str,
+/// Render a comment thread: root comment + all recursive children.
+fn build_comment_thread_html(
+  topic: &topic::Topic,
+  metadata: &TopicMetadata,
   audit_data: &AuditData,
   source_text_cache: &std::collections::HashMap<String, String>,
-) -> Option<CommentThreadResponse> {
-  let topic = topic::new_topic(topic_id);
-  let metadata = audit_data.topic_metadata.get(&topic)?;
-
-  // Only works for comment topics
-  metadata.target_topic()?;
-
-  // Flatten the entire thread: root comment + all recursive children
+) -> String {
   let mut flat: Vec<(&TopicMetadata, usize)> = vec![(metadata, 0)];
-  collect_children_recursive(&topic, 1, audit_data, &mut flat);
+  collect_children_recursive(topic, 1, audit_data, &mut flat);
 
   let total = flat.len();
   let mut html = String::new();
 
   for (i, (meta, depth)) in flat.iter().enumerate() {
     html.push_str(&render_comment_node(
-      meta, i, total, *depth, audit_data, source_text_cache,
+      meta,
+      i,
+      total,
+      *depth,
+      audit_data,
+      source_text_cache,
     ));
   }
 
-  Some(CommentThreadResponse { thread_html: html })
+  html
+}
+
+/// Render a non-comment topic as a thread node.
+/// Shows a metadata header (kind + name) followed by the topic's source text.
+fn render_topic_node(
+  metadata: &TopicMetadata,
+  audit_data: &AuditData,
+  source_text_cache: &std::collections::HashMap<String, String>,
+) -> String {
+  let topic_id = metadata.topic().id();
+  let kind_label = topic_kind_label(metadata);
+  let name = metadata.name().unwrap_or(topic_id);
+
+  let meta_html = format!(
+    "<div style=\"{}\"><span class=\"comment-type keyword\">{}</span> \
+     <span class=\"comment-author\">{}</span></div>",
+    COMMENT_META_STYLE,
+    html_escape(kind_label),
+    html_escape(name),
+  );
+
+  let content_html =
+    get_source_text(metadata.topic(), audit_data, source_text_cache);
+
+  let inner = format!(
+    "{}<div class=\"comment-content code-style\">{}</div>",
+    meta_html, content_html
+  );
+
+  let style = format!("{} {}", COMBINED_PANEL_STYLE, first_last_style(0, 1));
+
+  format!(
+    "<div class=\"conversation-node\" data-topic=\"{}\" style=\"{}\">{}</div>",
+    html_escape(topic_id),
+    style,
+    inner
+  )
+}
+
+/// Returns a human-readable label for a topic's kind.
+fn topic_kind_label(metadata: &TopicMetadata) -> &'static str {
+  match metadata {
+    TopicMetadata::NamedTopic { kind, .. } => match kind {
+      NamedTopicKind::Contract(ContractKind::Contract) => "contract",
+      NamedTopicKind::Contract(ContractKind::Interface) => "interface",
+      NamedTopicKind::Contract(ContractKind::Library) => "library",
+      NamedTopicKind::Contract(ContractKind::Abstract) => "abstract",
+      NamedTopicKind::Function(FunctionKind::Function)
+      | NamedTopicKind::Function(FunctionKind::FreeFunction) => "function",
+      NamedTopicKind::Function(FunctionKind::Constructor) => "constructor",
+      NamedTopicKind::Function(FunctionKind::Fallback) => "fallback",
+      NamedTopicKind::Function(FunctionKind::Receive) => "receive",
+      NamedTopicKind::Modifier => "modifier",
+      NamedTopicKind::Struct => "struct",
+      NamedTopicKind::Enum => "enum",
+      NamedTopicKind::EnumMember => "enum member",
+      NamedTopicKind::Event => "event",
+      NamedTopicKind::Error => "error",
+      NamedTopicKind::StateVariable(VariableMutability::Mutable) => {
+        "state variable"
+      }
+      NamedTopicKind::StateVariable(VariableMutability::Constant) => "constant",
+      NamedTopicKind::StateVariable(VariableMutability::Immutable) => {
+        "immutable"
+      }
+      NamedTopicKind::LocalVariable => "variable",
+      NamedTopicKind::Builtin => "builtin",
+    },
+    TopicMetadata::UnnamedTopic { kind, .. } => match kind {
+      UnnamedTopicKind::DocumentationRoot => "document",
+      _ => "expression",
+    },
+    TopicMetadata::ControlFlow { kind, .. } => match kind {
+      ControlFlowStatementKind::If => "if",
+      ControlFlowStatementKind::For => "for",
+      ControlFlowStatementKind::While => "while",
+      ControlFlowStatementKind::DoWhile => "do while",
+    },
+    TopicMetadata::TitledTopic { kind, .. } => match kind {
+      TitledTopicKind::DocumentationSection => "section",
+    },
+    TopicMetadata::CommentTopic { .. } => "comment",
+  }
 }
