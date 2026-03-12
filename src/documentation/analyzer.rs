@@ -130,6 +130,7 @@ fn process_documentation_node(
           kind: UnnamedTopicKind::DocumentationRoot,
           scope: scope.clone(),
           context,
+          expanded_context: vec![],
         },
       );
 
@@ -165,6 +166,7 @@ fn process_documentation_node(
           kind: UnnamedTopicKind::DocumentationHeading,
           scope: scope.clone(),
           context,
+          expanded_context: vec![],
         },
       );
 
@@ -207,6 +209,7 @@ fn process_documentation_node(
           kind: TitledTopicKind::DocumentationSection,
           title: title.clone(),
           context,
+          expanded_context: vec![],
         },
       );
 
@@ -244,6 +247,7 @@ fn process_documentation_node(
           kind: UnnamedTopicKind::DocumentationParagraph,
           scope: scope.clone(),
           context,
+          expanded_context: vec![],
         },
       );
 
@@ -274,6 +278,7 @@ fn process_documentation_node(
           kind: UnnamedTopicKind::DocumentationSentence,
           scope: scope.clone(),
           context,
+          expanded_context: vec![],
         },
       );
 
@@ -304,6 +309,7 @@ fn process_documentation_node(
           kind: UnnamedTopicKind::DocumentationCodeBlock,
           scope: scope.clone(),
           context,
+          expanded_context: vec![],
         },
       );
 
@@ -333,6 +339,7 @@ fn process_documentation_node(
           kind: UnnamedTopicKind::DocumentationList,
           scope: scope.clone(),
           context,
+          expanded_context: vec![],
         },
       );
 
@@ -362,6 +369,7 @@ fn process_documentation_node(
           kind: UnnamedTopicKind::DocumentationBlockQuote,
           scope: scope.clone(),
           context,
+          expanded_context: vec![],
         },
       );
 
@@ -391,6 +399,7 @@ fn process_documentation_node(
           kind: UnnamedTopicKind::DocumentationInlineCode,
           scope: scope.clone(),
           context,
+          expanded_context: vec![],
         },
       );
 

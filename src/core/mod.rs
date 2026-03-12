@@ -730,7 +730,7 @@ impl Reference {
 /// For Documentation: scope is a file, scope_references are file-level refs, nested_references are section-level refs.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SourceContext {
-  /// The grouping scope where these references occur (contract for Solidity, file for documentation)
+  /// The grouping scope where these references occur (contract for Solidity, file for documentation, feature for doc expanded context)
   scope: topic::Topic,
   /// Source location start for sorting groups relative to each other
   sort_key: Option<usize>,
@@ -1182,6 +1182,9 @@ pub enum TopicMetadata {
     scope: Scope,
     kind: UnnamedTopicKind,
     context: Vec<SourceContext>,
+    /// Expanded context derived from features linked to this topic.
+    /// Only populated for documentation topics.
+    expanded_context: Vec<SourceContext>,
   },
   /// A control flow statement (if/for/while/do-while) with its condition topic.
   ControlFlow {
@@ -1199,6 +1202,8 @@ pub enum TopicMetadata {
     kind: TitledTopicKind,
     title: String,
     context: Vec<SourceContext>,
+    /// Expanded context derived from features linked to this documentation topic.
+    expanded_context: Vec<SourceContext>,
   },
   /// A comment topic with immutable metadata
   CommentTopic {
@@ -1258,10 +1263,14 @@ impl TopicMetadata {
     match self {
       TopicMetadata::NamedTopic {
         expanded_context, ..
+      }
+      | TopicMetadata::UnnamedTopic {
+        expanded_context, ..
+      }
+      | TopicMetadata::TitledTopic {
+        expanded_context, ..
       } => expanded_context,
-      TopicMetadata::UnnamedTopic { .. }
-      | TopicMetadata::ControlFlow { .. }
-      | TopicMetadata::TitledTopic { .. }
+      TopicMetadata::ControlFlow { .. }
       | TopicMetadata::CommentTopic { .. } => &[],
     }
   }
@@ -1554,6 +1563,53 @@ pub fn load_audit_name(project_root: &Path) -> Result<String, String> {
   }
 
   Ok(audit_name)
+}
+
+/// Rebuilds the `expanded_context` (linked features) for all documentation TitledTopics
+/// by scanning the features map for documentation_topics references.
+pub fn rebuild_doc_expanded_context(audit_data: &mut AuditData) {
+  // Build reverse index: doc_topic -> [feature_topics]
+  let mut doc_to_features: HashMap<topic::Topic, Vec<topic::Topic>> = HashMap::new();
+  for (feature_topic, feature) in &audit_data.features {
+    for doc_topic in &feature.documentation_topics {
+      doc_to_features
+        .entry(doc_topic.clone())
+        .or_default()
+        .push(feature_topic.clone());
+    }
+  }
+
+  // Update TitledTopic and UnnamedTopic expanded_context fields
+  for (topic, metadata) in audit_data.topic_metadata.iter_mut() {
+    let expanded_context = match metadata {
+      TopicMetadata::TitledTopic {
+        expanded_context, ..
+      }
+      | TopicMetadata::UnnamedTopic {
+        expanded_context, ..
+      } => expanded_context,
+      _ => continue,
+    };
+    {
+      let feature_topics = doc_to_features.remove(topic).unwrap_or_default();
+      *expanded_context = feature_topics
+        .into_iter()
+        .map(|ft| {
+          let sort_key = ft.numeric_id().map(|id| id as usize);
+          SourceContext {
+            scope: ft.clone(),
+            sort_key,
+            is_in_scope: true,
+            scope_references: vec![Reference::ProjectReference {
+              reference_topic: ft,
+              sort_key,
+            }],
+            nested_references: vec![],
+          }
+        })
+        .collect();
+    }
+  }
 }
 
 pub fn new_audit_data(

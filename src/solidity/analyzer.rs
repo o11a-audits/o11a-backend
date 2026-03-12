@@ -1679,6 +1679,7 @@ fn process_second_pass_nodes(
             scope: scope.clone(),
             kind,
             context: vec![],
+            expanded_context: vec![],
           },
         );
       }

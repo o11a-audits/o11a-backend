@@ -77,12 +77,17 @@ async fn main() {
   println!("Loading features...");
   let feature_count = {
     let mut ctx = data_context.lock().unwrap();
-    collab_db::load_all_features(&pool, &mut ctx)
+    let count = collab_db::load_all_features(&pool, &mut ctx)
       .await
       .unwrap_or_else(|e| {
         eprintln!("Warning: Failed to load features: {}", e);
         0
-      })
+      });
+    // Rebuild doc expanded context now that features are loaded
+    for audit_data in ctx.audits.values_mut() {
+      core::rebuild_doc_expanded_context(audit_data);
+    }
+    count
   };
 
   println!("Loaded {} features", feature_count);

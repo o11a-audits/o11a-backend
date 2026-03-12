@@ -804,6 +804,7 @@ pub struct TitledTopicResponse {
   pub kind: String,
   pub scope: ScopeInfo,
   pub context: Vec<SourceContextResponse>,
+  pub expanded_context: Vec<SourceContextResponse>,
 }
 
 /// Response for UnnamedTopic metadata
@@ -813,6 +814,7 @@ pub struct UnnamedTopicResponse {
   pub kind: String,
   pub scope: ScopeInfo,
   pub context: Vec<SourceContextResponse>,
+  pub expanded_context: Vec<SourceContextResponse>,
 }
 
 /// Response for ControlFlow metadata
@@ -970,6 +972,7 @@ fn topic_metadata_to_response(
         kind: format!("{:?}", kind),
         scope: scope_info,
         context: convert_source_context(metadata.context()),
+        expanded_context: convert_source_context(metadata.expanded_context()),
       })
     }
 
@@ -979,6 +982,7 @@ fn topic_metadata_to_response(
         kind: format!("{:?}", kind),
         scope: scope_info,
         context: convert_source_context(metadata.context()),
+        expanded_context: convert_source_context(metadata.expanded_context()),
       })
     }
 
@@ -1810,6 +1814,7 @@ pub async fn build_features(
       ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
     audit_data.features = parsed.features;
     audit_data.requirements = parsed.requirements;
+    crate::core::rebuild_doc_expanded_context(audit_data);
   }
 
   Ok(Json(FeaturesResponse { features: response }))
@@ -1933,7 +1938,10 @@ pub async fn add_feature_documentation_topic(
     feature.documentation_topics.push(new_topic);
   }
 
-  Ok(Json(feature_to_response(&feature_topic, feature)))
+  let response = feature_to_response(&feature_topic, feature);
+  crate::core::rebuild_doc_expanded_context(audit_data);
+
+  Ok(Json(response))
 }
 
 /// DELETE /api/v1/audits/:audit_id/features/:feature_id/documentation_topics/:topic_id
@@ -1971,7 +1979,10 @@ pub async fn remove_feature_documentation_topic(
   let remove_topic = topic::new_topic(&topic_id);
   feature.documentation_topics.retain(|t| t != &remove_topic);
 
-  Ok(Json(feature_to_response(&feature_topic, feature)))
+  let response = feature_to_response(&feature_topic, feature);
+  crate::core::rebuild_doc_expanded_context(audit_data);
+
+  Ok(Json(response))
 }
 
 // ============================================
