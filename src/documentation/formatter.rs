@@ -95,9 +95,7 @@ fn do_node_to_html(
         .join("");
 
       let topic_id = topic::new_documentation_topic(*node_id);
-      formatting::format_topic_token(
-        &topic_id, &content, "sentence", &topic_id,
-      )
+      formatting::format_topic_token(&topic_id, &content, "sentence", &topic_id)
     }
 
     DocumentationNode::Text { value, .. } => formatting::html_escape(value),
@@ -251,6 +249,163 @@ fn do_node_to_html(
       formatting::format_thematic_break()
     }
 
+    DocumentationNode::Break { .. } => "<br />".to_string(),
+
+    DocumentationNode::Delete { children, .. } => {
+      let content = children
+        .iter()
+        .map(|child| do_node_to_html(child, indent_level, nodes_map))
+        .collect::<Vec<_>>()
+        .join("");
+
+      format!("<del>{}</del>", content)
+    }
+
+    DocumentationNode::Image {
+      alt, url, title, ..
+    } => {
+      let label = if !alt.is_empty() {
+        alt.as_str()
+      } else if let Some(t) = title.as_deref() {
+        t
+      } else {
+        url.as_str()
+      };
+      format_image_link(
+        &formatting::html_escape(url),
+        &formatting::html_escape(label),
+      )
+    }
+
+    DocumentationNode::Table {
+      children, node_id, ..
+    } => {
+      let rows = children
+        .iter()
+        .map(|child| do_node_to_html(child, indent_level, nodes_map))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+      let topic_id = topic::new_documentation_topic(*node_id);
+      formatting::format_topic_block(&topic_id, &rows, "table", &topic_id)
+    }
+
+    DocumentationNode::TableRow { children, .. } => {
+      let cells = children
+        .iter()
+        .map(|child| do_node_to_html(child, indent_level, nodes_map))
+        .collect::<Vec<_>>()
+        .join("");
+
+      format!("<tr>{}</tr>", cells)
+    }
+
+    DocumentationNode::TableCell { children, .. } => {
+      let content = children
+        .iter()
+        .map(|child| do_node_to_html(child, indent_level, nodes_map))
+        .collect::<Vec<_>>()
+        .join("");
+
+      format!("<td>{}</td>", content)
+    }
+
+    DocumentationNode::Html { value, .. } => {
+      // Convert any HTML containing <img> tags to links instead of embedding images
+      if value.contains("<img") {
+        let src = extract_html_attr(value, "src").unwrap_or_default();
+        let alt = extract_html_attr(value, "alt")
+          .or_else(|| extract_html_attr(value, "title"))
+          .unwrap_or(src.clone());
+        let label = if alt.is_empty() { "Img" } else { &alt };
+        format_image_link(
+          &formatting::html_escape(&src),
+          &formatting::html_escape(label),
+        )
+      } else {
+        value.clone()
+      }
+    }
+
+    DocumentationNode::FootnoteDefinition {
+      identifier,
+      children,
+      ..
+    } => {
+      let content = children
+        .iter()
+        .map(|child| do_node_to_html(child, indent_level, nodes_map))
+        .collect::<Vec<_>>()
+        .join("");
+
+      format!(
+        "<div class=\"footnote\" id=\"fn-{}\"><sup>{}</sup> {}</div>",
+        formatting::html_escape(identifier),
+        formatting::html_escape(identifier),
+        content
+      )
+    }
+
+    DocumentationNode::FootnoteReference { identifier, .. } => {
+      format!(
+        "<sup><a href=\"#fn-{}\">{}</a></sup>",
+        formatting::html_escape(identifier),
+        formatting::html_escape(identifier)
+      )
+    }
+
+    DocumentationNode::LinkReference {
+      identifier,
+      label,
+      children,
+      ..
+    } => {
+      let content = children
+        .iter()
+        .map(|child| do_node_to_html(child, indent_level, nodes_map))
+        .collect::<Vec<_>>()
+        .join("");
+
+      let display = if content.is_empty() {
+        label.as_deref().unwrap_or(identifier).to_string()
+      } else {
+        content
+      };
+      format!("[{}]", display)
+    }
+
+    DocumentationNode::ImageReference {
+      alt, identifier, ..
+    } => {
+      let display = if alt.is_empty() {
+        identifier.as_str()
+      } else {
+        alt.as_str()
+      };
+      format!("[{}]", formatting::html_escape(display))
+    }
+
+    DocumentationNode::Definition { .. } => {
+      // Link definitions are invisible in rendered output
+      String::new()
+    }
+
+    DocumentationNode::Frontmatter { value, .. } => {
+      formatting::format_code_block(
+        Some("yaml"),
+        &formatting::html_escape(value),
+      )
+    }
+
+    DocumentationNode::Math { value, .. } => formatting::format_code_block(
+      Some("math"),
+      &formatting::html_escape(value),
+    ),
+
+    DocumentationNode::InlineMath { value, .. } => {
+      formatting::format_inline_code(&formatting::html_escape(value))
+    }
+
     DocumentationNode::Stub { topic, .. } => formatting::format_stub(topic),
   }
 }
@@ -368,9 +523,7 @@ fn do_node_to_plain_text(
       format!("**{}**", content)
     }
 
-    DocumentationNode::Link {
-      url, children, ..
-    } => {
+    DocumentationNode::Link { url, children, .. } => {
       let content: String = children
         .iter()
         .map(|c| do_node_to_plain_text(c, nodes_map))
@@ -393,6 +546,123 @@ fn do_node_to_plain_text(
 
     DocumentationNode::ThematicBreak { .. } => "---".to_string(),
 
+    DocumentationNode::Break { .. } => "\n".to_string(),
+
+    DocumentationNode::Delete { children, .. } => {
+      let content: String = children
+        .iter()
+        .map(|c| do_node_to_plain_text(c, nodes_map))
+        .collect();
+      format!("~~{}~~", content)
+    }
+
+    DocumentationNode::Image {
+      alt, url, title, ..
+    } => match title {
+      Some(t) => format!("![{}]({} \"{}\")", alt, url, t),
+      None => format!("![{}]({})", alt, url),
+    },
+
+    DocumentationNode::Table { children, .. } => children
+      .iter()
+      .map(|c| do_node_to_plain_text(c, nodes_map))
+      .collect::<Vec<_>>()
+      .join("\n"),
+
+    DocumentationNode::TableRow { children, .. } => {
+      let cells: Vec<String> = children
+        .iter()
+        .map(|c| do_node_to_plain_text(c, nodes_map))
+        .collect();
+      format!("| {} |", cells.join(" | "))
+    }
+
+    DocumentationNode::TableCell { children, .. } => children
+      .iter()
+      .map(|c| do_node_to_plain_text(c, nodes_map))
+      .collect(),
+
+    DocumentationNode::Html { value, .. } => value.clone(),
+
+    DocumentationNode::FootnoteDefinition {
+      identifier,
+      children,
+      ..
+    } => {
+      let content: String = children
+        .iter()
+        .map(|c| do_node_to_plain_text(c, nodes_map))
+        .collect();
+      format!("[^{}]: {}", identifier, content)
+    }
+
+    DocumentationNode::FootnoteReference { identifier, .. } => {
+      format!("[^{}]", identifier)
+    }
+
+    DocumentationNode::LinkReference {
+      identifier,
+      label,
+      children,
+      ..
+    } => {
+      let content: String = children
+        .iter()
+        .map(|c| do_node_to_plain_text(c, nodes_map))
+        .collect();
+      if content.is_empty() {
+        format!("[{}]", label.as_deref().unwrap_or(identifier))
+      } else {
+        format!("[{}][{}]", content, identifier)
+      }
+    }
+
+    DocumentationNode::ImageReference {
+      alt, identifier, ..
+    } => {
+      format!("![{}][{}]", alt, identifier)
+    }
+
+    DocumentationNode::Definition {
+      identifier,
+      url,
+      title,
+      ..
+    } => match title {
+      Some(t) => format!("[{}]: {} \"{}\"", identifier, url, t),
+      None => format!("[{}]: {}", identifier, url),
+    },
+
+    DocumentationNode::Frontmatter { value, .. } => {
+      format!("---\n{}\n---", value)
+    }
+
+    DocumentationNode::Math { value, .. } => {
+      format!("$$\n{}\n$$", value)
+    }
+
+    DocumentationNode::InlineMath { value, .. } => {
+      format!("${}$", value)
+    }
+
     DocumentationNode::Stub { .. } => String::new(),
   }
+}
+
+/// Format an image as a styled link with the 🖼 prefix.
+fn format_image_link(url: &str, label: &str) -> String {
+  format!(
+    "\u{1f5bc} <a href=\"{}\" style=\"color: var(--color-function)\">{}</a>",
+    url, label,
+  )
+}
+
+/// Extract an HTML attribute value from a raw HTML string.
+/// e.g. `extract_html_attr("<img src=\"foo.png\">", "src")` => `Some("foo.png")`
+fn extract_html_attr(html: &str, attr: &str) -> Option<String> {
+  let pattern = format!("{}=\"", attr);
+  let start = html.find(&pattern)? + pattern.len();
+  let rest = &html[start..];
+  let end = rest.find('"')?;
+  Some(rest[..end].to_string())
 }

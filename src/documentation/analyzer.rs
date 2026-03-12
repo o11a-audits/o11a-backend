@@ -463,10 +463,19 @@ fn process_documentation_node(
     // For all other node types, just add them to the nodes map (no topic_metadata)
     DocumentationNode::Text { .. }
     | DocumentationNode::ThematicBreak { .. }
+    | DocumentationNode::Break { .. }
     | DocumentationNode::CodeKeyword { .. }
     | DocumentationNode::CodeOperator { .. }
     | DocumentationNode::CodeIdentifier { .. }
-    | DocumentationNode::CodeText { .. } => {
+    | DocumentationNode::CodeText { .. }
+    | DocumentationNode::Image { .. }
+    | DocumentationNode::Html { .. }
+    | DocumentationNode::FootnoteReference { .. }
+    | DocumentationNode::ImageReference { .. }
+    | DocumentationNode::Definition { .. }
+    | DocumentationNode::Frontmatter { .. }
+    | DocumentationNode::Math { .. }
+    | DocumentationNode::InlineMath { .. } => {
       audit_data
         .nodes
         .insert(topic, Node::Documentation(node.clone()));
@@ -476,7 +485,13 @@ fn process_documentation_node(
     DocumentationNode::ListItem { children, .. }
     | DocumentationNode::Emphasis { children, .. }
     | DocumentationNode::Strong { children, .. }
-    | DocumentationNode::Link { children, .. } => {
+    | DocumentationNode::Link { children, .. }
+    | DocumentationNode::Delete { children, .. }
+    | DocumentationNode::Table { children, .. }
+    | DocumentationNode::TableRow { children, .. }
+    | DocumentationNode::TableCell { children, .. }
+    | DocumentationNode::FootnoteDefinition { children, .. }
+    | DocumentationNode::LinkReference { children, .. } => {
       // Add the node with children converted to stubs
       audit_data.nodes.insert(
         topic,

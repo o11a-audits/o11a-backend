@@ -461,6 +461,107 @@ pub enum DocumentationNode {
     position: Option<usize>,
   },
 
+  Break {
+    node_id: i32,
+    position: Option<usize>,
+  },
+
+  Delete {
+    node_id: i32,
+    position: Option<usize>,
+    children: Vec<DocumentationNode>,
+  },
+
+  Image {
+    node_id: i32,
+    position: Option<usize>,
+    alt: String,
+    url: String,
+    title: Option<String>,
+  },
+
+  Table {
+    node_id: i32,
+    position: Option<usize>,
+    children: Vec<DocumentationNode>,
+  },
+
+  TableRow {
+    node_id: i32,
+    position: Option<usize>,
+    children: Vec<DocumentationNode>,
+  },
+
+  TableCell {
+    node_id: i32,
+    position: Option<usize>,
+    children: Vec<DocumentationNode>,
+  },
+
+  Html {
+    node_id: i32,
+    position: Option<usize>,
+    value: String,
+  },
+
+  FootnoteDefinition {
+    node_id: i32,
+    position: Option<usize>,
+    identifier: String,
+    label: Option<String>,
+    children: Vec<DocumentationNode>,
+  },
+
+  FootnoteReference {
+    node_id: i32,
+    position: Option<usize>,
+    identifier: String,
+    label: Option<String>,
+  },
+
+  LinkReference {
+    node_id: i32,
+    position: Option<usize>,
+    identifier: String,
+    label: Option<String>,
+    children: Vec<DocumentationNode>,
+  },
+
+  ImageReference {
+    node_id: i32,
+    position: Option<usize>,
+    alt: String,
+    identifier: String,
+    label: Option<String>,
+  },
+
+  Definition {
+    node_id: i32,
+    position: Option<usize>,
+    url: String,
+    title: Option<String>,
+    identifier: String,
+    label: Option<String>,
+  },
+
+  Frontmatter {
+    node_id: i32,
+    position: Option<usize>,
+    value: String,
+  },
+
+  Math {
+    node_id: i32,
+    position: Option<usize>,
+    value: String,
+  },
+
+  InlineMath {
+    node_id: i32,
+    position: Option<usize>,
+    value: String,
+  },
+
   // Placeholder for a node (similar to Solidity's Stub)
   Stub {
     node_id: i32,
@@ -490,6 +591,21 @@ impl DocumentationNode {
       DocumentationNode::Link { node_id, .. } => *node_id,
       DocumentationNode::BlockQuote { node_id, .. } => *node_id,
       DocumentationNode::ThematicBreak { node_id, .. } => *node_id,
+      DocumentationNode::Break { node_id, .. } => *node_id,
+      DocumentationNode::Delete { node_id, .. } => *node_id,
+      DocumentationNode::Image { node_id, .. } => *node_id,
+      DocumentationNode::Table { node_id, .. } => *node_id,
+      DocumentationNode::TableRow { node_id, .. } => *node_id,
+      DocumentationNode::TableCell { node_id, .. } => *node_id,
+      DocumentationNode::Html { node_id, .. } => *node_id,
+      DocumentationNode::FootnoteDefinition { node_id, .. } => *node_id,
+      DocumentationNode::FootnoteReference { node_id, .. } => *node_id,
+      DocumentationNode::LinkReference { node_id, .. } => *node_id,
+      DocumentationNode::ImageReference { node_id, .. } => *node_id,
+      DocumentationNode::Definition { node_id, .. } => *node_id,
+      DocumentationNode::Frontmatter { node_id, .. } => *node_id,
+      DocumentationNode::Math { node_id, .. } => *node_id,
+      DocumentationNode::InlineMath { node_id, .. } => *node_id,
       DocumentationNode::Stub { node_id, .. } => *node_id,
     }
   }
@@ -510,7 +626,22 @@ impl DocumentationNode {
       | DocumentationNode::Strong { position, .. }
       | DocumentationNode::Link { position, .. }
       | DocumentationNode::BlockQuote { position, .. }
-      | DocumentationNode::ThematicBreak { position, .. } => *position,
+      | DocumentationNode::ThematicBreak { position, .. }
+      | DocumentationNode::Break { position, .. }
+      | DocumentationNode::Delete { position, .. }
+      | DocumentationNode::Image { position, .. }
+      | DocumentationNode::Table { position, .. }
+      | DocumentationNode::TableRow { position, .. }
+      | DocumentationNode::TableCell { position, .. }
+      | DocumentationNode::Html { position, .. }
+      | DocumentationNode::FootnoteDefinition { position, .. }
+      | DocumentationNode::FootnoteReference { position, .. }
+      | DocumentationNode::LinkReference { position, .. }
+      | DocumentationNode::ImageReference { position, .. }
+      | DocumentationNode::Definition { position, .. }
+      | DocumentationNode::Frontmatter { position, .. }
+      | DocumentationNode::Math { position, .. }
+      | DocumentationNode::InlineMath { position, .. } => *position,
       // Nodes created by parser don't have position
       DocumentationNode::Section { .. }
       | DocumentationNode::Sentence { .. }
@@ -535,7 +666,13 @@ impl DocumentationNode {
       | DocumentationNode::Emphasis { children, .. }
       | DocumentationNode::Strong { children, .. }
       | DocumentationNode::Link { children, .. }
-      | DocumentationNode::BlockQuote { children, .. } => {
+      | DocumentationNode::BlockQuote { children, .. }
+      | DocumentationNode::Delete { children, .. }
+      | DocumentationNode::Table { children, .. }
+      | DocumentationNode::TableRow { children, .. }
+      | DocumentationNode::TableCell { children, .. }
+      | DocumentationNode::FootnoteDefinition { children, .. }
+      | DocumentationNode::LinkReference { children, .. } => {
         children.iter().collect()
       }
       // Heading has text children and optionally a section child
@@ -1040,7 +1177,165 @@ fn convert_mdast_node(
       Ok(DocumentationNode::ThematicBreak { node_id, position })
     }
 
-    // For unsupported node types, we'll create a text node with a placeholder
+    MdNode::Break(_) => {
+      Ok(DocumentationNode::Break { node_id, position })
+    }
+
+    MdNode::Delete(delete) => {
+      let children = delete
+        .children
+        .iter()
+        .map(|child| convert_mdast_node(child, audit_data, next_id))
+        .collect::<Result<Vec<_>, _>>()?;
+
+      Ok(DocumentationNode::Delete {
+        node_id,
+        position,
+        children,
+      })
+    }
+
+    MdNode::Image(image) => Ok(DocumentationNode::Image {
+      node_id,
+      position,
+      alt: image.alt.clone(),
+      url: image.url.clone(),
+      title: image.title.clone(),
+    }),
+
+    MdNode::Table(table) => {
+      let children = table
+        .children
+        .iter()
+        .map(|child| convert_mdast_node(child, audit_data, next_id))
+        .collect::<Result<Vec<_>, _>>()?;
+
+      Ok(DocumentationNode::Table {
+        node_id,
+        position,
+        children,
+      })
+    }
+
+    MdNode::TableRow(row) => {
+      let children = row
+        .children
+        .iter()
+        .map(|child| convert_mdast_node(child, audit_data, next_id))
+        .collect::<Result<Vec<_>, _>>()?;
+
+      Ok(DocumentationNode::TableRow {
+        node_id,
+        position,
+        children,
+      })
+    }
+
+    MdNode::TableCell(cell) => {
+      let children = cell
+        .children
+        .iter()
+        .map(|child| convert_mdast_node(child, audit_data, next_id))
+        .collect::<Result<Vec<_>, _>>()?;
+
+      Ok(DocumentationNode::TableCell {
+        node_id,
+        position,
+        children,
+      })
+    }
+
+    MdNode::Html(html) => Ok(DocumentationNode::Html {
+      node_id,
+      position,
+      value: html.value.clone(),
+    }),
+
+    MdNode::FootnoteDefinition(def) => {
+      let children = def
+        .children
+        .iter()
+        .map(|child| convert_mdast_node(child, audit_data, next_id))
+        .collect::<Result<Vec<_>, _>>()?;
+
+      Ok(DocumentationNode::FootnoteDefinition {
+        node_id,
+        position,
+        identifier: def.identifier.clone(),
+        label: def.label.clone(),
+        children,
+      })
+    }
+
+    MdNode::FootnoteReference(ref_node) => {
+      Ok(DocumentationNode::FootnoteReference {
+        node_id,
+        position,
+        identifier: ref_node.identifier.clone(),
+        label: ref_node.label.clone(),
+      })
+    }
+
+    MdNode::LinkReference(link_ref) => {
+      let children = link_ref
+        .children
+        .iter()
+        .map(|child| convert_mdast_node(child, audit_data, next_id))
+        .collect::<Result<Vec<_>, _>>()?;
+
+      Ok(DocumentationNode::LinkReference {
+        node_id,
+        position,
+        identifier: link_ref.identifier.clone(),
+        label: link_ref.label.clone(),
+        children,
+      })
+    }
+
+    MdNode::ImageReference(img_ref) => {
+      Ok(DocumentationNode::ImageReference {
+        node_id,
+        position,
+        alt: img_ref.alt.clone(),
+        identifier: img_ref.identifier.clone(),
+        label: img_ref.label.clone(),
+      })
+    }
+
+    MdNode::Definition(def) => Ok(DocumentationNode::Definition {
+      node_id,
+      position,
+      url: def.url.clone(),
+      title: def.title.clone(),
+      identifier: def.identifier.clone(),
+      label: def.label.clone(),
+    }),
+
+    MdNode::Yaml(yaml) => Ok(DocumentationNode::Frontmatter {
+      node_id,
+      position,
+      value: yaml.value.clone(),
+    }),
+
+    MdNode::Toml(toml) => Ok(DocumentationNode::Frontmatter {
+      node_id,
+      position,
+      value: toml.value.clone(),
+    }),
+
+    MdNode::Math(math) => Ok(DocumentationNode::Math {
+      node_id,
+      position,
+      value: math.value.clone(),
+    }),
+
+    MdNode::InlineMath(math) => Ok(DocumentationNode::InlineMath {
+      node_id,
+      position,
+      value: math.value.clone(),
+    }),
+
+    // MDX-specific nodes are not supported
     _ => Ok(DocumentationNode::Text {
       node_id,
       position,
@@ -1210,7 +1505,69 @@ pub fn children_to_stubs(node: DocumentationNode) -> DocumentationNode {
       value,
       children: children.into_iter().map(node_to_stub).collect(),
     },
-    // Leaf nodes remain unchanged (Text, CodeKeyword, CodeOperator, CodeIdentifier, CodeText, ThematicBreak, Stub)
+    DocumentationNode::Delete {
+      node_id,
+      position,
+      children,
+    } => DocumentationNode::Delete {
+      node_id,
+      position,
+      children: children.into_iter().map(node_to_stub).collect(),
+    },
+    DocumentationNode::Table {
+      node_id,
+      position,
+      children,
+    } => DocumentationNode::Table {
+      node_id,
+      position,
+      children: children.into_iter().map(node_to_stub).collect(),
+    },
+    DocumentationNode::TableRow {
+      node_id,
+      position,
+      children,
+    } => DocumentationNode::TableRow {
+      node_id,
+      position,
+      children: children.into_iter().map(node_to_stub).collect(),
+    },
+    DocumentationNode::TableCell {
+      node_id,
+      position,
+      children,
+    } => DocumentationNode::TableCell {
+      node_id,
+      position,
+      children: children.into_iter().map(node_to_stub).collect(),
+    },
+    DocumentationNode::FootnoteDefinition {
+      node_id,
+      position,
+      identifier,
+      label,
+      children,
+    } => DocumentationNode::FootnoteDefinition {
+      node_id,
+      position,
+      identifier,
+      label,
+      children: children.into_iter().map(node_to_stub).collect(),
+    },
+    DocumentationNode::LinkReference {
+      node_id,
+      position,
+      identifier,
+      label,
+      children,
+    } => DocumentationNode::LinkReference {
+      node_id,
+      position,
+      identifier,
+      label,
+      children: children.into_iter().map(node_to_stub).collect(),
+    },
+    // Leaf nodes remain unchanged
     other => other,
   }
 }

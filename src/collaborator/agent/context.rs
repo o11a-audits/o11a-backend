@@ -1530,7 +1530,68 @@ pub fn render_documentation_ast_snippet(
       }
       return json!(value);
     }
-    DocumentationNode::ThematicBreak { .. } => return json!(null),
+    DocumentationNode::ThematicBreak { .. }
+    | DocumentationNode::Break { .. }
+    | DocumentationNode::Definition { .. } => return json!(null),
+
+    DocumentationNode::Delete { children, .. }
+    | DocumentationNode::LinkReference { children, .. } => {
+      let (text, _) = flatten_inline_content(children, audit_data);
+      return json!(text);
+    }
+
+    DocumentationNode::Image { alt, .. } => return json!(format!("[image: {}]", alt)),
+    DocumentationNode::ImageReference { alt, .. } => {
+      return json!(format!("[image: {}]", alt));
+    }
+
+    DocumentationNode::Table { children, .. } => json!({
+      "type": "table",
+      "id": id,
+      "children": render_children(children),
+    }),
+
+    DocumentationNode::TableRow { children, .. } => {
+      let cells: Vec<serde_json::Value> = render_children(children);
+      return json!(cells);
+    }
+
+    DocumentationNode::TableCell { children, .. } => {
+      let (text, _) = flatten_inline_content(children, audit_data);
+      return json!(text);
+    }
+
+    DocumentationNode::Html { value, .. } => return json!(value),
+
+    DocumentationNode::FootnoteDefinition {
+      identifier,
+      children,
+      ..
+    } => {
+      let (text, _) = flatten_inline_content(children, audit_data);
+      return json!(format!("[^{}]: {}", identifier, text));
+    }
+
+    DocumentationNode::FootnoteReference { identifier, .. } => {
+      return json!(format!("[^{}]", identifier));
+    }
+
+    DocumentationNode::Frontmatter { value, .. } => json!({
+      "type": "frontmatter",
+      "id": id,
+      "text": value,
+    }),
+
+    DocumentationNode::Math { value, .. } => json!({
+      "type": "math",
+      "id": id,
+      "text": value,
+    }),
+
+    DocumentationNode::InlineMath { value, .. } => {
+      return json!(format!("${value}$"));
+    }
+
     DocumentationNode::Stub { .. } => return json!(null),
   };
 
