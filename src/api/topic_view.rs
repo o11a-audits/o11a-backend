@@ -336,6 +336,12 @@ pub fn highlighted_name(metadata: &TopicMetadata) -> String {
       }
     },
     TopicMetadata::CommentTopic { .. } => "<span>Comment</span>".to_string(),
+    TopicMetadata::FeatureTopic { name, .. } => {
+      format!("<span class=\"feature\">{}</span>", html_escape(name))
+    }
+    TopicMetadata::RequirementTopic { description, .. } => {
+      format!("<span class=\"requirement\">{}</span>", html_escape(description))
+    }
   };
 
   format!("<code>{}</code>", inner)
@@ -1058,6 +1064,7 @@ fn flatten_expanded_context(expanded_context: &[SourceContext]) -> Vec<String> {
 pub fn render_highlight_css(
   topic_id: &str,
   metadata: &TopicMetadata,
+  audit_data: &AuditData,
 ) -> String {
   let expanded_ref_panel = "#expanded-references-panel";
 
@@ -1071,14 +1078,14 @@ pub fn render_highlight_css(
     TopicMetadata::NamedTopic {
       ancestors,
       descendants,
-      expanded_context,
+      topic,
       ..
     } => {
       let ancestor_ids: Vec<String> =
         ancestors.iter().map(|t| t.id().to_string()).collect();
       let descendant_ids: Vec<String> =
         descendants.iter().map(|t| t.id().to_string()).collect();
-      let relative_ids = flatten_expanded_context(expanded_context);
+      let relative_ids = flatten_expanded_context(metadata.expanded_context());
       (ancestor_ids, descendant_ids, relative_ids)
     }
     _ => (vec![], vec![], vec![]),
@@ -1209,8 +1216,10 @@ pub fn build_topic_view(
       c.highlight_css.clone(),
     ),
     None => {
+      let empty_ctx: Vec<crate::core::SourceContext> = vec![];
+      let ctx = audit_data.topic_context.get(view_metadata.topic()).unwrap_or(&empty_ctx);
       let topic_html = render_grouped_source_panel(
-        view_metadata.context(),
+        ctx,
         audit_data,
         source_text_cache,
         true,
@@ -1222,7 +1231,7 @@ pub fn build_topic_view(
         true,
       );
       let breadcrumb = render_history_breadcrumb(view_metadata, audit_data);
-      let css = render_highlight_css(view_metadata.topic().id(), view_metadata);
+      let css = render_highlight_css(view_metadata.topic().id(), view_metadata, audit_data);
       (topic_html, expanded_html, breadcrumb, css)
     }
   };
@@ -1537,5 +1546,38 @@ fn topic_kind_label(metadata: &TopicMetadata) -> &'static str {
       TitledTopicKind::DocumentationSection => "section",
     },
     TopicMetadata::CommentTopic { .. } => "comment",
+    TopicMetadata::FeatureTopic { .. } => "feature",
+    TopicMetadata::RequirementTopic { .. } => "requirement",
   }
+}
+
+// ============================================================================
+// Documentation API helpers
+// ============================================================================
+
+/// Build an HTML panel from a list of feature topics by collecting all their
+/// documentation topics' source contexts and rendering them as a grouped source panel.
+/// Deduplicates documentation topics across features.
+pub fn build_documentation_panel(
+  feature_topics: &[topic::Topic],
+  audit_data: &AuditData,
+  source_text_cache: &std::collections::HashMap<String, String>,
+) -> String {
+  let mut all_contexts: Vec<SourceContext> = Vec::new();
+  let mut seen_doc_topics = Vec::new();
+
+  for feature_topic in feature_topics {
+    if let Some(feature) = audit_data.features.get(feature_topic) {
+      for doc_topic in &feature.documentation_topics {
+        if !seen_doc_topics.contains(doc_topic) {
+          seen_doc_topics.push(doc_topic.clone());
+          if let Some(ctx) = audit_data.topic_context.get(doc_topic) {
+            all_contexts.extend(ctx.iter().cloned());
+          }
+        }
+      }
+    }
+  }
+
+  render_grouped_source_panel(&all_contexts, audit_data, source_text_cache, true)
 }

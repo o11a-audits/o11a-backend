@@ -83,9 +83,9 @@ async fn main() {
         eprintln!("Warning: Failed to load features: {}", e);
         0
       });
-    // Rebuild doc expanded context now that features are loaded
+    // Rebuild feature context now that features are loaded
     for audit_data in ctx.audits.values_mut() {
-      core::rebuild_doc_expanded_context(audit_data);
+      core::rebuild_feature_context(audit_data);
     }
     count
   };

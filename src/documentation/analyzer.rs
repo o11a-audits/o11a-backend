@@ -129,9 +129,12 @@ fn process_documentation_node(
           topic: topic.clone(),
           kind: UnnamedTopicKind::DocumentationRoot,
           scope: scope.clone(),
-          context,
           expanded_context: vec![],
         },
+      );
+      audit_data.topic_context.insert(
+        topic.clone(),
+        context,
       );
 
       // Process children with the same scope
@@ -165,9 +168,12 @@ fn process_documentation_node(
           topic: topic.clone(),
           kind: UnnamedTopicKind::DocumentationHeading,
           scope: scope.clone(),
-          context,
           expanded_context: vec![],
         },
+      );
+      audit_data.topic_context.insert(
+        topic.clone(),
+        context,
       );
 
       // Process heading text children (inline formatting nodes)
@@ -208,9 +214,12 @@ fn process_documentation_node(
           scope: scope.clone(),
           kind: TitledTopicKind::DocumentationSection,
           title: title.clone(),
-          context,
           expanded_context: vec![],
         },
+      );
+      audit_data.topic_context.insert(
+        topic.clone(),
+        context,
       );
 
       // Create nested scope by adding this section to the scope hierarchy.
@@ -246,9 +255,12 @@ fn process_documentation_node(
           topic: topic.clone(),
           kind: UnnamedTopicKind::DocumentationParagraph,
           scope: scope.clone(),
-          context,
           expanded_context: vec![],
         },
+      );
+      audit_data.topic_context.insert(
+        topic.clone(),
+        context,
       );
 
       // Paragraphs don't add to scope - only sections/headers define scope hierarchy.
@@ -277,9 +289,12 @@ fn process_documentation_node(
           topic: topic.clone(),
           kind: UnnamedTopicKind::DocumentationSentence,
           scope: scope.clone(),
-          context,
           expanded_context: vec![],
         },
+      );
+      audit_data.topic_context.insert(
+        topic.clone(),
+        context,
       );
 
       // Sentences don't create a new scope level - they stay within the
@@ -308,9 +323,12 @@ fn process_documentation_node(
           topic: topic.clone(),
           kind: UnnamedTopicKind::DocumentationCodeBlock,
           scope: scope.clone(),
-          context,
           expanded_context: vec![],
         },
+      );
+      audit_data.topic_context.insert(
+        topic.clone(),
+        context,
       );
 
       // Process children (code tokens) with the same scope
@@ -338,9 +356,12 @@ fn process_documentation_node(
           topic: topic.clone(),
           kind: UnnamedTopicKind::DocumentationList,
           scope: scope.clone(),
-          context,
           expanded_context: vec![],
         },
+      );
+      audit_data.topic_context.insert(
+        topic.clone(),
+        context,
       );
 
       // Process children with the same scope
@@ -368,9 +389,12 @@ fn process_documentation_node(
           topic: topic.clone(),
           kind: UnnamedTopicKind::DocumentationBlockQuote,
           scope: scope.clone(),
-          context,
           expanded_context: vec![],
         },
+      );
+      audit_data.topic_context.insert(
+        topic.clone(),
+        context,
       );
 
       // Process children with the same scope
@@ -398,9 +422,12 @@ fn process_documentation_node(
           topic: topic.clone(),
           kind: UnnamedTopicKind::DocumentationInlineCode,
           scope: scope.clone(),
-          context,
           expanded_context: vec![],
         },
+      );
+      audit_data.topic_context.insert(
+        topic.clone(),
+        context,
       );
 
       // Process children (code tokens) with the same scope

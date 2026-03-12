@@ -71,6 +71,7 @@ pub fn analyze(
     &relatives_map,
     &mut audit_data.nodes,
     &mut audit_data.topic_metadata,
+    &mut audit_data.topic_context,
     &mut audit_data.function_properties,
     &mut audit_data.variable_types,
   )?;
@@ -1351,6 +1352,7 @@ fn second_pass(
   relatives_map: &RelativesMap,
   nodes: &mut BTreeMap<topic::Topic, Node>,
   topic_metadata: &mut BTreeMap<topic::Topic, TopicMetadata>,
+  topic_context: &mut BTreeMap<topic::Topic, Vec<SourceContext>>,
   function_properties: &mut BTreeMap<topic::Topic, FunctionModProperties>,
   variable_types: &mut BTreeMap<topic::Topic, SolidityType>,
 ) -> Result<(), String> {
@@ -1381,6 +1383,7 @@ fn second_pass(
   // (requires scopes to extract control flow chains for reference grouping)
   populate_context(
     topic_metadata,
+    topic_context,
     in_scope_source_topics,
     nodes,
     in_scope_files,
@@ -1491,9 +1494,8 @@ fn process_second_pass_nodes(
         ),
         name: in_scope_topic_declaration.name().clone(),
         scope: scope.clone(),
-        context: vec![], // Populated after all metadata is built
-        expanded_context: vec![], // Populated after all metadata is built
-        ancestry: vec![], // Populated after all metadata is built
+        expanded_context: vec![],
+        ancestry: vec![],
         is_mutable,
         mutations: mutation_topics,
         ancestors: ancestor_topics,
@@ -1593,7 +1595,6 @@ fn process_second_pass_nodes(
             scope: scope.clone(),
             kind,
             condition,
-            context: vec![],
           },
         );
       } else {
@@ -1678,7 +1679,6 @@ fn process_second_pass_nodes(
             topic,
             scope: scope.clone(),
             kind,
-            context: vec![],
             expanded_context: vec![],
           },
         );
@@ -3396,6 +3396,7 @@ fn collect_ancestry_in_direction(
 /// extracted for every reference_node.
 fn populate_context(
   topic_metadata: &mut BTreeMap<topic::Topic, TopicMetadata>,
+  topic_context: &mut BTreeMap<topic::Topic, Vec<SourceContext>>,
   in_scope_source_topics: &BTreeMap<i32, InScopeDeclaration>,
   nodes: &BTreeMap<topic::Topic, Node>,
   in_scope_files: &HashSet<core::ProjectPath>,
@@ -3430,46 +3431,26 @@ fn populate_context(
       })
       .collect();
 
-  // Update each named topic metadata with context
-  for (topic, metadata) in topic_metadata.iter_mut() {
+  // Update each named topic with context
+  for (topic, metadata) in topic_metadata.iter() {
     if let Some(refs) = refs_map.get(topic) {
-      if let TopicMetadata::NamedTopic { context, .. } = metadata {
-        *context = refs.clone();
+      if matches!(metadata, TopicMetadata::NamedTopic { .. }) {
+        topic_context.insert(topic.clone(), refs.clone());
       }
     }
   }
 
   // Build context for non-named topics (just the self-reference in scope hierarchy)
-  for (_topic, metadata) in topic_metadata.iter_mut() {
+  for (_topic, metadata) in topic_metadata.iter() {
     match metadata {
       TopicMetadata::NamedTopic { .. } => {} // Already populated above
-      TopicMetadata::UnnamedTopic {
-        topic,
-        scope,
-        context,
-        ..
-      }
-      | TopicMetadata::ControlFlow {
-        topic,
-        scope,
-        context,
-        ..
-      }
-      | TopicMetadata::TitledTopic {
-        topic,
-        scope,
-        context,
-        ..
-      }
-      | TopicMetadata::CommentTopic {
-        topic,
-        scope,
-        context,
-        ..
-      } => {
+      TopicMetadata::UnnamedTopic { topic, scope, .. }
+      | TopicMetadata::ControlFlow { topic, scope, .. }
+      | TopicMetadata::TitledTopic { topic, scope, .. }
+      | TopicMetadata::CommentTopic { topic, scope, .. } => {
         if let Some(node_id) = topic.underlying_id().ok() {
           if let Some(self_ref) = scope_to_self_reference(scope, node_id) {
-            *context = build_source_context(
+            let context = build_source_context(
               &[],
               Some(self_ref),
               &scope_map,
@@ -3477,9 +3458,12 @@ fn populate_context(
               in_scope_source_topics,
               in_scope_files,
             );
+            topic_context.insert(topic.clone(), context);
           }
         }
       }
+      TopicMetadata::FeatureTopic { .. }
+      | TopicMetadata::RequirementTopic { .. } => {}
     }
   }
 }
@@ -3641,18 +3625,11 @@ fn populate_expanded_context(
   // Now update each metadata with expanded_context
   for (topic, metadata) in topic_metadata.iter_mut() {
     if let Some(expanded_refs) = expanded_refs_map.get(topic) {
-      match metadata {
-        TopicMetadata::NamedTopic {
-          expanded_context, ..
-        } => {
-          *expanded_context = expanded_refs.clone();
-        }
-        TopicMetadata::UnnamedTopic { .. }
-        | TopicMetadata::ControlFlow { .. }
-        | TopicMetadata::TitledTopic { .. }
-        | TopicMetadata::CommentTopic { .. } => {
-          // No expanded_context for unnamed/titled/comment topics
-        }
+      if let TopicMetadata::NamedTopic {
+        expanded_context, ..
+      } = metadata
+      {
+        *expanded_context = expanded_refs.clone();
       }
     }
   }
@@ -3809,16 +3786,8 @@ fn populate_ancestry(
   // Now update each metadata with ancestry
   for (topic, metadata) in topic_metadata.iter_mut() {
     if let Some(ancestry_refs) = ancestry_refs_map.get(topic) {
-      match metadata {
-        TopicMetadata::NamedTopic { ancestry, .. } => {
-          *ancestry = ancestry_refs.clone();
-        }
-        TopicMetadata::UnnamedTopic { .. }
-        | TopicMetadata::ControlFlow { .. }
-        | TopicMetadata::TitledTopic { .. }
-        | TopicMetadata::CommentTopic { .. } => {
-          // No ancestry for unnamed/titled/comment topics
-        }
+      if let TopicMetadata::NamedTopic { ancestry, .. } = metadata {
+        *ancestry = ancestry_refs.clone();
       }
     }
   }

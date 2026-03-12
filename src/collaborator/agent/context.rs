@@ -76,6 +76,10 @@ fn resolve_topic_name(topic: &topic::Topic, audit_data: &AuditData) -> String {
     Some(TopicMetadata::CommentTopic { comment_type, .. }) => {
       comment_type.clone()
     }
+    Some(TopicMetadata::FeatureTopic { name, .. }) => name.clone(),
+    Some(TopicMetadata::RequirementTopic { description, .. }) => {
+      description.clone()
+    }
     None => topic.id().to_string(),
   }
 }
@@ -181,6 +185,8 @@ fn plaintext_name_from_metadata(metadata: &TopicMetadata) -> String {
       control_flow_kind_to_string(kind).to_string()
     }
     TopicMetadata::CommentTopic { comment_type, .. } => comment_type.clone(),
+    TopicMetadata::FeatureTopic { name, .. } => name.clone(),
+    TopicMetadata::RequirementTopic { description, .. } => description.clone(),
   }
 }
 
@@ -1729,8 +1735,10 @@ pub fn build_agent_topic_context(
   let topic_id_string = topic_id.to_string();
   let name = resolve_topic_name(&topic, audit_data);
 
+  let empty_ctx: Vec<crate::core::SourceContext> = vec![];
+  let topic_ctx = audit_data.topic_context.get(&topic).unwrap_or(&empty_ctx);
   let context = convert_source_groups(
-    metadata.context(),
+    topic_ctx,
     &topic,
     audit_data,
     source_text_cache,
@@ -1744,14 +1752,13 @@ pub fn build_agent_topic_context(
   match metadata {
     TopicMetadata::NamedTopic {
       kind,
-      expanded_context,
       ..
     } => {
       let (kind_str, sub_kind) = named_kind_to_string(kind);
 
       let expanded = if include_expanded_context {
         Some(convert_source_groups(
-          expanded_context,
+          metadata.expanded_context(),
           &topic,
           audit_data,
           source_text_cache,
@@ -1843,5 +1850,27 @@ pub fn build_agent_topic_context(
         mentions,
       })
     }
+
+    TopicMetadata::FeatureTopic { .. } => Some(AgentTopicContext {
+      topic: topic_id_string,
+      name,
+      kind: "Feature".to_string(),
+      sub_kind: None,
+      condition: None,
+      context,
+      expanded_context: None,
+      mentions,
+    }),
+
+    TopicMetadata::RequirementTopic { .. } => Some(AgentTopicContext {
+      topic: topic_id_string,
+      name,
+      kind: "Requirement".to_string(),
+      sub_kind: None,
+      condition: None,
+      context,
+      expanded_context: None,
+      mentions,
+    }),
   }
 }

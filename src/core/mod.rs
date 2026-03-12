@@ -182,8 +182,6 @@ pub enum ContractKind {
 /// with requirements that describe expected behaviors.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Feature {
-  pub name: String,
-  pub description: String,
   /// D-prefixed topic IDs of documentation sections/paragraphs that inform this feature
   pub documentation_topics: Vec<topic::Topic>,
   /// R-prefixed topic IDs of requirements belonging to this feature
@@ -195,9 +193,6 @@ pub struct Feature {
 /// ("Do not allow a user to withdraw another user's funds").
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Requirement {
-  pub description: String,
-  /// F-prefixed topic ID of the parent feature
-  pub feature_topic: topic::Topic,
   /// N-prefixed topic IDs of source code topics that satisfy this requirement
   pub source_topics: Vec<topic::Topic>,
 }
@@ -224,6 +219,8 @@ pub struct AuditData {
   /// Reverse index: target topic ID → non-hidden comment topics.
   /// Updated on comment create and status change.
   pub comment_index: HashMap<topic::Topic, Vec<topic::Topic>>,
+  /// Primary source context for each topic, stored separately from TopicMetadata.
+  pub topic_context: BTreeMap<topic::Topic, Vec<SourceContext>>,
   /// Features extracted from documentation, keyed by F-prefixed topic ID.
   pub features: BTreeMap<topic::Topic, Feature>,
   /// Requirements keyed by R-prefixed topic ID. Each belongs to one feature.
@@ -1151,13 +1148,9 @@ pub enum TopicMetadata {
     kind: NamedTopicKind,
     name: String,
     visibility: NamedTopicVisibility,
-    context: Vec<SourceContext>,
     /// Context derived from recursively traversing all ancestors, descendants, and relatives.
-    /// Contains grouped source context showing where all transitive ancestry-related
-    /// variables are declared/referenced.
     expanded_context: Vec<SourceContext>,
     /// Context derived from recursively traversing ancestors and descendants only.
-    /// Similar to expanded_context but excludes relatives.
     ancestry: Vec<SourceContext>,
     /// Whether this topic has mutations (was previously NamedMutableTopic)
     is_mutable: bool,
@@ -1181,7 +1174,6 @@ pub enum TopicMetadata {
     topic: topic::Topic,
     scope: Scope,
     kind: UnnamedTopicKind,
-    context: Vec<SourceContext>,
     /// Expanded context derived from features linked to this topic.
     /// Only populated for documentation topics.
     expanded_context: Vec<SourceContext>,
@@ -1193,7 +1185,6 @@ pub enum TopicMetadata {
     kind: ControlFlowStatementKind,
     /// The condition expression topic.
     condition: topic::Topic,
-    context: Vec<SourceContext>,
   },
   /// A topic with a title (like documentation sections) but not a full declaration
   TitledTopic {
@@ -1201,7 +1192,6 @@ pub enum TopicMetadata {
     scope: Scope,
     kind: TitledTopicKind,
     title: String,
-    context: Vec<SourceContext>,
     /// Expanded context derived from features linked to this documentation topic.
     expanded_context: Vec<SourceContext>,
   },
@@ -1214,9 +1204,25 @@ pub enum TopicMetadata {
     author_id: i64,
     created_at: String,
     mentioned_topics: Vec<topic::Topic>,
-    context: Vec<SourceContext>,
+  },
+  /// A feature extracted from documentation
+  FeatureTopic {
+    topic: topic::Topic,
+    name: String,
+    description: String,
+    author_id: i64,
+    created_at: String,
+  },
+  /// A behavioral requirement belonging to a feature
+  RequirementTopic {
+    topic: topic::Topic,
+    description: String,
+    feature_topic: topic::Topic,
+    author_id: i64,
+    created_at: String,
   },
 }
+
 
 impl TopicMetadata {
   pub fn scope(&self) -> &Scope {
@@ -1226,16 +1232,20 @@ impl TopicMetadata {
       | TopicMetadata::ControlFlow { scope, .. }
       | TopicMetadata::TitledTopic { scope, .. }
       | TopicMetadata::CommentTopic { scope, .. } => scope,
+      TopicMetadata::FeatureTopic { .. }
+      | TopicMetadata::RequirementTopic { .. } => &Scope::Global,
     }
   }
 
   pub fn name(&self) -> Option<&str> {
     match self {
-      TopicMetadata::NamedTopic { name, .. } => Some(name),
+      TopicMetadata::NamedTopic { name, .. }
+      | TopicMetadata::FeatureTopic { name, .. } => Some(name),
       TopicMetadata::TitledTopic { title, .. } => Some(title),
       TopicMetadata::UnnamedTopic { .. }
       | TopicMetadata::ControlFlow { .. }
-      | TopicMetadata::CommentTopic { .. } => None,
+      | TopicMetadata::CommentTopic { .. }
+      | TopicMetadata::RequirementTopic { .. } => None,
     }
   }
 
@@ -1245,19 +1255,12 @@ impl TopicMetadata {
       | TopicMetadata::UnnamedTopic { topic, .. }
       | TopicMetadata::ControlFlow { topic, .. }
       | TopicMetadata::TitledTopic { topic, .. }
-      | TopicMetadata::CommentTopic { topic, .. } => topic,
+      | TopicMetadata::CommentTopic { topic, .. }
+      | TopicMetadata::FeatureTopic { topic, .. }
+      | TopicMetadata::RequirementTopic { topic, .. } => topic,
     }
   }
 
-  pub fn context(&self) -> &[SourceContext] {
-    match self {
-      TopicMetadata::NamedTopic { context, .. }
-      | TopicMetadata::UnnamedTopic { context, .. }
-      | TopicMetadata::ControlFlow { context, .. }
-      | TopicMetadata::TitledTopic { context, .. }
-      | TopicMetadata::CommentTopic { context, .. } => context,
-    }
-  }
 
   pub fn expanded_context(&self) -> &[SourceContext] {
     match self {
@@ -1270,81 +1273,67 @@ impl TopicMetadata {
       | TopicMetadata::TitledTopic {
         expanded_context, ..
       } => expanded_context,
-      TopicMetadata::ControlFlow { .. }
-      | TopicMetadata::CommentTopic { .. } => &[],
+      _ => &[],
     }
   }
 
   pub fn ancestry(&self) -> &[SourceContext] {
     match self {
       TopicMetadata::NamedTopic { ancestry, .. } => ancestry,
-      TopicMetadata::UnnamedTopic { .. }
-      | TopicMetadata::ControlFlow { .. }
-      | TopicMetadata::TitledTopic { .. }
-      | TopicMetadata::CommentTopic { .. } => &[],
+      _ => &[],
     }
   }
 
   pub fn ancestors(&self) -> &[topic::Topic] {
     match self {
       TopicMetadata::NamedTopic { ancestors, .. } => ancestors,
-      TopicMetadata::UnnamedTopic { .. }
-      | TopicMetadata::ControlFlow { .. }
-      | TopicMetadata::TitledTopic { .. }
-      | TopicMetadata::CommentTopic { .. } => &[],
+      _ => &[],
     }
   }
 
   pub fn descendants(&self) -> &[topic::Topic] {
     match self {
       TopicMetadata::NamedTopic { descendants, .. } => descendants,
-      TopicMetadata::UnnamedTopic { .. }
-      | TopicMetadata::ControlFlow { .. }
-      | TopicMetadata::TitledTopic { .. }
-      | TopicMetadata::CommentTopic { .. } => &[],
+      _ => &[],
     }
   }
 
   pub fn relatives(&self) -> &[topic::Topic] {
     match self {
       TopicMetadata::NamedTopic { relatives, .. } => relatives,
-      TopicMetadata::UnnamedTopic { .. }
-      | TopicMetadata::ControlFlow { .. }
-      | TopicMetadata::TitledTopic { .. }
-      | TopicMetadata::CommentTopic { .. } => &[],
+      _ => &[],
     }
   }
 
   pub fn mutations(&self) -> &[topic::Topic] {
     match self {
       TopicMetadata::NamedTopic { mutations, .. } => mutations,
-      TopicMetadata::UnnamedTopic { .. }
-      | TopicMetadata::ControlFlow { .. }
-      | TopicMetadata::TitledTopic { .. }
-      | TopicMetadata::CommentTopic { .. } => &[],
+      _ => &[],
     }
   }
 
   pub fn is_mutable(&self) -> bool {
     match self {
       TopicMetadata::NamedTopic { is_mutable, .. } => *is_mutable,
-      TopicMetadata::UnnamedTopic { .. }
-      | TopicMetadata::ControlFlow { .. }
-      | TopicMetadata::TitledTopic { .. }
-      | TopicMetadata::CommentTopic { .. } => false,
+      _ => false,
     }
   }
 
   pub fn target_topic(&self) -> Option<&topic::Topic> {
     match self {
       TopicMetadata::CommentTopic { target_topic, .. } => Some(target_topic),
+      TopicMetadata::RequirementTopic { feature_topic, .. } => {
+        Some(feature_topic)
+      }
       _ => None,
     }
   }
 
   pub fn author_id(&self) -> Option<i64> {
     match self {
-      TopicMetadata::CommentTopic { author_id, .. } => Some(*author_id),
+      TopicMetadata::CommentTopic { author_id, .. }
+      | TopicMetadata::FeatureTopic { author_id, .. }
+      | TopicMetadata::RequirementTopic { author_id, .. } => Some(*author_id),
       _ => None,
     }
   }
@@ -1360,7 +1349,9 @@ impl TopicMetadata {
 
   pub fn created_at(&self) -> Option<&str> {
     match self {
-      TopicMetadata::CommentTopic { created_at, .. } => {
+      TopicMetadata::CommentTopic { created_at, .. }
+      | TopicMetadata::FeatureTopic { created_at, .. }
+      | TopicMetadata::RequirementTopic { created_at, .. } => {
         Some(created_at.as_str())
       }
       _ => None,
@@ -1565,9 +1556,11 @@ pub fn load_audit_name(project_root: &Path) -> Result<String, String> {
   Ok(audit_name)
 }
 
-/// Rebuilds the `expanded_context` (linked features) for all documentation TitledTopics
-/// by scanning the features map for documentation_topics references.
-pub fn rebuild_doc_expanded_context(audit_data: &mut AuditData) {
+/// Rebuilds feature-related context:
+/// - `expanded_context` on documentation TitledTopics/UnnamedTopics (linked features)
+/// - `topic_context` for FeatureTopics (linked requirements)
+/// - `topic_context` for RequirementTopics (parent feature)
+pub fn rebuild_feature_context(audit_data: &mut AuditData) {
   // Build reverse index: doc_topic -> [feature_topics]
   let mut doc_to_features: HashMap<topic::Topic, Vec<topic::Topic>> = HashMap::new();
   for (feature_topic, feature) in &audit_data.features {
@@ -1579,7 +1572,7 @@ pub fn rebuild_doc_expanded_context(audit_data: &mut AuditData) {
     }
   }
 
-  // Update TitledTopic and UnnamedTopic expanded_context fields
+  // Update expanded_context for documentation topics (TitledTopic/UnnamedTopic)
   for (topic, metadata) in audit_data.topic_metadata.iter_mut() {
     let expanded_context = match metadata {
       TopicMetadata::TitledTopic {
@@ -1590,24 +1583,73 @@ pub fn rebuild_doc_expanded_context(audit_data: &mut AuditData) {
       } => expanded_context,
       _ => continue,
     };
-    {
-      let feature_topics = doc_to_features.remove(topic).unwrap_or_default();
-      *expanded_context = feature_topics
-        .into_iter()
-        .map(|ft| {
-          let sort_key = ft.numeric_id().map(|id| id as usize);
-          SourceContext {
-            scope: ft.clone(),
+    let feature_topics = doc_to_features.remove(topic).unwrap_or_default();
+    *expanded_context = feature_topics
+      .into_iter()
+      .map(|ft| {
+        let sort_key = ft.numeric_id().map(|id| id as usize);
+        SourceContext {
+          scope: ft.clone(),
+          sort_key,
+          is_in_scope: true,
+          scope_references: vec![Reference::ProjectReference {
+            reference_topic: ft,
             sort_key,
-            is_in_scope: true,
-            scope_references: vec![Reference::ProjectReference {
-              reference_topic: ft,
-              sort_key,
-            }],
-            nested_references: vec![],
-          }
+          }],
+          nested_references: vec![],
+        }
+      })
+      .collect();
+  }
+
+  // Build context for FeatureTopics: each requirement as a SourceContext entry
+  for (feature_topic, metadata) in &audit_data.topic_metadata {
+    if !matches!(metadata, TopicMetadata::FeatureTopic { .. }) {
+      continue;
+    }
+    let feature = match audit_data.features.get(feature_topic) {
+      Some(f) => f,
+      None => continue,
+    };
+    let context: Vec<SourceContext> = feature
+      .requirement_topics
+      .iter()
+      .filter_map(|rt| {
+        let sort_key = rt.numeric_id().map(|id| id as usize);
+        Some(SourceContext {
+          scope: feature_topic.clone(),
+          sort_key,
+          is_in_scope: true,
+          scope_references: vec![Reference::ProjectReference {
+            reference_topic: rt.clone(),
+            sort_key,
+          }],
+          nested_references: vec![],
         })
-        .collect();
+      })
+      .collect();
+    audit_data
+      .topic_context
+      .insert(feature_topic.clone(), context);
+  }
+
+  // Build context for RequirementTopics: parent feature as a SourceContext entry
+  for (req_topic, metadata) in &audit_data.topic_metadata {
+    if let TopicMetadata::RequirementTopic { feature_topic, .. } = metadata {
+      let sort_key = feature_topic.numeric_id().map(|id| id as usize);
+      let context = vec![SourceContext {
+        scope: req_topic.clone(),
+        sort_key,
+        is_in_scope: true,
+        scope_references: vec![Reference::ProjectReference {
+          reference_topic: feature_topic.clone(),
+          sort_key,
+        }],
+        nested_references: vec![],
+      }];
+      audit_data
+        .topic_context
+        .insert(req_topic.clone(), context);
     }
   }
 }
@@ -1629,7 +1671,6 @@ pub fn new_audit_data(
       kind: NamedTopicKind::Builtin,
       visibility: NamedTopicVisibility::Public,
       name: "keccak256".to_string(),
-      context: Vec::new(),
       expanded_context: Vec::new(),
       ancestry: Vec::new(),
       is_mutable: false,
@@ -1650,7 +1691,6 @@ pub fn new_audit_data(
       kind: NamedTopicKind::Builtin,
       visibility: NamedTopicVisibility::Public,
       name: "type".to_string(),
-      context: Vec::new(),
       expanded_context: Vec::new(),
       ancestry: Vec::new(),
       is_mutable: false,
@@ -1671,7 +1711,6 @@ pub fn new_audit_data(
       kind: NamedTopicKind::Builtin,
       visibility: NamedTopicVisibility::Public,
       name: "this".to_string(),
-      context: Vec::new(),
       expanded_context: Vec::new(),
       ancestry: Vec::new(),
       is_mutable: false,
@@ -1692,6 +1731,7 @@ pub fn new_audit_data(
     variable_types: BTreeMap::new(),
     name_index: TopicNameIndex::empty(),
     comment_index: HashMap::new(),
+    topic_context: BTreeMap::new(),
     features: BTreeMap::new(),
     requirements: BTreeMap::new(),
     mentions_index: HashMap::new(),

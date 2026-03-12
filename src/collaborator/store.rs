@@ -32,7 +32,6 @@ pub fn register_comment_in_audit_data(
       created_at: comment.created_at.clone(),
       scope: scope.to_scope(),
       mentioned_topics,
-      context: vec![],
     },
   );
 

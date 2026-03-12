@@ -4,7 +4,7 @@ use serde::Deserialize;
 
 use crate::collaborator::agent::context;
 use crate::collaborator::agent::router::{self, TaskSize};
-use crate::core::{AST, AuditData, Feature, Requirement, topic};
+use crate::core::{self, AST, AuditData, Feature, Requirement, topic};
 
 /// Raw feature as returned by the LLM (no topic ID yet).
 #[derive(Deserialize)]
@@ -88,6 +88,7 @@ Documentation:\n";
 pub struct ParsedFeatures {
   pub features: BTreeMap<topic::Topic, Feature>,
   pub requirements: BTreeMap<topic::Topic, Requirement>,
+  pub topic_metadata: BTreeMap<topic::Topic, core::TopicMetadata>,
 }
 
 /// Parse the LLM response into features and requirements,
@@ -102,10 +103,14 @@ fn parse_features_response(response: &str) -> Result<ParsedFeatures, String> {
   let json_str = json_str.strip_suffix("```").unwrap_or(json_str).trim();
 
   let raw_features: Vec<LLMFeature> = serde_json::from_str(json_str)
-    .map_err(|e| format!("Failed to parse features JSON: {}", e))?;
+    .map_err(|e| {
+      eprintln!("Failed to parse features JSON: {}\nResponse:\n{}", e, json_str);
+      format!("Failed to parse features JSON: {}", e)
+    })?;
 
   let mut features = BTreeMap::new();
   let mut requirements = BTreeMap::new();
+  let mut topic_metadata = BTreeMap::new();
   let mut req_counter = 0i32;
 
   for (i, raw) in raw_features.into_iter().enumerate() {
@@ -121,21 +126,38 @@ fn parse_features_response(response: &str) -> Result<ParsedFeatures, String> {
       req_counter += 1;
       let req_topic = topic::new_requirement_topic(req_counter);
       requirement_topics.push(req_topic.clone());
+      topic_metadata.insert(
+        req_topic.clone(),
+        core::TopicMetadata::RequirementTopic {
+          topic: req_topic.clone(),
+          description,
+          feature_topic: feature_topic.clone(),
+          author_id: 0,
+          created_at: String::new(),
+        },
+      );
       requirements.insert(
         req_topic,
         Requirement {
-          description,
-          feature_topic: feature_topic.clone(),
           source_topics: Vec::new(),
         },
       );
     }
 
+    topic_metadata.insert(
+      feature_topic.clone(),
+      core::TopicMetadata::FeatureTopic {
+        topic: feature_topic.clone(),
+        name: raw.name,
+        description: raw.description,
+        author_id: 0,
+        created_at: String::new(),
+      },
+    );
+
     features.insert(
       feature_topic,
       Feature {
-        name: raw.name,
-        description: raw.description,
         documentation_topics: doc_topics,
         requirement_topics,
       },
@@ -145,6 +167,7 @@ fn parse_features_response(response: &str) -> Result<ParsedFeatures, String> {
   Ok(ParsedFeatures {
     features,
     requirements,
+    topic_metadata,
   })
 }
 

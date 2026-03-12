@@ -78,6 +78,7 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             audit_id TEXT NOT NULL,
             name TEXT NOT NULL,
             description TEXT NOT NULL,
+            author_id INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         )
         "#,
@@ -90,6 +91,13 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
   )
   .execute(pool)
   .await?;
+
+  // Migration: add author_id to features if missing
+  let _ = sqlx::query(
+    "ALTER TABLE features ADD COLUMN author_id INTEGER NOT NULL DEFAULT 0",
+  )
+  .execute(pool)
+  .await;
 
   // Feature-topic associations
   sqlx::query(
@@ -119,6 +127,7 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             feature_id INTEGER NOT NULL,
             description TEXT NOT NULL,
+            author_id INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         )
         "#,
@@ -131,6 +140,13 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
   )
   .execute(pool)
   .await?;
+
+  // Migration: add author_id to requirements if missing
+  let _ = sqlx::query(
+    "ALTER TABLE requirements ADD COLUMN author_id INTEGER NOT NULL DEFAULT 0",
+  )
+  .execute(pool)
+  .await;
 
   // Requirement source topic associations
   sqlx::query(
@@ -470,6 +486,7 @@ pub struct FeatureRow {
   pub audit_id: String,
   pub name: String,
   pub description: String,
+  pub author_id: i64,
   pub created_at: String,
 }
 
@@ -488,16 +505,18 @@ pub async fn create_feature(
   audit_id: &str,
   name: &str,
   description: &str,
+  author_id: i64,
 ) -> Result<FeatureRow, sqlx::Error> {
   let result = sqlx::query(
     r#"
-        INSERT INTO features (audit_id, name, description)
-        VALUES (?, ?, ?)
+        INSERT INTO features (audit_id, name, description, author_id)
+        VALUES (?, ?, ?, ?)
         "#,
   )
   .bind(audit_id)
   .bind(name)
   .bind(description)
+  .bind(author_id)
   .execute(pool)
   .await?;
 
@@ -678,22 +697,40 @@ pub async fn load_all_features(
             }
           }
 
+          audit_data.topic_metadata.insert(
+            req_topic.clone(),
+            core::TopicMetadata::RequirementTopic {
+              topic: req_topic.clone(),
+              description: req.description.clone(),
+              feature_topic: feature_topic.clone(),
+              author_id: req.author_id,
+              created_at: req.created_at.clone(),
+            },
+          );
+
           audit_data.requirements.insert(
             req_topic,
             Requirement {
-              description: req.description.clone(),
-              feature_topic: feature_topic.clone(),
               source_topics,
             },
           );
         }
       }
 
+      audit_data.topic_metadata.insert(
+        feature_topic.clone(),
+        core::TopicMetadata::FeatureTopic {
+          topic: feature_topic.clone(),
+          name: row.name.clone(),
+          description: row.description.clone(),
+          author_id: row.author_id,
+          created_at: row.created_at.clone(),
+        },
+      );
+
       audit_data.features.insert(
         feature_topic,
         Feature {
-          name: row.name.clone(),
-          description: row.description.clone(),
           documentation_topics: doc_topics,
           requirement_topics,
         },
@@ -714,6 +751,7 @@ pub struct RequirementRow {
   pub id: i64,
   pub feature_id: i64,
   pub description: String,
+  pub author_id: i64,
   pub created_at: String,
 }
 
@@ -730,15 +768,17 @@ pub async fn create_requirement(
   pool: &SqlitePool,
   feature_id: i64,
   description: &str,
+  author_id: i64,
 ) -> Result<RequirementRow, sqlx::Error> {
   let result = sqlx::query(
     r#"
-        INSERT INTO requirements (feature_id, description)
-        VALUES (?, ?)
+        INSERT INTO requirements (feature_id, description, author_id)
+        VALUES (?, ?, ?)
         "#,
   )
   .bind(feature_id)
   .bind(description)
+  .bind(author_id)
   .execute(pool)
   .await?;
 

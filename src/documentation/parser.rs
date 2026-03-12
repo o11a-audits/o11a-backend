@@ -145,7 +145,9 @@ pub(crate) fn get_named_topic_kind(
     core::TopicMetadata::UnnamedTopic { .. }
     | core::TopicMetadata::ControlFlow { .. }
     | core::TopicMetadata::TitledTopic { .. }
-    | core::TopicMetadata::CommentTopic { .. } => None,
+    | core::TopicMetadata::CommentTopic { .. }
+    | core::TopicMetadata::FeatureTopic { .. }
+    | core::TopicMetadata::RequirementTopic { .. } => None,
   }
 }
 

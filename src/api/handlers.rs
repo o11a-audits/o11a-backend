@@ -273,7 +273,7 @@ pub async fn get_documents(
       crate::core::TopicMetadata::UnnamedTopic { kind, .. }
         if *kind == crate::core::UnnamedTopicKind::DocumentationRoot =>
       {
-        documents.push(topic_metadata_to_response(topic, metadata));
+        documents.push(topic_metadata_to_response(topic, metadata, audit_data));
       }
       _ => (),
     };
@@ -307,7 +307,9 @@ pub async fn get_contracts(
       crate::core::TopicMetadata::UnnamedTopic { .. }
       | crate::core::TopicMetadata::ControlFlow { .. }
       | crate::core::TopicMetadata::TitledTopic { .. }
-      | crate::core::TopicMetadata::CommentTopic { .. } => false,
+      | crate::core::TopicMetadata::CommentTopic { .. }
+      | crate::core::TopicMetadata::FeatureTopic { .. }
+      | crate::core::TopicMetadata::RequirementTopic { .. } => false,
     };
 
     if is_contract {
@@ -323,7 +325,7 @@ pub async fn get_contracts(
         continue;
       }
 
-      contracts.push(topic_metadata_to_response(topic, metadata));
+      contracts.push(topic_metadata_to_response(topic, metadata, audit_data));
     }
   }
 
@@ -840,6 +842,31 @@ pub struct CommentTopicResponse {
   pub context: Vec<SourceContextResponse>,
 }
 
+/// Response for FeatureTopic metadata
+#[derive(Debug, Serialize)]
+pub struct FeatureTopicResponse {
+  pub topic_id: String,
+  pub name: String,
+  pub description: String,
+  pub author_id: i64,
+  pub created_at: String,
+  pub documentation_topics: Vec<String>,
+  pub requirement_topics: Vec<String>,
+  pub context: Vec<SourceContextResponse>,
+}
+
+/// Response for RequirementTopic metadata
+#[derive(Debug, Serialize)]
+pub struct RequirementTopicResponse {
+  pub topic_id: String,
+  pub description: String,
+  pub feature_topic: String,
+  pub author_id: i64,
+  pub created_at: String,
+  pub source_topics: Vec<String>,
+  pub context: Vec<SourceContextResponse>,
+}
+
 /// Enum for different topic metadata response types
 #[derive(Debug, Serialize)]
 #[serde(tag = "type")]
@@ -854,6 +881,10 @@ pub enum TopicMetadataResponse {
   ControlFlow(ControlFlowTopicResponse),
   #[serde(rename = "CommentTopic")]
   CommentTopic(CommentTopicResponse),
+  #[serde(rename = "feature")]
+  Feature(FeatureTopicResponse),
+  #[serde(rename = "requirement")]
+  Requirement(RequirementTopicResponse),
 }
 
 // Helper function to convert SourceChild to SourceChildResponse
@@ -911,8 +942,11 @@ fn convert_source_context(
 fn topic_metadata_to_response(
   topic: &crate::core::topic::Topic,
   metadata: &crate::core::TopicMetadata,
+  audit_data: &crate::core::AuditData,
 ) -> TopicMetadataResponse {
   let scope_info = ScopeInfo::from_scope(metadata.scope());
+  let empty_ctx: Vec<crate::core::SourceContext> = vec![];
+  let ctx = audit_data.topic_context.get(topic).unwrap_or(&empty_ctx);
 
   match metadata {
     crate::core::TopicMetadata::NamedTopic {
@@ -951,7 +985,7 @@ fn topic_metadata_to_response(
         sub_kind,
         visibility: format!("{:?}", visibility),
         scope: scope_info,
-        context: convert_source_context(metadata.context()),
+        context: convert_source_context(ctx),
         expanded_context: convert_source_context(metadata.expanded_context()),
         ancestry: convert_source_context(metadata.ancestry()),
         ancestors: metadata.ancestors().iter().map(|t| t.id.clone()).collect(),
@@ -971,7 +1005,7 @@ fn topic_metadata_to_response(
         title: title.clone(),
         kind: format!("{:?}", kind),
         scope: scope_info,
-        context: convert_source_context(metadata.context()),
+        context: convert_source_context(ctx),
         expanded_context: convert_source_context(metadata.expanded_context()),
       })
     }
@@ -981,7 +1015,7 @@ fn topic_metadata_to_response(
         topic_id: topic.id.clone(),
         kind: format!("{:?}", kind),
         scope: scope_info,
-        context: convert_source_context(metadata.context()),
+        context: convert_source_context(ctx),
         expanded_context: convert_source_context(metadata.expanded_context()),
       })
     }
@@ -993,7 +1027,7 @@ fn topic_metadata_to_response(
       kind: format!("{:?}", kind),
       scope: scope_info,
       condition: condition.id.clone(),
-      context: convert_source_context(metadata.context()),
+      context: convert_source_context(ctx),
     }),
 
     crate::core::TopicMetadata::CommentTopic {
@@ -1011,8 +1045,58 @@ fn topic_metadata_to_response(
       created_at: created_at.clone(),
       scope: scope_info,
       mentioned_topics: mentioned_topics.iter().map(|t| t.id.clone()).collect(),
-      context: convert_source_context(metadata.context()),
+      context: convert_source_context(ctx),
     }),
+
+    crate::core::TopicMetadata::FeatureTopic {
+      name,
+      description,
+      author_id,
+      created_at,
+      ..
+    } => {
+      let feature = audit_data.features.get(topic);
+      TopicMetadataResponse::Feature(FeatureTopicResponse {
+        topic_id: topic.id.clone(),
+        name: name.clone(),
+        description: description.clone(),
+        author_id: *author_id,
+        created_at: created_at.clone(),
+        documentation_topics: feature
+          .map(|f| {
+            f.documentation_topics
+              .iter()
+              .map(|t| t.id.clone())
+              .collect()
+          })
+          .unwrap_or_default(),
+        requirement_topics: feature
+          .map(|f| f.requirement_topics.iter().map(|t| t.id.clone()).collect())
+          .unwrap_or_default(),
+        context: convert_source_context(ctx),
+      })
+    }
+
+    crate::core::TopicMetadata::RequirementTopic {
+      description,
+      feature_topic,
+      author_id,
+      created_at,
+      ..
+    } => {
+      let requirement = audit_data.requirements.get(topic);
+      TopicMetadataResponse::Requirement(RequirementTopicResponse {
+        topic_id: topic.id.clone(),
+        description: description.clone(),
+        feature_topic: feature_topic.id.clone(),
+        author_id: *author_id,
+        created_at: created_at.clone(),
+        source_topics: requirement
+          .map(|r| r.source_topics.iter().map(|t| t.id.clone()).collect())
+          .unwrap_or_default(),
+        context: convert_source_context(ctx),
+      })
+    }
   }
 }
 
@@ -1042,7 +1126,9 @@ pub async fn get_metadata(
     StatusCode::NOT_FOUND
   })?;
 
-  Ok(Json(topic_metadata_to_response(&topic, metadata)))
+  Ok(Json(topic_metadata_to_response(
+    &topic, metadata, audit_data,
+  )))
 }
 
 // Get pre-rendered topic view HTML for a specific topic within an audit.
@@ -1126,10 +1212,7 @@ pub async fn get_conversation(
   State(state): State<AppState>,
   Path((audit_id, topic_id)): Path<(String, String)>,
 ) -> Result<Json<super::topic_view::ConversationResponse>, StatusCode> {
-  println!(
-    "GET /api/v1/audits/{}/conversation/{}",
-    audit_id, topic_id
-  );
+  println!("GET /api/v1/audits/{}/conversation/{}", audit_id, topic_id);
 
   let ctx = state.data_context.lock().map_err(|e| {
     eprintln!("Mutex poisoned in get_conversation: {}", e);
@@ -1178,11 +1261,12 @@ pub async fn get_thread(
     .cloned()
     .unwrap_or_default();
 
-  let html = super::topic_view::build_thread(&topic_id, audit_data, &source_text_cache)
-    .ok_or_else(|| {
-      eprintln!("Topic '{}' not found in audit '{}'", topic_id, audit_id);
-      StatusCode::NOT_FOUND
-    })?;
+  let html =
+    super::topic_view::build_thread(&topic_id, audit_data, &source_text_cache)
+      .ok_or_else(|| {
+        eprintln!("Topic '{}' not found in audit '{}'", topic_id, audit_id);
+        StatusCode::NOT_FOUND
+      })?;
 
   Ok(Html(html))
 }
@@ -1286,8 +1370,11 @@ pub async fn create_comment(
 
   // Parse mentions, render HTML, register in audit_data, and cache source text.
   // Build ConversationEntry objects for WebSocket broadcasting.
-  let mut conversation_events: Vec<(String, super::topic_view::ConversationEntry, Vec<String>)> =
-    Vec::new();
+  let mut conversation_events: Vec<(
+    String,
+    super::topic_view::ConversationEntry,
+    Vec<String>,
+  )> = Vec::new();
   {
     let mut ctx = state
       .data_context
@@ -1378,12 +1465,14 @@ pub async fn create_comment(
 
   // Broadcast via WebSocket
   for (topic_id, entry, invalidated_thread_ids) in conversation_events {
-    let _ = state.comment_broadcast.send(CommentEvent::ConversationUpdated {
-      audit_id: audit_id.clone(),
-      topic_id,
-      entry,
-      invalidated_thread_ids,
-    });
+    let _ = state
+      .comment_broadcast
+      .send(CommentEvent::ConversationUpdated {
+        audit_id: audit_id.clone(),
+        topic_id,
+        entry,
+        invalidated_thread_ids,
+      });
   }
 
   Ok(Json(CommentCreatedResponse { comment_topic_id }))
@@ -1643,70 +1732,11 @@ pub async fn get_agent_context(
 // Feature routes
 // ============================================
 
-#[derive(Debug, Serialize)]
-pub struct RequirementResponse {
-  pub topic: String,
-  pub description: String,
-  pub feature_topic: String,
-  pub source_topics: Vec<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct FeatureResponse {
-  pub topic: String,
-  pub name: String,
-  pub description: String,
-  pub documentation_topics: Vec<String>,
-  pub requirement_topics: Vec<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct FeaturesResponse {
-  pub features: Vec<FeatureResponse>,
-}
-
-fn feature_to_response(
-  feat_topic: &core::topic::Topic,
-  feature: &Feature,
-) -> FeatureResponse {
-  FeatureResponse {
-    topic: feat_topic.id().to_string(),
-    name: feature.name.clone(),
-    description: feature.description.clone(),
-    documentation_topics: feature
-      .documentation_topics
-      .iter()
-      .map(|t| t.id().to_string())
-      .collect(),
-    requirement_topics: feature
-      .requirement_topics
-      .iter()
-      .map(|t| t.id().to_string())
-      .collect(),
-  }
-}
-
-fn requirement_to_response(
-  req_topic: &core::topic::Topic,
-  requirement: &core::Requirement,
-) -> RequirementResponse {
-  RequirementResponse {
-    topic: req_topic.id().to_string(),
-    description: requirement.description.clone(),
-    feature_topic: requirement.feature_topic.id().to_string(),
-    source_topics: requirement
-      .source_topics
-      .iter()
-      .map(|t| t.id().to_string())
-      .collect(),
-  }
-}
-
 /// Get all features for an audit.
 pub async fn get_features(
   State(state): State<AppState>,
   Path(audit_id): Path<String>,
-) -> Result<Json<FeaturesResponse>, StatusCode> {
+) -> Result<Json<Vec<TopicMetadataResponse>>, StatusCode> {
   println!("GET /api/v1/audits/{}/features", audit_id);
 
   let ctx = state.data_context.lock().map_err(|e| {
@@ -1718,18 +1748,23 @@ pub async fn get_features(
 
   let features = audit_data
     .features
-    .iter()
-    .map(|(t, f)| feature_to_response(t, f))
+    .keys()
+    .filter_map(|ft| {
+      audit_data
+        .topic_metadata
+        .get(ft)
+        .map(|m| topic_metadata_to_response(ft, m, audit_data))
+    })
     .collect();
 
-  Ok(Json(FeaturesResponse { features }))
+  Ok(Json(features))
 }
 
 /// Trigger the agent to build features from documentation.
 pub async fn build_features(
   State(state): State<AppState>,
   Path(audit_id): Path<String>,
-) -> Result<Json<FeaturesResponse>, StatusCode> {
+) -> Result<Json<Vec<TopicMetadataResponse>>, StatusCode> {
   println!("POST /api/v1/audits/{}/features/build", audit_id);
 
   // Render documentation JSON while holding the lock, then release it
@@ -1753,13 +1788,6 @@ pub async fn build_features(
       StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-  // Build response before storing
-  let response: Vec<FeatureResponse> = parsed
-    .features
-    .iter()
-    .map(|(t, f)| feature_to_response(t, f))
-    .collect();
-
   // Persist to database: clear old features, insert new ones
   db::delete_all_features_for_audit(&state.db, &audit_id)
     .await
@@ -1768,12 +1796,20 @@ pub async fn build_features(
       StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-  for (_feat_topic, feature) in &parsed.features {
+  for (feat_topic, feature) in &parsed.features {
+    // Get name/description from topic_metadata
+    let (name, description) = match parsed.topic_metadata.get(feat_topic) {
+      Some(core::TopicMetadata::FeatureTopic {
+        name, description, ..
+      }) => (name.as_str(), description.as_str()),
+      _ => continue,
+    };
     let row = db::create_feature(
       &state.db,
       &audit_id,
-      &feature.name,
-      &feature.description,
+      name,
+      description,
+      AUTHOR_AGENT, // agent-created
     )
     .await
     .map_err(|e| {
@@ -1787,14 +1823,20 @@ pub async fn build_features(
     }
     // Persist requirements for this feature
     for req_topic in &feature.requirement_topics {
+      // Get description from topic_metadata
+      let req_desc = match parsed.topic_metadata.get(req_topic) {
+        Some(core::TopicMetadata::RequirementTopic { description, .. }) => {
+          description.as_str()
+        }
+        _ => continue,
+      };
+      let req_row = db::create_requirement(&state.db, row.id, req_desc, 0)
+        .await
+        .map_err(|e| {
+          eprintln!("create_requirement failed: {}", e);
+          StatusCode::INTERNAL_SERVER_ERROR
+        })?;
       if let Some(req) = parsed.requirements.get(req_topic) {
-        let req_row =
-          db::create_requirement(&state.db, row.id, &req.description)
-            .await
-            .map_err(|e| {
-              eprintln!("create_requirement failed: {}", e);
-              StatusCode::INTERNAL_SERVER_ERROR
-            })?;
         for st in &req.source_topics {
           let _ =
             db::add_requirement_source_topic(&state.db, req_row.id, st.id())
@@ -1804,26 +1846,47 @@ pub async fn build_features(
     }
   }
 
-  // Store in audit data
-  {
-    let mut ctx = state.data_context.lock().map_err(|e| {
-      eprintln!("Mutex poisoned in build_features (store): {}", e);
-      StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-    let audit_data =
-      ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
-    audit_data.features = parsed.features;
-    audit_data.requirements = parsed.requirements;
-    crate::core::rebuild_doc_expanded_context(audit_data);
-  }
+  // Store in audit data and build response
+  let mut ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in build_features (store): {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+  let audit_data = ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+  // Remove old feature/requirement TopicMetadata entries
+  audit_data.topic_metadata.retain(|_, m| {
+    !matches!(
+      m,
+      core::TopicMetadata::FeatureTopic { .. }
+        | core::TopicMetadata::RequirementTopic { .. }
+    )
+  });
 
-  Ok(Json(FeaturesResponse { features: response }))
+  // Insert TopicMetadata from parsed result
+  audit_data.topic_metadata.extend(parsed.topic_metadata);
+
+  let feature_keys: Vec<_> = parsed.features.keys().cloned().collect();
+  audit_data.features = parsed.features;
+  audit_data.requirements = parsed.requirements;
+  crate::core::rebuild_feature_context(audit_data);
+
+  let response: Vec<TopicMetadataResponse> = feature_keys
+    .iter()
+    .filter_map(|ft| {
+      audit_data
+        .topic_metadata
+        .get(ft)
+        .map(|m| topic_metadata_to_response(ft, m, audit_data))
+    })
+    .collect();
+
+  Ok(Json(response))
 }
 
 #[derive(Debug, Deserialize)]
 pub struct CreateFeatureRequest {
   pub name: String,
   pub description: String,
+  pub author_id: i64,
 }
 
 /// POST /api/v1/audits/:audit_id/features
@@ -1832,7 +1895,7 @@ pub async fn create_feature(
   State(state): State<AppState>,
   Path(audit_id): Path<String>,
   Json(payload): Json<CreateFeatureRequest>,
-) -> Result<Json<FeatureResponse>, StatusCode> {
+) -> Result<Json<TopicMetadataResponse>, StatusCode> {
   println!("POST /api/v1/audits/{}/features", audit_id);
 
   let row = db::create_feature(
@@ -1840,6 +1903,7 @@ pub async fn create_feature(
     &audit_id,
     &payload.name,
     &payload.description,
+    payload.author_id,
   )
   .await
   .map_err(|e| {
@@ -1849,24 +1913,30 @@ pub async fn create_feature(
 
   let feature_topic = topic::new_feature_topic(row.id as i32);
   let feature = Feature {
-    name: row.name,
-    description: row.description,
     documentation_topics: Vec::new(),
     requirement_topics: Vec::new(),
   };
 
-  let response = feature_to_response(&feature_topic, &feature);
+  let metadata = core::TopicMetadata::FeatureTopic {
+    topic: feature_topic.clone(),
+    name: row.name,
+    description: row.description,
+    author_id: row.author_id,
+    created_at: row.created_at,
+  };
 
-  {
-    let mut ctx = state.data_context.lock().map_err(|e| {
-      eprintln!("Mutex poisoned in create_feature: {}", e);
-      StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-    let audit_data =
-      ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
-    audit_data.features.insert(feature_topic, feature);
-  }
+  let mut ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in create_feature: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+  let audit_data = ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+  audit_data.features.insert(feature_topic.clone(), feature);
+  audit_data
+    .topic_metadata
+    .insert(feature_topic.clone(), metadata.clone());
 
+  let response =
+    topic_metadata_to_response(&feature_topic, &metadata, audit_data);
   Ok(Json(response))
 }
 
@@ -1875,7 +1945,7 @@ pub async fn create_feature(
 pub async fn get_feature(
   State(state): State<AppState>,
   Path((audit_id, feature_id)): Path<(String, i32)>,
-) -> Result<Json<FeatureResponse>, StatusCode> {
+) -> Result<Json<TopicMetadataResponse>, StatusCode> {
   println!("GET /api/v1/audits/{}/features/{}", audit_id, feature_id);
 
   let ctx = state.data_context.lock().map_err(|e| {
@@ -1885,12 +1955,16 @@ pub async fn get_feature(
 
   let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
   let feature_topic = topic::new_feature_topic(feature_id);
-  let feature = audit_data
-    .features
+  let metadata = audit_data
+    .topic_metadata
     .get(&feature_topic)
     .ok_or(StatusCode::NOT_FOUND)?;
 
-  Ok(Json(feature_to_response(&feature_topic, feature)))
+  Ok(Json(topic_metadata_to_response(
+    &feature_topic,
+    metadata,
+    audit_data,
+  )))
 }
 
 #[derive(Debug, Deserialize)]
@@ -1904,7 +1978,7 @@ pub async fn add_feature_documentation_topic(
   State(state): State<AppState>,
   Path((audit_id, feature_id)): Path<(String, i64)>,
   Json(payload): Json<AddFeatureTopicRequest>,
-) -> Result<Json<FeatureResponse>, StatusCode> {
+) -> Result<Json<TopicMetadataResponse>, StatusCode> {
   println!(
     "POST /api/v1/audits/{}/features/{}/documentation_topics",
     audit_id, feature_id
@@ -1938,8 +2012,13 @@ pub async fn add_feature_documentation_topic(
     feature.documentation_topics.push(new_topic);
   }
 
-  let response = feature_to_response(&feature_topic, feature);
-  crate::core::rebuild_doc_expanded_context(audit_data);
+  crate::core::rebuild_feature_context(audit_data);
+  let metadata = audit_data
+    .topic_metadata
+    .get(&feature_topic)
+    .ok_or(StatusCode::NOT_FOUND)?;
+  let response =
+    topic_metadata_to_response(&feature_topic, metadata, audit_data);
 
   Ok(Json(response))
 }
@@ -1949,7 +2028,7 @@ pub async fn add_feature_documentation_topic(
 pub async fn remove_feature_documentation_topic(
   State(state): State<AppState>,
   Path((audit_id, feature_id, topic_id)): Path<(String, i64, String)>,
-) -> Result<Json<FeatureResponse>, StatusCode> {
+) -> Result<Json<TopicMetadataResponse>, StatusCode> {
   println!(
     "DELETE /api/v1/audits/{}/features/{}/documentation_topics/{}",
     audit_id, feature_id, topic_id
@@ -1979,10 +2058,152 @@ pub async fn remove_feature_documentation_topic(
   let remove_topic = topic::new_topic(&topic_id);
   feature.documentation_topics.retain(|t| t != &remove_topic);
 
-  let response = feature_to_response(&feature_topic, feature);
-  crate::core::rebuild_doc_expanded_context(audit_data);
+  crate::core::rebuild_feature_context(audit_data);
+  let metadata = audit_data
+    .topic_metadata
+    .get(&feature_topic)
+    .ok_or(StatusCode::NOT_FOUND)?;
+  let response =
+    topic_metadata_to_response(&feature_topic, metadata, audit_data);
 
   Ok(Json(response))
+}
+
+// ============================================
+// Documentation routes
+// ============================================
+
+/// GET /api/v1/audits/:audit_id/features/:topic_id
+/// Returns feature IDs linked to a topic.
+/// For feature topics, returns the feature itself.
+/// For requirement topics, returns the parent feature.
+/// For source topics, returns features via requirements that reference this topic.
+pub async fn get_topic_features(
+  State(state): State<AppState>,
+  Path((audit_id, topic_id)): Path<(String, String)>,
+) -> Result<Json<Vec<String>>, StatusCode> {
+  println!(
+    "GET /api/v1/audits/{}/features/{}",
+    audit_id, topic_id
+  );
+
+  let ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in get_topic_features: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+
+  let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+  let t = new_topic(&topic_id);
+
+  let mut feature_topics: Vec<topic::Topic> = Vec::new();
+  match t.kind() {
+    Some(TopicKind::Feature) => {
+      feature_topics.push(t);
+    }
+    Some(TopicKind::Requirement) => {
+      if let Some(metadata) = audit_data.topic_metadata.get(&t) {
+        if let Some(ft) = metadata.target_topic() {
+          feature_topics.push(ft.clone());
+        }
+      }
+    }
+    _ => {
+      for (req_topic, req) in &audit_data.requirements {
+        if req.source_topics.contains(&t) {
+          if let Some(metadata) = audit_data.topic_metadata.get(req_topic) {
+            if let Some(ft) = metadata.target_topic() {
+              if !feature_topics.contains(ft) {
+                feature_topics.push(ft.clone());
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  let feature_ids: Vec<String> = feature_topics
+    .iter()
+    .map(|ft| ft.id.clone())
+    .collect();
+
+  Ok(Json(feature_ids))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DocumentationPanelRequest {
+  pub feature_topics: Vec<String>,
+}
+
+/// POST /api/v1/audits/:audit_id/documentation
+/// Returns rendered HTML panel of documentation from the given feature topics.
+/// Accepts feature (F), requirement (R), or any other topic IDs.
+/// - Feature topics: directly use their documentation_topics
+/// - Requirement topics: resolve to parent feature, then use its documentation_topics
+/// - Other topics: reverse-lookup requirements with this source_topic, then their features
+pub async fn get_documentation_panel(
+  State(state): State<AppState>,
+  Path(audit_id): Path<String>,
+  Json(payload): Json<DocumentationPanelRequest>,
+) -> Result<impl IntoResponse, StatusCode> {
+  println!("POST /api/v1/audits/{}/documentation", audit_id);
+
+  let ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in get_documentation_panel: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+
+  let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+
+  // Resolve all input topic IDs to feature topics
+  let mut feature_topics: Vec<topic::Topic> = Vec::new();
+  for id in &payload.feature_topics {
+    let t = new_topic(id);
+    match t.kind() {
+      Some(TopicKind::Feature) => {
+        if !feature_topics.contains(&t) {
+          feature_topics.push(t);
+        }
+      }
+      Some(TopicKind::Requirement) => {
+        if let Some(metadata) = audit_data.topic_metadata.get(&t) {
+          if let Some(ft) = metadata.target_topic() {
+            if !feature_topics.contains(ft) {
+              feature_topics.push(ft.clone());
+            }
+          }
+        }
+      }
+      _ => {
+        // Reverse lookup: find requirements that have this topic as a source_topic
+        for (req_topic, req) in &audit_data.requirements {
+          if req.source_topics.contains(&t) {
+            if let Some(metadata) = audit_data.topic_metadata.get(req_topic) {
+              if let Some(ft) = metadata.target_topic() {
+                if !feature_topics.contains(ft) {
+                  feature_topics.push(ft.clone());
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  let source_text_cache = ctx
+    .source_text_cache
+    .get(&audit_id)
+    .cloned()
+    .unwrap_or_default();
+
+  let html = super::topic_view::build_documentation_panel(
+    &feature_topics,
+    audit_data,
+    &source_text_cache,
+  );
+
+  Ok(Html(html))
 }
 
 // ============================================
@@ -1992,6 +2213,7 @@ pub async fn remove_feature_documentation_topic(
 #[derive(Debug, Deserialize)]
 pub struct CreateRequirementRequest {
   pub description: String,
+  pub author_id: i64,
 }
 
 /// POST /api/v1/audits/:audit_id/features/:feature_id/requirements
@@ -2000,49 +2222,63 @@ pub async fn create_requirement(
   State(state): State<AppState>,
   Path((audit_id, feature_id)): Path<(String, i64)>,
   Json(payload): Json<CreateRequirementRequest>,
-) -> Result<Json<RequirementResponse>, StatusCode> {
+) -> Result<Json<TopicMetadataResponse>, StatusCode> {
   println!(
     "POST /api/v1/audits/{}/features/{}/requirements",
     audit_id, feature_id
   );
 
-  let row = db::create_requirement(&state.db, feature_id, &payload.description)
-    .await
-    .map_err(|e| {
-      eprintln!("create_requirement failed: {}", e);
-      StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+  let row = db::create_requirement(
+    &state.db,
+    feature_id,
+    &payload.description,
+    payload.author_id,
+  )
+  .await
+  .map_err(|e| {
+    eprintln!("create_requirement failed: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
 
   let feature_topic = topic::new_feature_topic(feature_id as i32);
   let req_topic = topic::new_requirement_topic(row.id as i32);
 
   let requirement = core::Requirement {
-    description: row.description,
-    feature_topic: feature_topic.clone(),
     source_topics: Vec::new(),
   };
 
-  let response = requirement_to_response(&req_topic, &requirement);
+  let metadata = core::TopicMetadata::RequirementTopic {
+    topic: req_topic.clone(),
+    description: row.description,
+    feature_topic: feature_topic.clone(),
+    author_id: row.author_id,
+    created_at: row.created_at,
+  };
 
-  {
-    let mut ctx = state.data_context.lock().map_err(|e| {
-      eprintln!("Mutex poisoned in create_requirement: {}", e);
-      StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-    let audit_data =
-      ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+  let mut ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in create_requirement: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+  let audit_data = ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
 
-    // Add requirement topic to parent feature
-    let feature = audit_data
-      .features
-      .get_mut(&feature_topic)
-      .ok_or(StatusCode::NOT_FOUND)?;
-    feature.requirement_topics.push(req_topic.clone());
+  // Add requirement topic to parent feature
+  let feature = audit_data
+    .features
+    .get_mut(&feature_topic)
+    .ok_or(StatusCode::NOT_FOUND)?;
+  feature.requirement_topics.push(req_topic.clone());
 
-    // Store requirement
-    audit_data.requirements.insert(req_topic, requirement);
-  }
+  // Store requirement and metadata
+  audit_data
+    .requirements
+    .insert(req_topic.clone(), requirement);
+  audit_data
+    .topic_metadata
+    .insert(req_topic.clone(), metadata.clone());
 
+  crate::core::rebuild_feature_context(audit_data);
+
+  let response = topic_metadata_to_response(&req_topic, &metadata, audit_data);
   Ok(Json(response))
 }
 
@@ -2080,8 +2316,12 @@ pub async fn delete_requirement(
       feature.requirement_topics.retain(|t| t != &req_topic);
     }
 
-    // Remove requirement itself
+    // Remove requirement itself and its metadata
     audit_data.requirements.remove(&req_topic);
+    audit_data.topic_metadata.remove(&req_topic);
+    audit_data.topic_context.remove(&req_topic);
+
+    crate::core::rebuild_feature_context(audit_data);
   }
 
   Ok(StatusCode::NO_CONTENT)
@@ -2092,7 +2332,7 @@ pub async fn delete_requirement(
 pub async fn get_requirement(
   State(state): State<AppState>,
   Path((audit_id, requirement_id)): Path<(String, i32)>,
-) -> Result<Json<RequirementResponse>, StatusCode> {
+) -> Result<Json<TopicMetadataResponse>, StatusCode> {
   println!(
     "GET /api/v1/audits/{}/requirements/{}",
     audit_id, requirement_id
@@ -2105,12 +2345,14 @@ pub async fn get_requirement(
 
   let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
   let req_topic = topic::new_requirement_topic(requirement_id);
-  let requirement = audit_data
-    .requirements
+  let metadata = audit_data
+    .topic_metadata
     .get(&req_topic)
     .ok_or(StatusCode::NOT_FOUND)?;
 
-  Ok(Json(requirement_to_response(&req_topic, requirement)))
+  Ok(Json(topic_metadata_to_response(
+    &req_topic, metadata, audit_data,
+  )))
 }
 
 #[derive(Debug, Deserialize)]
@@ -2124,7 +2366,7 @@ pub async fn add_requirement_source_topic(
   State(state): State<AppState>,
   Path((audit_id, requirement_id)): Path<(String, i64)>,
   Json(payload): Json<AddSourceTopicRequest>,
-) -> Result<Json<RequirementResponse>, StatusCode> {
+) -> Result<Json<TopicMetadataResponse>, StatusCode> {
   println!(
     "POST /api/v1/audits/{}/requirements/{}/source_topics",
     audit_id, requirement_id
@@ -2157,7 +2399,12 @@ pub async fn add_requirement_source_topic(
     requirement.source_topics.push(new_topic);
   }
 
-  Ok(Json(requirement_to_response(&req_topic, requirement)))
+  let metadata = audit_data
+    .topic_metadata
+    .get(&req_topic)
+    .ok_or(StatusCode::NOT_FOUND)?;
+  let response = topic_metadata_to_response(&req_topic, metadata, audit_data);
+  Ok(Json(response))
 }
 
 /// DELETE /api/v1/audits/:audit_id/requirements/:requirement_id/source_topics/:topic_id
@@ -2165,7 +2412,7 @@ pub async fn add_requirement_source_topic(
 pub async fn remove_requirement_source_topic(
   State(state): State<AppState>,
   Path((audit_id, requirement_id, topic_id)): Path<(String, i64, String)>,
-) -> Result<Json<RequirementResponse>, StatusCode> {
+) -> Result<Json<TopicMetadataResponse>, StatusCode> {
   println!(
     "DELETE /api/v1/audits/{}/requirements/{}/source_topics/{}",
     audit_id, requirement_id, topic_id
@@ -2192,5 +2439,10 @@ pub async fn remove_requirement_source_topic(
   let remove_topic = topic::new_topic(&topic_id);
   requirement.source_topics.retain(|t| t != &remove_topic);
 
-  Ok(Json(requirement_to_response(&req_topic, requirement)))
+  let metadata = audit_data
+    .topic_metadata
+    .get(&req_topic)
+    .ok_or(StatusCode::NOT_FOUND)?;
+  let response = topic_metadata_to_response(&req_topic, metadata, audit_data);
+  Ok(Json(response))
 }
