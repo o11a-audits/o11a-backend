@@ -397,6 +397,34 @@ pub enum Scope {
   },
 }
 
+impl Scope {
+  /// Returns all ancestor topics in the scope chain.
+  /// For Component scope, yields the component.
+  /// For Member scope, yields the component and member.
+  /// For ContainingBlock scope, yields the component, member, and all containing blocks.
+  pub fn ancestor_topics(&self) -> Vec<&topic::Topic> {
+    match self {
+      Scope::Global | Scope::Container { .. } => vec![],
+      Scope::Component { component, .. } => vec![component],
+      Scope::Member {
+        component, member, ..
+      } => vec![component, member],
+      Scope::ContainingBlock {
+        component,
+        member,
+        containing_blocks,
+        ..
+      } => {
+        let mut ancestors = vec![component, member];
+        for layer in containing_blocks {
+          ancestors.push(&layer.block);
+        }
+        ancestors
+      }
+    }
+  }
+}
+
 pub fn add_to_scope(scope: &Scope, topic: topic::Topic) -> Scope {
   match scope {
     Scope::Global => Scope::Global, // Global scope cannot be nested
@@ -838,6 +866,41 @@ impl NestedSourceContext {
 
   pub fn children(&self) -> &[SourceChild] {
     &self.children
+  }
+}
+
+/// Merges a list of SourceContext entries, combining entries that share the
+/// same scope into a single group with merged references.
+pub fn merge_context_groups(contexts: Vec<SourceContext>) -> Vec<SourceContext> {
+  let mut merged: Vec<SourceContext> = Vec::new();
+  for ctx in contexts {
+    ensure_context(&mut merged, ctx.scope.clone(), ctx.sort_key, ctx.is_in_scope);
+    let group = merged.iter_mut().find(|g| g.scope == ctx.scope).unwrap();
+    for r in ctx.scope_references {
+      insert_ref_sorted(&mut group.scope_references, r);
+    }
+    for nested in ctx.nested_references {
+      insert_nested_sorted(&mut group.nested_references, nested);
+    }
+  }
+  merged
+}
+
+/// Inserts a NestedSourceContext into a sorted vec, merging children if the
+/// subscope already exists.
+fn insert_nested_sorted(
+  nested_refs: &mut Vec<NestedSourceContext>,
+  nested: NestedSourceContext,
+) {
+  if let Some(existing) = nested_refs.iter_mut().find(|n| n.subscope == nested.subscope) {
+    for child in nested.children {
+      existing.children.push(child);
+    }
+  } else {
+    let pos = nested_refs
+      .binary_search_by(|n| n.sort_key.cmp(&nested.sort_key))
+      .unwrap_or_else(|pos| pos);
+    nested_refs.insert(pos, nested);
   }
 }
 
@@ -1602,7 +1665,7 @@ pub fn rebuild_feature_context(audit_data: &mut AuditData) {
       .collect();
   }
 
-  // Build context for FeatureTopics: each requirement as a SourceContext entry
+  // Build context for FeatureTopics: feature itself + requirements in one group
   for (feature_topic, metadata) in &audit_data.topic_metadata {
     if !matches!(metadata, TopicMetadata::FeatureTopic { .. }) {
       continue;
@@ -1611,23 +1674,24 @@ pub fn rebuild_feature_context(audit_data: &mut AuditData) {
       Some(f) => f,
       None => continue,
     };
-    let context: Vec<SourceContext> = feature
-      .requirement_topics
-      .iter()
-      .filter_map(|rt| {
-        let sort_key = rt.numeric_id().map(|id| id as usize);
-        Some(SourceContext {
-          scope: feature_topic.clone(),
-          sort_key,
-          is_in_scope: true,
-          scope_references: vec![Reference::ProjectReference {
-            reference_topic: rt.clone(),
-            sort_key,
-          }],
-          nested_references: vec![],
-        })
-      })
-      .collect();
+    let mut scope_references = vec![Reference::ProjectReference {
+      reference_topic: feature_topic.clone(),
+      sort_key: Some(0),
+    }];
+    for rt in &feature.requirement_topics {
+      let sort_key = rt.numeric_id().map(|id| id as usize);
+      scope_references.push(Reference::ProjectReference {
+        reference_topic: rt.clone(),
+        sort_key,
+      });
+    }
+    let context = vec![SourceContext {
+      scope: feature_topic.clone(),
+      sort_key: Some(0),
+      is_in_scope: true,
+      scope_references,
+      nested_references: vec![],
+    }];
     audit_data
       .topic_context
       .insert(feature_topic.clone(), context);

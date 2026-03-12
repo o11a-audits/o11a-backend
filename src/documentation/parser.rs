@@ -1044,7 +1044,7 @@ fn convert_mdast_node(
     _ => Ok(DocumentationNode::Text {
       node_id,
       position,
-      value: format!("[UNSUPPORTED {:?}]", node),
+      value: "[UNSUPPORTED]".to_string(),
     }),
   }
 }

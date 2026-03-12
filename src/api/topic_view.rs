@@ -7,7 +7,7 @@ use crate::core::{
   TopicMetadata, UnnamedTopicKind, VariableMutability, topic,
 };
 
-use crate::formatting::html_escape;
+use crate::formatting::{self, html_escape};
 
 // ============================================================================
 // Response Types
@@ -340,7 +340,10 @@ pub fn highlighted_name(metadata: &TopicMetadata) -> String {
       format!("<span class=\"feature\">{}</span>", html_escape(name))
     }
     TopicMetadata::RequirementTopic { description, .. } => {
-      format!("<span class=\"requirement\">{}</span>", html_escape(description))
+      format!(
+        "<span class=\"requirement\">{}</span>",
+        html_escape(description)
+      )
     }
   };
 
@@ -514,47 +517,90 @@ fn render_subscope_title(
 // Source Text Helpers
 // ============================================================================
 
-/// Get or render source text HTML for a topic.
-fn get_source_text(
+/// Render source text HTML for a topic from its data.
+/// Returns None if the topic has no renderable content.
+pub fn render_source_text(
   topic: &topic::Topic,
   audit_data: &AuditData,
-  source_text_cache: &std::collections::HashMap<String, String>,
-) -> String {
-  // Check cache first
-  if let Some(html) = source_text_cache.get(topic.id()) {
-    return html.clone();
+) -> Option<String> {
+  // Feature topics: render name and description
+  if let Some(TopicMetadata::FeatureTopic { description, .. }) =
+    audit_data.topic_metadata.get(topic)
+  {
+    return Some(format!(
+      "<p style=\"margin: 0\">{}</p>",
+      formatting::format_topic_block(
+        topic,
+        &format!("{} {}", formatting::format_keyword("feat"), description),
+        "feature",
+        topic
+      )
+    ));
   }
 
-  // Check for global builtins
+  // Requirement topics: render description as a paragraph
+  if let Some(TopicMetadata::RequirementTopic { description, .. }) =
+    audit_data.topic_metadata.get(topic)
+  {
+    return Some(format!(
+      "<p style=\"margin: 0\">{}</p>",
+      formatting::format_topic_block(
+        topic,
+        &format!("{} {}", formatting::format_keyword("req"), description),
+        "requirement",
+        topic
+      )
+    ));
+  }
+
+  // Global builtins
   if let Some(global) = crate::solidity::formatter::global_to_source_text(topic)
   {
-    return global;
+    return Some(global);
   }
 
   // Render from AST node
   match audit_data.nodes.get(topic) {
     Some(Node::Solidity(solidity_node)) => {
-      crate::solidity::formatter::node_to_source_text(
+      Some(crate::solidity::formatter::node_to_source_text(
         solidity_node,
         &audit_data.nodes,
         &audit_data.topic_metadata,
-      )
+      ))
     }
     Some(Node::Documentation(doc_node)) => {
-      crate::documentation::formatter::node_to_html(doc_node, &audit_data.nodes)
+      Some(crate::documentation::formatter::node_to_html(
+        doc_node,
+        &audit_data.nodes,
+      ))
     }
     Some(Node::Comment(nodes)) => {
-      crate::collaborator::formatter::render_comment_html(
+      Some(crate::collaborator::formatter::render_comment_html(
         nodes,
         topic,
         &audit_data.nodes,
-      )
+      ))
     }
-    None => format!(
+    None => None,
+  }
+}
+
+/// Get or render source text HTML for a topic, checking cache first.
+fn get_source_text(
+  topic: &topic::Topic,
+  audit_data: &AuditData,
+  source_text_cache: &std::collections::HashMap<String, String>,
+) -> String {
+  if let Some(html) = source_text_cache.get(topic.id()) {
+    return html.clone();
+  }
+
+  render_source_text(topic, audit_data).unwrap_or_else(|| {
+    format!(
       "<div class=\"error\">Source text not found for {}</div>",
       html_escape(topic.id())
-    ),
-  }
+    )
+  })
 }
 
 // ============================================================================
@@ -1064,7 +1110,6 @@ fn flatten_expanded_context(expanded_context: &[SourceContext]) -> Vec<String> {
 pub fn render_highlight_css(
   topic_id: &str,
   metadata: &TopicMetadata,
-  audit_data: &AuditData,
 ) -> String {
   let expanded_ref_panel = "#expanded-references-panel";
 
@@ -1078,7 +1123,6 @@ pub fn render_highlight_css(
     TopicMetadata::NamedTopic {
       ancestors,
       descendants,
-      topic,
       ..
     } => {
       let ancestor_ids: Vec<String> =
@@ -1217,13 +1261,12 @@ pub fn build_topic_view(
     ),
     None => {
       let empty_ctx: Vec<crate::core::SourceContext> = vec![];
-      let ctx = audit_data.topic_context.get(view_metadata.topic()).unwrap_or(&empty_ctx);
-      let topic_html = render_grouped_source_panel(
-        ctx,
-        audit_data,
-        source_text_cache,
-        true,
-      );
+      let ctx = audit_data
+        .topic_context
+        .get(view_metadata.topic())
+        .unwrap_or(&empty_ctx);
+      let topic_html =
+        render_grouped_source_panel(ctx, audit_data, source_text_cache, true);
       let expanded_html = render_grouped_source_panel(
         view_metadata.expanded_context(),
         audit_data,
@@ -1231,7 +1274,7 @@ pub fn build_topic_view(
         true,
       );
       let breadcrumb = render_history_breadcrumb(view_metadata, audit_data);
-      let css = render_highlight_css(view_metadata.topic().id(), view_metadata, audit_data);
+      let css = render_highlight_css(view_metadata.topic().id(), view_metadata);
       (topic_html, expanded_html, breadcrumb, css)
     }
   };
@@ -1304,9 +1347,12 @@ pub fn build_conversation_entry(
   let metadata = audit_data.topic_metadata.get(entry_topic)?;
 
   let html = match entry_topic.kind() {
-    Some(topic::TopicKind::Comment) => {
-      build_comment_thread_html(entry_topic, metadata, audit_data, source_text_cache)
-    }
+    Some(topic::TopicKind::Comment) => build_comment_thread_html(
+      entry_topic,
+      metadata,
+      audit_data,
+      source_text_cache,
+    ),
     _ => render_topic_node(metadata, audit_data, source_text_cache),
   };
 
@@ -1564,20 +1610,41 @@ pub fn build_documentation_panel(
   source_text_cache: &std::collections::HashMap<String, String>,
 ) -> String {
   let mut all_contexts: Vec<SourceContext> = Vec::new();
-  let mut seen_doc_topics = Vec::new();
+  let mut seen_doc_topics: Vec<topic::Topic> = Vec::new();
 
   for feature_topic in feature_topics {
     if let Some(feature) = audit_data.features.get(feature_topic) {
       for doc_topic in &feature.documentation_topics {
         if !seen_doc_topics.contains(doc_topic) {
           seen_doc_topics.push(doc_topic.clone());
-          if let Some(ctx) = audit_data.topic_context.get(doc_topic) {
-            all_contexts.extend(ctx.iter().cloned());
-          }
         }
       }
     }
   }
 
-  render_grouped_source_panel(&all_contexts, audit_data, source_text_cache, true)
+  // Filter out subsumed doc topics: if any ancestor in a topic's scope chain
+  // is also a doc topic, it will already be rendered as a child of that ancestor.
+  let non_subsumed: Vec<_> = seen_doc_topics
+    .iter()
+    .filter(|doc_topic| {
+      if let Some(metadata) = audit_data.topic_metadata.get(doc_topic) {
+        !metadata
+          .scope()
+          .ancestor_topics()
+          .iter()
+          .any(|t| seen_doc_topics.contains(t))
+      } else {
+        true
+      }
+    })
+    .collect();
+
+  for doc_topic in non_subsumed {
+    if let Some(ctx) = audit_data.topic_context.get(doc_topic) {
+      all_contexts.extend(ctx.iter().cloned());
+    }
+  }
+
+  let merged = crate::core::merge_context_groups(all_contexts);
+  render_grouped_source_panel(&merged, audit_data, source_text_cache, true)
 }

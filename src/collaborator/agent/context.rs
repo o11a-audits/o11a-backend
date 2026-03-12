@@ -210,7 +210,11 @@ fn lookup_topic_comments(
   topic: &topic::Topic,
   audit_data: &AuditData,
 ) -> Vec<String> {
-  let comment_topics = audit_data.comment_index.get(topic).map(|v| v.as_slice()).unwrap_or(&[]);
+  let comment_topics = audit_data
+    .comment_index
+    .get(topic)
+    .map(|v| v.as_slice())
+    .unwrap_or(&[]);
   comment_topics
     .iter()
     .filter_map(|comment_topic| {
@@ -1750,10 +1754,7 @@ pub fn build_agent_topic_context(
     .unwrap_or_default();
 
   match metadata {
-    TopicMetadata::NamedTopic {
-      kind,
-      ..
-    } => {
+    TopicMetadata::NamedTopic { kind, .. } => {
       let (kind_str, sub_kind) = named_kind_to_string(kind);
 
       let expanded = if include_expanded_context {

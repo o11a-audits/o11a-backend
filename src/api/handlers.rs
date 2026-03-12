@@ -379,39 +379,11 @@ pub async fn get_source_text(
   // Create topic from the topic_id
   let topic = new_topic(&topic_id);
 
-  match crate::solidity::formatter::global_to_source_text(&topic) {
-    Some(global) => {
-      return Ok(Html(global));
-    }
-    None => (),
-  }
-
-  // Get the node for this topic
-  let node = audit_data.nodes.get(&topic).ok_or_else(|| {
-    eprintln!("Topic '{}' not found in audit '{}'", topic_id, audit_id);
-    StatusCode::NOT_FOUND
-  })?;
-
-  // Convert the node to source text based on its type
-  let source_text = match node {
-    Node::Solidity(solidity_node) => {
-      crate::solidity::formatter::node_to_source_text(
-        solidity_node,
-        &audit_data.nodes,
-        &audit_data.topic_metadata,
-      )
-    }
-    Node::Documentation(doc_node) => {
-      crate::documentation::formatter::node_to_html(doc_node, &audit_data.nodes)
-    }
-    Node::Comment(nodes) => {
-      crate::collaborator::formatter::render_comment_html(
-        nodes,
-        &topic,
-        &audit_data.nodes,
-      )
-    }
-  };
+  let source_text =
+    super::topic_view::render_source_text(&topic, audit_data).ok_or_else(|| {
+      eprintln!("Topic '{}' not found in audit '{}'", topic_id, audit_id);
+      StatusCode::NOT_FOUND
+    })?;
 
   Ok(Html(source_text))
 }
