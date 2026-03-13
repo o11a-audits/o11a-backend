@@ -29,7 +29,7 @@ impl Topic {
       Some(b'D') => Some(TopicKind::Documentation),
       Some(b'C') => Some(TopicKind::Comment),
       Some(b'I') => Some(TopicKind::Invariant),
-      Some(b'A') => Some(TopicKind::AttackVector),
+      Some(b'T') => Some(TopicKind::AttackVector),
       Some(b'F') => Some(TopicKind::Feature),
       Some(b'R') => Some(TopicKind::Requirement),
       _ => None,
@@ -85,7 +85,7 @@ pub fn new_invariant_topic(invariant_id: i32) -> Topic {
 
 pub fn new_attack_vector_topic(id: i32) -> Topic {
   Topic {
-    id: format!("A{}", id),
+    id: format!("T{}", id),
   }
 }
 

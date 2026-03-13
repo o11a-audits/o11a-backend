@@ -165,7 +165,7 @@ fn parse_features_response(response: &str) -> Result<ParsedFeatures, String> {
       },
     );
 
-    features.insert(feature_topic, Feature { requirement_topics });
+    features.insert(feature_topic, Feature { requirement_topics, threat_topics: Vec::new() });
   }
 
   Ok(ParsedFeatures {

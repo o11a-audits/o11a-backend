@@ -188,6 +188,84 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
   .execute(pool)
   .await?;
 
+  // Threats table
+  sqlx::query(
+    r#"
+        CREATE TABLE IF NOT EXISTS threats (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            feature_id INTEGER NOT NULL,
+            description TEXT NOT NULL,
+            author_id INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            severity TEXT NOT NULL DEFAULT 'medium'
+        )
+        "#,
+  )
+  .execute(pool)
+  .await?;
+
+  sqlx::query(
+    "CREATE INDEX IF NOT EXISTS idx_threats_feature ON threats(feature_id)",
+  )
+  .execute(pool)
+  .await?;
+
+  // Invariants table
+  sqlx::query(
+    r#"
+        CREATE TABLE IF NOT EXISTS invariants (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            threat_id INTEGER NOT NULL,
+            description TEXT NOT NULL,
+            author_id INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            severity TEXT NOT NULL DEFAULT 'medium'
+        )
+        "#,
+  )
+  .execute(pool)
+  .await?;
+
+  sqlx::query(
+    "CREATE INDEX IF NOT EXISTS idx_invariants_threat ON invariants(threat_id)",
+  )
+  .execute(pool)
+  .await?;
+
+  // Invariant source topic associations
+  sqlx::query(
+    r#"
+        CREATE TABLE IF NOT EXISTS invariant_source_topics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            invariant_id INTEGER NOT NULL,
+            topic_id TEXT NOT NULL,
+            UNIQUE(invariant_id, topic_id)
+        )
+        "#,
+  )
+  .execute(pool)
+  .await?;
+
+  sqlx::query(
+    "CREATE INDEX IF NOT EXISTS idx_inv_source_topics_inv ON invariant_source_topics(invariant_id)",
+  )
+  .execute(pool)
+  .await?;
+
+  // Migration: add severity to threats if missing
+  let _ = sqlx::query(
+    "ALTER TABLE threats ADD COLUMN severity TEXT NOT NULL DEFAULT 'medium'",
+  )
+  .execute(pool)
+  .await;
+
+  // Migration: add severity to invariants if missing
+  let _ = sqlx::query(
+    "ALTER TABLE invariants ADD COLUMN severity TEXT NOT NULL DEFAULT 'medium'",
+  )
+  .execute(pool)
+  .await;
+
   Ok(())
 }
 
@@ -632,6 +710,47 @@ pub async fn delete_all_features_for_audit(
   .execute(pool)
   .await?;
 
+  // Delete invariant source topic associations
+  sqlx::query(
+    r#"
+        DELETE FROM invariant_source_topics WHERE invariant_id IN (
+            SELECT i.id FROM invariants i
+            JOIN threats t ON i.threat_id = t.id
+            JOIN features f ON t.feature_id = f.id
+            WHERE f.audit_id = ?
+        )
+        "#,
+  )
+  .bind(audit_id)
+  .execute(pool)
+  .await?;
+
+  // Delete invariants
+  sqlx::query(
+    r#"
+        DELETE FROM invariants WHERE threat_id IN (
+            SELECT t.id FROM threats t
+            JOIN features f ON t.feature_id = f.id
+            WHERE f.audit_id = ?
+        )
+        "#,
+  )
+  .bind(audit_id)
+  .execute(pool)
+  .await?;
+
+  // Delete threats
+  sqlx::query(
+    r#"
+        DELETE FROM threats WHERE feature_id IN (
+            SELECT id FROM features WHERE audit_id = ?
+        )
+        "#,
+  )
+  .bind(audit_id)
+  .execute(pool)
+  .await?;
+
   // Delete feature topic associations
   sqlx::query(
     r#"
@@ -682,6 +801,23 @@ pub async fn load_all_features(
     .fetch_all(pool)
     .await?;
 
+  let threats =
+    sqlx::query_as::<_, ThreatRow>("SELECT * FROM threats")
+      .fetch_all(pool)
+      .await?;
+
+  let invariants =
+    sqlx::query_as::<_, InvariantRow>("SELECT * FROM invariants")
+      .fetch_all(pool)
+      .await?;
+
+  let inv_source_topics =
+    sqlx::query_as::<_, InvariantSourceTopicRow>(
+      "SELECT * FROM invariant_source_topics",
+    )
+    .fetch_all(pool)
+    .await?;
+
   // Group requirements by feature_id
   let mut reqs_by_feature: std::collections::HashMap<i64, Vec<&RequirementRow>> =
     std::collections::HashMap::new();
@@ -701,6 +837,27 @@ pub async fn load_all_features(
     std::collections::HashMap::new();
   for rdt in &req_doc_topics {
     doc_by_req.entry(rdt.requirement_id).or_default().push(rdt);
+  }
+
+  // Group threats by feature_id
+  let mut threats_by_feature: std::collections::HashMap<i64, Vec<&ThreatRow>> =
+    std::collections::HashMap::new();
+  for t in &threats {
+    threats_by_feature.entry(t.feature_id).or_default().push(t);
+  }
+
+  // Group invariants by threat_id
+  let mut invs_by_threat: std::collections::HashMap<i64, Vec<&InvariantRow>> =
+    std::collections::HashMap::new();
+  for inv in &invariants {
+    invs_by_threat.entry(inv.threat_id).or_default().push(inv);
+  }
+
+  // Group invariant source topics by invariant_id
+  let mut src_by_inv: std::collections::HashMap<i64, Vec<&InvariantSourceTopicRow>> =
+    std::collections::HashMap::new();
+  for ist in &inv_source_topics {
+    src_by_inv.entry(ist.invariant_id).or_default().push(ist);
   }
 
   let count = features.len();
@@ -751,6 +908,67 @@ pub async fn load_all_features(
         }
       }
 
+      // Load threats for this feature
+      let mut threat_topics = Vec::new();
+      if let Some(th_rows) = threats_by_feature.get(&row.id) {
+        for th in th_rows {
+          let threat_topic = topic::new_attack_vector_topic(th.id as i32);
+          threat_topics.push(threat_topic.clone());
+
+          // Load invariants for this threat
+          let mut invariant_topics = Vec::new();
+          if let Some(inv_rows) = invs_by_threat.get(&th.id) {
+            for inv in inv_rows {
+              let inv_topic = topic::new_invariant_topic(inv.id as i32);
+              invariant_topics.push(inv_topic.clone());
+
+              let mut source_topics = Vec::new();
+              if let Some(srcs) = src_by_inv.get(&inv.id) {
+                for s in srcs {
+                  source_topics.push(topic::new_topic(&s.topic_id));
+                }
+              }
+
+              audit_data.topic_metadata.insert(
+                inv_topic.clone(),
+                core::TopicMetadata::InvariantTopic {
+                  topic: inv_topic.clone(),
+                  description: inv.description.clone(),
+                  threat_topic: threat_topic.clone(),
+                  author_id: inv.author_id,
+                  created_at: inv.created_at.clone(),
+                  severity: core::ThreatSeverity::from_str(&inv.severity)
+                    .unwrap_or(core::ThreatSeverity::Medium),
+                },
+              );
+
+              audit_data.invariants.insert(
+                inv_topic,
+                core::Invariant { source_topics },
+              );
+            }
+          }
+
+          audit_data.topic_metadata.insert(
+            threat_topic.clone(),
+            core::TopicMetadata::ThreatTopic {
+              topic: threat_topic.clone(),
+              description: th.description.clone(),
+              feature_topic: feature_topic.clone(),
+              author_id: th.author_id,
+              created_at: th.created_at.clone(),
+              severity: core::ThreatSeverity::from_str(&th.severity)
+                .unwrap_or(core::ThreatSeverity::Medium),
+            },
+          );
+
+          audit_data.threats.insert(
+            threat_topic,
+            core::Threat { invariant_topics },
+          );
+        }
+      }
+
       audit_data.topic_metadata.insert(
         feature_topic.clone(),
         core::TopicMetadata::FeatureTopic {
@@ -766,6 +984,7 @@ pub async fn load_all_features(
         feature_topic,
         Feature {
           requirement_topics,
+          threat_topics,
         },
       );
     }
@@ -914,6 +1133,177 @@ pub async fn remove_requirement_documentation_topic(
     "DELETE FROM requirement_documentation_topics WHERE requirement_id = ? AND topic_id = ?",
   )
   .bind(requirement_id)
+  .bind(topic_id)
+  .execute(pool)
+  .await?;
+  Ok(())
+}
+
+// ============================================================================
+// Threat CRUD operations
+// ============================================================================
+
+/// Database row for a threat
+#[derive(Debug, sqlx::FromRow)]
+pub struct ThreatRow {
+  pub id: i64,
+  pub feature_id: i64,
+  pub description: String,
+  pub author_id: i64,
+  pub created_at: String,
+  pub severity: String,
+}
+
+/// Creates a new threat and returns the row
+pub async fn create_threat(
+  pool: &SqlitePool,
+  feature_id: i64,
+  description: &str,
+  author_id: i64,
+  severity: &str,
+) -> Result<ThreatRow, sqlx::Error> {
+  let result = sqlx::query(
+    r#"
+        INSERT INTO threats (feature_id, description, author_id, severity)
+        VALUES (?, ?, ?, ?)
+        "#,
+  )
+  .bind(feature_id)
+  .bind(description)
+  .bind(author_id)
+  .bind(severity)
+  .execute(pool)
+  .await?;
+
+  let id = result.last_insert_rowid();
+  sqlx::query_as::<_, ThreatRow>("SELECT * FROM threats WHERE id = ?")
+    .bind(id)
+    .fetch_one(pool)
+    .await
+}
+
+/// Deletes a threat and its associated invariants
+pub async fn delete_threat(
+  pool: &SqlitePool,
+  threat_id: i64,
+) -> Result<(), sqlx::Error> {
+  sqlx::query(
+    r#"
+        DELETE FROM invariant_source_topics WHERE invariant_id IN (
+            SELECT id FROM invariants WHERE threat_id = ?
+        )
+        "#,
+  )
+  .bind(threat_id)
+  .execute(pool)
+  .await?;
+  sqlx::query("DELETE FROM invariants WHERE threat_id = ?")
+    .bind(threat_id)
+    .execute(pool)
+    .await?;
+  sqlx::query("DELETE FROM threats WHERE id = ?")
+    .bind(threat_id)
+    .execute(pool)
+    .await?;
+  Ok(())
+}
+
+// ============================================================================
+// Invariant CRUD operations
+// ============================================================================
+
+/// Database row for an invariant
+#[derive(Debug, sqlx::FromRow)]
+pub struct InvariantRow {
+  pub id: i64,
+  pub threat_id: i64,
+  pub description: String,
+  pub author_id: i64,
+  pub created_at: String,
+  pub severity: String,
+}
+
+/// Database row for an invariant source topic association
+#[derive(Debug, sqlx::FromRow)]
+pub struct InvariantSourceTopicRow {
+  pub id: i64,
+  pub invariant_id: i64,
+  pub topic_id: String,
+}
+
+/// Creates a new invariant and returns the row
+pub async fn create_invariant(
+  pool: &SqlitePool,
+  threat_id: i64,
+  description: &str,
+  author_id: i64,
+  severity: &str,
+) -> Result<InvariantRow, sqlx::Error> {
+  let result = sqlx::query(
+    r#"
+        INSERT INTO invariants (threat_id, description, author_id, severity)
+        VALUES (?, ?, ?, ?)
+        "#,
+  )
+  .bind(threat_id)
+  .bind(description)
+  .bind(author_id)
+  .bind(severity)
+  .execute(pool)
+  .await?;
+
+  let id = result.last_insert_rowid();
+  sqlx::query_as::<_, InvariantRow>("SELECT * FROM invariants WHERE id = ?")
+    .bind(id)
+    .fetch_one(pool)
+    .await
+}
+
+/// Deletes an invariant and its source topic associations
+pub async fn delete_invariant(
+  pool: &SqlitePool,
+  invariant_id: i64,
+) -> Result<(), sqlx::Error> {
+  sqlx::query("DELETE FROM invariant_source_topics WHERE invariant_id = ?")
+    .bind(invariant_id)
+    .execute(pool)
+    .await?;
+  sqlx::query("DELETE FROM invariants WHERE id = ?")
+    .bind(invariant_id)
+    .execute(pool)
+    .await?;
+  Ok(())
+}
+
+/// Adds a source topic to an invariant
+pub async fn add_invariant_source_topic(
+  pool: &SqlitePool,
+  invariant_id: i64,
+  topic_id: &str,
+) -> Result<(), sqlx::Error> {
+  sqlx::query(
+    r#"
+        INSERT OR IGNORE INTO invariant_source_topics (invariant_id, topic_id)
+        VALUES (?, ?)
+        "#,
+  )
+  .bind(invariant_id)
+  .bind(topic_id)
+  .execute(pool)
+  .await?;
+  Ok(())
+}
+
+/// Removes a source topic from an invariant
+pub async fn remove_invariant_source_topic(
+  pool: &SqlitePool,
+  invariant_id: i64,
+  topic_id: &str,
+) -> Result<(), sqlx::Error> {
+  sqlx::query(
+    "DELETE FROM invariant_source_topics WHERE invariant_id = ? AND topic_id = ?",
+  )
+  .bind(invariant_id)
   .bind(topic_id)
   .execute(pool)
   .await?;

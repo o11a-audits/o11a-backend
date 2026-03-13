@@ -309,7 +309,9 @@ pub async fn get_contracts(
       | crate::core::TopicMetadata::TitledTopic { .. }
       | crate::core::TopicMetadata::CommentTopic { .. }
       | crate::core::TopicMetadata::FeatureTopic { .. }
-      | crate::core::TopicMetadata::RequirementTopic { .. } => false,
+      | crate::core::TopicMetadata::RequirementTopic { .. }
+      | crate::core::TopicMetadata::ThreatTopic { .. }
+      | crate::core::TopicMetadata::InvariantTopic { .. } => false,
     };
 
     if is_contract {
@@ -822,7 +824,6 @@ pub struct FeatureTopicResponse {
   pub description: String,
   pub author_id: i64,
   pub created_at: String,
-  pub requirement_topics: Vec<String>,
   pub context: Vec<SourceContextResponse>,
 }
 
@@ -834,8 +835,30 @@ pub struct RequirementTopicResponse {
   pub feature_topic: String,
   pub author_id: i64,
   pub created_at: String,
-  pub documentation_topics: Vec<String>,
-  pub source_topics: Vec<String>,
+  pub context: Vec<SourceContextResponse>,
+}
+
+/// Response for ThreatTopic metadata
+#[derive(Debug, Serialize)]
+pub struct ThreatTopicResponse {
+  pub topic_id: String,
+  pub description: String,
+  pub feature_topic: String,
+  pub author_id: i64,
+  pub created_at: String,
+  pub severity: String,
+  pub context: Vec<SourceContextResponse>,
+}
+
+/// Response for InvariantTopic metadata
+#[derive(Debug, Serialize)]
+pub struct InvariantTopicResponse {
+  pub topic_id: String,
+  pub description: String,
+  pub threat_topic: String,
+  pub author_id: i64,
+  pub created_at: String,
+  pub severity: String,
   pub context: Vec<SourceContextResponse>,
 }
 
@@ -857,6 +880,10 @@ pub enum TopicMetadataResponse {
   Feature(FeatureTopicResponse),
   #[serde(rename = "requirement")]
   Requirement(RequirementTopicResponse),
+  #[serde(rename = "threat")]
+  Threat(ThreatTopicResponse),
+  #[serde(rename = "invariant")]
+  Invariant(InvariantTopicResponse),
 }
 
 // Helper function to convert SourceChild to SourceChildResponse
@@ -1027,16 +1054,12 @@ fn topic_metadata_to_response(
       created_at,
       ..
     } => {
-      let feature = audit_data.features.get(topic);
       TopicMetadataResponse::Feature(FeatureTopicResponse {
         topic_id: topic.id.clone(),
         name: name.clone(),
         description: description.clone(),
         author_id: *author_id,
         created_at: created_at.clone(),
-        requirement_topics: feature
-          .map(|f| f.requirement_topics.iter().map(|t| t.id.clone()).collect())
-          .unwrap_or_default(),
         context: convert_source_context(ctx),
       })
     }
@@ -1048,24 +1071,50 @@ fn topic_metadata_to_response(
       created_at,
       ..
     } => {
-      let requirement = audit_data.requirements.get(topic);
       TopicMetadataResponse::Requirement(RequirementTopicResponse {
         topic_id: topic.id.clone(),
         description: description.clone(),
         feature_topic: feature_topic.id.clone(),
         author_id: *author_id,
         created_at: created_at.clone(),
-        documentation_topics: requirement
-          .map(|r| {
-            r.documentation_topics
-              .iter()
-              .map(|t| t.id.clone())
-              .collect()
-          })
-          .unwrap_or_default(),
-        source_topics: requirement
-          .map(|r| r.source_topics.iter().map(|t| t.id.clone()).collect())
-          .unwrap_or_default(),
+        context: convert_source_context(ctx),
+      })
+    }
+
+    crate::core::TopicMetadata::ThreatTopic {
+      description,
+      feature_topic,
+      author_id,
+      created_at,
+      severity,
+      ..
+    } => {
+      TopicMetadataResponse::Threat(ThreatTopicResponse {
+        topic_id: topic.id.clone(),
+        description: description.clone(),
+        feature_topic: feature_topic.id.clone(),
+        author_id: *author_id,
+        created_at: created_at.clone(),
+        severity: severity.as_str().to_string(),
+        context: convert_source_context(ctx),
+      })
+    }
+
+    crate::core::TopicMetadata::InvariantTopic {
+      description,
+      threat_topic,
+      author_id,
+      created_at,
+      severity,
+      ..
+    } => {
+      TopicMetadataResponse::Invariant(InvariantTopicResponse {
+        topic_id: topic.id.clone(),
+        description: description.clone(),
+        threat_topic: threat_topic.id.clone(),
+        author_id: *author_id,
+        created_at: created_at.clone(),
+        severity: severity.as_str().to_string(),
         context: convert_source_context(ctx),
       })
     }
@@ -1732,6 +1781,102 @@ pub async fn get_features(
   Ok(Json(features))
 }
 
+/// GET /api/v1/audits/:audit_id/features/:feature_id/requirements
+pub async fn get_feature_requirements(
+  State(state): State<AppState>,
+  Path((audit_id, feature_id)): Path<(String, i64)>,
+) -> Result<Json<Vec<String>>, StatusCode> {
+  println!(
+    "GET /api/v1/audits/{}/features/{}/requirements",
+    audit_id, feature_id
+  );
+
+  let feature_topic = topic::new_feature_topic(feature_id as i32);
+
+  let ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in get_feature_requirements: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+
+  let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+  let feature = audit_data
+    .features
+    .get(&feature_topic)
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+  let ids: Vec<String> = feature
+    .requirement_topics
+    .iter()
+    .map(|t| t.id.clone())
+    .collect();
+
+  Ok(Json(ids))
+}
+
+/// GET /api/v1/audits/:audit_id/features/:feature_id/threats
+pub async fn get_feature_threats(
+  State(state): State<AppState>,
+  Path((audit_id, feature_id)): Path<(String, i64)>,
+) -> Result<Json<Vec<String>>, StatusCode> {
+  println!(
+    "GET /api/v1/audits/{}/features/{}/threats",
+    audit_id, feature_id
+  );
+
+  let feature_topic = topic::new_feature_topic(feature_id as i32);
+
+  let ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in get_feature_threats: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+
+  let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+  let feature = audit_data
+    .features
+    .get(&feature_topic)
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+  let ids: Vec<String> = feature
+    .threat_topics
+    .iter()
+    .map(|t| t.id.clone())
+    .collect();
+
+  Ok(Json(ids))
+}
+
+/// GET /api/v1/audits/:audit_id/threats/:threat_id/invariants
+pub async fn get_threat_invariants(
+  State(state): State<AppState>,
+  Path((audit_id, threat_id)): Path<(String, i64)>,
+) -> Result<Json<Vec<String>>, StatusCode> {
+  println!(
+    "GET /api/v1/audits/{}/threats/{}/invariants",
+    audit_id, threat_id
+  );
+
+  let threat_topic = topic::new_attack_vector_topic(threat_id as i32);
+
+  let ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in get_threat_invariants: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+
+  let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+  let threat = audit_data
+    .threats
+    .get(&threat_topic)
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+  let ids: Vec<String> = threat
+    .invariant_topics
+    .iter()
+    .map(|t| t.id.clone())
+    .collect();
+
+  Ok(Json(ids))
+}
+
 /// Trigger the agent to build features from documentation.
 pub async fn build_features(
   State(state): State<AppState>,
@@ -1824,12 +1969,14 @@ pub async fn build_features(
     StatusCode::INTERNAL_SERVER_ERROR
   })?;
   let audit_data = ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
-  // Remove old feature/requirement TopicMetadata entries
+  // Remove old feature/requirement/threat/invariant TopicMetadata entries
   audit_data.topic_metadata.retain(|_, m| {
     !matches!(
       m,
       core::TopicMetadata::FeatureTopic { .. }
         | core::TopicMetadata::RequirementTopic { .. }
+        | core::TopicMetadata::ThreatTopic { .. }
+        | core::TopicMetadata::InvariantTopic { .. }
     )
   });
 
@@ -1838,6 +1985,8 @@ pub async fn build_features(
 
   audit_data.features = parsed.features;
   audit_data.requirements = parsed.requirements;
+  audit_data.threats.clear();
+  audit_data.invariants.clear();
   crate::core::rebuild_feature_context(audit_data);
 
   Ok(StatusCode::OK)
@@ -1875,6 +2024,7 @@ pub async fn create_feature(
   let feature_topic = topic::new_feature_topic(row.id as i32);
   let feature = Feature {
     requirement_topics: Vec::new(),
+    threat_topics: Vec::new(),
   };
 
   let metadata = core::TopicMetadata::FeatureTopic {
@@ -2415,5 +2565,392 @@ pub async fn remove_requirement_source_topic(
     .get(&req_topic)
     .ok_or(StatusCode::NOT_FOUND)?;
   let response = topic_metadata_to_response(&req_topic, metadata, audit_data);
+  Ok(Json(response))
+}
+
+// ============================================
+// Threat routes
+// ============================================
+
+#[derive(Debug, Deserialize)]
+pub struct CreateThreatRequest {
+  pub description: String,
+  pub author_id: i64,
+  pub severity: String,
+}
+
+/// POST /api/v1/audits/:audit_id/features/:feature_id/threats
+/// Creates a new threat on a feature.
+pub async fn create_threat(
+  State(state): State<AppState>,
+  Path((audit_id, feature_id)): Path<(String, i64)>,
+  Json(payload): Json<CreateThreatRequest>,
+) -> Result<Json<TopicMetadataResponse>, StatusCode> {
+  println!(
+    "POST /api/v1/audits/{}/features/{}/threats",
+    audit_id, feature_id
+  );
+
+  let severity = core::ThreatSeverity::from_str(&payload.severity)
+    .ok_or(StatusCode::BAD_REQUEST)?;
+
+  let row = db::create_threat(
+    &state.db,
+    feature_id,
+    &payload.description,
+    payload.author_id,
+    severity.as_str(),
+  )
+  .await
+  .map_err(|e| {
+    eprintln!("create_threat failed: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+
+  let feature_topic = topic::new_feature_topic(feature_id as i32);
+  let threat_topic = topic::new_attack_vector_topic(row.id as i32);
+
+  let threat = core::Threat {
+    invariant_topics: Vec::new(),
+  };
+
+  let metadata = core::TopicMetadata::ThreatTopic {
+    topic: threat_topic.clone(),
+    description: row.description,
+    feature_topic: feature_topic.clone(),
+    author_id: row.author_id,
+    created_at: row.created_at,
+    severity,
+  };
+
+  let mut ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in create_threat: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+  let audit_data = ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+
+  let feature = audit_data
+    .features
+    .get_mut(&feature_topic)
+    .ok_or(StatusCode::NOT_FOUND)?;
+  feature.threat_topics.push(threat_topic.clone());
+
+  audit_data.threats.insert(threat_topic.clone(), threat);
+  audit_data
+    .topic_metadata
+    .insert(threat_topic.clone(), metadata.clone());
+
+  crate::core::rebuild_feature_context(audit_data);
+
+  let response = topic_metadata_to_response(&threat_topic, &metadata, audit_data);
+  Ok(Json(response))
+}
+
+/// DELETE /api/v1/audits/:audit_id/features/:feature_id/threats/:threat_id
+pub async fn delete_threat(
+  State(state): State<AppState>,
+  Path((audit_id, feature_id, threat_id)): Path<(String, i64, i64)>,
+) -> Result<StatusCode, StatusCode> {
+  println!(
+    "DELETE /api/v1/audits/{}/features/{}/threats/{}",
+    audit_id, feature_id, threat_id
+  );
+
+  db::delete_threat(&state.db, threat_id)
+    .await
+    .map_err(|e| {
+      eprintln!("delete_threat failed: {}", e);
+      StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+  let threat_topic = topic::new_attack_vector_topic(threat_id as i32);
+  let feature_topic = topic::new_feature_topic(feature_id as i32);
+
+  {
+    let mut ctx = state.data_context.lock().map_err(|e| {
+      eprintln!("Mutex poisoned in delete_threat: {}", e);
+      StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let audit_data =
+      ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+
+    if let Some(feature) = audit_data.features.get_mut(&feature_topic) {
+      feature.threat_topics.retain(|t| t != &threat_topic);
+    }
+
+    // Remove invariants belonging to this threat
+    if let Some(threat) = audit_data.threats.get(&threat_topic) {
+      for inv_topic in &threat.invariant_topics {
+        audit_data.invariants.remove(inv_topic);
+        audit_data.topic_metadata.remove(inv_topic);
+        audit_data.topic_context.remove(inv_topic);
+      }
+    }
+
+    audit_data.threats.remove(&threat_topic);
+    audit_data.topic_metadata.remove(&threat_topic);
+    audit_data.topic_context.remove(&threat_topic);
+
+    crate::core::rebuild_feature_context(audit_data);
+  }
+
+  Ok(StatusCode::NO_CONTENT)
+}
+
+/// GET /api/v1/audits/:audit_id/threats/:threat_id
+pub async fn get_threat(
+  State(state): State<AppState>,
+  Path((audit_id, threat_id)): Path<(String, i32)>,
+) -> Result<Json<TopicMetadataResponse>, StatusCode> {
+  println!("GET /api/v1/audits/{}/threats/{}", audit_id, threat_id);
+
+  let ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in get_threat: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+
+  let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+  let threat_topic = topic::new_attack_vector_topic(threat_id);
+  let metadata = audit_data
+    .topic_metadata
+    .get(&threat_topic)
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+  Ok(Json(topic_metadata_to_response(
+    &threat_topic, metadata, audit_data,
+  )))
+}
+
+// ============================================
+// Invariant routes
+// ============================================
+
+#[derive(Debug, Deserialize)]
+pub struct CreateInvariantRequest {
+  pub description: String,
+  pub author_id: i64,
+}
+
+/// POST /api/v1/audits/:audit_id/threats/:threat_id/invariants
+pub async fn create_invariant(
+  State(state): State<AppState>,
+  Path((audit_id, threat_id)): Path<(String, i64)>,
+  Json(payload): Json<CreateInvariantRequest>,
+) -> Result<Json<TopicMetadataResponse>, StatusCode> {
+  println!(
+    "POST /api/v1/audits/{}/threats/{}/invariants",
+    audit_id, threat_id
+  );
+
+  let threat_topic = topic::new_attack_vector_topic(threat_id as i32);
+
+  // Invariants always inherit severity from their parent threat
+  let severity = {
+    let ctx = state.data_context.lock().map_err(|e| {
+      eprintln!("Mutex poisoned in create_invariant: {}", e);
+      StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+    match audit_data.topic_metadata.get(&threat_topic) {
+      Some(core::TopicMetadata::ThreatTopic { severity, .. }) => *severity,
+      _ => return Err(StatusCode::NOT_FOUND),
+    }
+  };
+
+  let row = db::create_invariant(
+    &state.db,
+    threat_id,
+    &payload.description,
+    payload.author_id,
+    severity.as_str(),
+  )
+  .await
+  .map_err(|e| {
+    eprintln!("create_invariant failed: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+
+  let inv_topic = topic::new_invariant_topic(row.id as i32);
+
+  let invariant = core::Invariant {
+    source_topics: Vec::new(),
+  };
+
+  let metadata = core::TopicMetadata::InvariantTopic {
+    topic: inv_topic.clone(),
+    description: row.description,
+    threat_topic: threat_topic.clone(),
+    author_id: row.author_id,
+    created_at: row.created_at,
+    severity,
+  };
+
+  let mut ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in create_invariant: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+  let audit_data = ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+
+  let threat = audit_data
+    .threats
+    .get_mut(&threat_topic)
+    .ok_or(StatusCode::NOT_FOUND)?;
+  threat.invariant_topics.push(inv_topic.clone());
+
+  audit_data.invariants.insert(inv_topic.clone(), invariant);
+  audit_data
+    .topic_metadata
+    .insert(inv_topic.clone(), metadata.clone());
+
+  crate::core::rebuild_feature_context(audit_data);
+
+  let response = topic_metadata_to_response(&inv_topic, &metadata, audit_data);
+  Ok(Json(response))
+}
+
+/// DELETE /api/v1/audits/:audit_id/threats/:threat_id/invariants/:invariant_id
+pub async fn delete_invariant(
+  State(state): State<AppState>,
+  Path((audit_id, threat_id, invariant_id)): Path<(String, i64, i64)>,
+) -> Result<StatusCode, StatusCode> {
+  println!(
+    "DELETE /api/v1/audits/{}/threats/{}/invariants/{}",
+    audit_id, threat_id, invariant_id
+  );
+
+  db::delete_invariant(&state.db, invariant_id)
+    .await
+    .map_err(|e| {
+      eprintln!("delete_invariant failed: {}", e);
+      StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+  let inv_topic = topic::new_invariant_topic(invariant_id as i32);
+  let threat_topic = topic::new_attack_vector_topic(threat_id as i32);
+
+  {
+    let mut ctx = state.data_context.lock().map_err(|e| {
+      eprintln!("Mutex poisoned in delete_invariant: {}", e);
+      StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let audit_data =
+      ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+
+    if let Some(threat) = audit_data.threats.get_mut(&threat_topic) {
+      threat.invariant_topics.retain(|t| t != &inv_topic);
+    }
+
+    audit_data.invariants.remove(&inv_topic);
+    audit_data.topic_metadata.remove(&inv_topic);
+    audit_data.topic_context.remove(&inv_topic);
+
+    crate::core::rebuild_feature_context(audit_data);
+  }
+
+  Ok(StatusCode::NO_CONTENT)
+}
+
+/// GET /api/v1/audits/:audit_id/invariants/:invariant_id
+pub async fn get_invariant(
+  State(state): State<AppState>,
+  Path((audit_id, invariant_id)): Path<(String, i32)>,
+) -> Result<Json<TopicMetadataResponse>, StatusCode> {
+  println!("GET /api/v1/audits/{}/invariants/{}", audit_id, invariant_id);
+
+  let ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in get_invariant: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+
+  let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+  let inv_topic = topic::new_invariant_topic(invariant_id);
+  let metadata = audit_data
+    .topic_metadata
+    .get(&inv_topic)
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+  Ok(Json(topic_metadata_to_response(
+    &inv_topic, metadata, audit_data,
+  )))
+}
+
+/// POST /api/v1/audits/:audit_id/invariants/:invariant_id/source_topics
+pub async fn add_invariant_source_topic(
+  State(state): State<AppState>,
+  Path((audit_id, invariant_id)): Path<(String, i64)>,
+  Json(payload): Json<AddSourceTopicRequest>,
+) -> Result<Json<TopicMetadataResponse>, StatusCode> {
+  println!(
+    "POST /api/v1/audits/{}/invariants/{}/source_topics",
+    audit_id, invariant_id
+  );
+
+  db::add_invariant_source_topic(&state.db, invariant_id, &payload.topic_id)
+    .await
+    .map_err(|e| {
+      eprintln!("add_invariant_source_topic failed: {}", e);
+      StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+  let mut ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in add_invariant_source_topic: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+  let audit_data = ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+  let inv_topic = topic::new_invariant_topic(invariant_id as i32);
+  let invariant = audit_data
+    .invariants
+    .get_mut(&inv_topic)
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+  let new_topic = topic::new_topic(&payload.topic_id);
+  if !invariant.source_topics.contains(&new_topic) {
+    invariant.source_topics.push(new_topic);
+  }
+
+  let metadata = audit_data
+    .topic_metadata
+    .get(&inv_topic)
+    .ok_or(StatusCode::NOT_FOUND)?;
+  let response = topic_metadata_to_response(&inv_topic, metadata, audit_data);
+  Ok(Json(response))
+}
+
+/// DELETE /api/v1/audits/:audit_id/invariants/:invariant_id/source_topics/:topic_id
+pub async fn remove_invariant_source_topic(
+  State(state): State<AppState>,
+  Path((audit_id, invariant_id, topic_id)): Path<(String, i64, String)>,
+) -> Result<Json<TopicMetadataResponse>, StatusCode> {
+  println!(
+    "DELETE /api/v1/audits/{}/invariants/{}/source_topics/{}",
+    audit_id, invariant_id, topic_id
+  );
+
+  db::remove_invariant_source_topic(&state.db, invariant_id, &topic_id)
+    .await
+    .map_err(|e| {
+      eprintln!("remove_invariant_source_topic failed: {}", e);
+      StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+  let mut ctx = state.data_context.lock().map_err(|e| {
+    eprintln!("Mutex poisoned in remove_invariant_source_topic: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
+  let audit_data = ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+  let inv_topic = topic::new_invariant_topic(invariant_id as i32);
+  let invariant = audit_data
+    .invariants
+    .get_mut(&inv_topic)
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+  let remove_topic = topic::new_topic(&topic_id);
+  invariant.source_topics.retain(|t| t != &remove_topic);
+
+  let metadata = audit_data
+    .topic_metadata
+    .get(&inv_topic)
+    .ok_or(StatusCode::NOT_FOUND)?;
+  let response = topic_metadata_to_response(&inv_topic, metadata, audit_data);
   Ok(Json(response))
 }

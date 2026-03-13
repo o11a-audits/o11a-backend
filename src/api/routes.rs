@@ -94,6 +94,14 @@ pub fn create_router(state: AppState) -> Router {
       get(handlers::get_features).post(handlers::create_feature),
     )
     .route(
+      "/api/v1/audits/:audit_id/features/:feature_id/requirements",
+      get(handlers::get_feature_requirements),
+    )
+    .route(
+      "/api/v1/audits/:audit_id/features/:feature_id/threats",
+      get(handlers::get_feature_threats),
+    )
+    .route(
       "/api/v1/audits/:audit_id/features/build",
       post(handlers::build_features),
     )
@@ -138,6 +146,44 @@ pub fn create_router(state: AppState) -> Router {
     .route(
       "/api/v1/audits/:audit_id/requirements/:requirement_id/source_topics/:topic_id",
       delete(handlers::remove_requirement_source_topic),
+    )
+    // ============================================
+    // Threat routes
+    // ============================================
+    .route(
+      "/api/v1/audits/:audit_id/features/:feature_id/threats",
+      post(handlers::create_threat),
+    )
+    .route(
+      "/api/v1/audits/:audit_id/features/:feature_id/threats/:threat_id",
+      delete(handlers::delete_threat),
+    )
+    .route(
+      "/api/v1/audits/:audit_id/threats/:threat_id",
+      get(handlers::get_threat),
+    )
+    // ============================================
+    // Invariant routes
+    // ============================================
+    .route(
+      "/api/v1/audits/:audit_id/threats/:threat_id/invariants",
+      get(handlers::get_threat_invariants).post(handlers::create_invariant),
+    )
+    .route(
+      "/api/v1/audits/:audit_id/threats/:threat_id/invariants/:invariant_id",
+      delete(handlers::delete_invariant),
+    )
+    .route(
+      "/api/v1/audits/:audit_id/invariants/:invariant_id",
+      get(handlers::get_invariant),
+    )
+    .route(
+      "/api/v1/audits/:audit_id/invariants/:invariant_id/source_topics",
+      post(handlers::add_invariant_source_topic),
+    )
+    .route(
+      "/api/v1/audits/:audit_id/invariants/:invariant_id/source_topics/:topic_id",
+      delete(handlers::remove_invariant_source_topic),
     )
     // WebSocket for real-time comment updates
     .route(

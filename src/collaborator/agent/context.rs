@@ -80,6 +80,12 @@ fn resolve_topic_name(topic: &topic::Topic, audit_data: &AuditData) -> String {
     Some(TopicMetadata::RequirementTopic { description, .. }) => {
       description.clone()
     }
+    Some(TopicMetadata::ThreatTopic { description, .. }) => {
+      description.clone()
+    }
+    Some(TopicMetadata::InvariantTopic { description, .. }) => {
+      description.clone()
+    }
     None => topic.id().to_string(),
   }
 }
@@ -187,6 +193,8 @@ fn plaintext_name_from_metadata(metadata: &TopicMetadata) -> String {
     TopicMetadata::CommentTopic { comment_type, .. } => comment_type.clone(),
     TopicMetadata::FeatureTopic { name, .. } => name.clone(),
     TopicMetadata::RequirementTopic { description, .. } => description.clone(),
+    TopicMetadata::ThreatTopic { description, .. } => description.clone(),
+    TopicMetadata::InvariantTopic { description, .. } => description.clone(),
   }
 }
 
@@ -1928,6 +1936,28 @@ pub fn build_agent_topic_context(
       topic: topic_id_string,
       name,
       kind: "Requirement".to_string(),
+      sub_kind: None,
+      condition: None,
+      context,
+      expanded_context: None,
+      mentions,
+    }),
+
+    TopicMetadata::ThreatTopic { .. } => Some(AgentTopicContext {
+      topic: topic_id_string,
+      name,
+      kind: "Threat".to_string(),
+      sub_kind: None,
+      condition: None,
+      context,
+      expanded_context: None,
+      mentions,
+    }),
+
+    TopicMetadata::InvariantTopic { .. } => Some(AgentTopicContext {
+      topic: topic_id_string,
+      name,
+      kind: "Invariant".to_string(),
       sub_kind: None,
       condition: None,
       context,

@@ -177,12 +177,45 @@ pub enum ContractKind {
   Interface,
 }
 
+/// Severity level for threats and invariants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ThreatSeverity {
+  Low,
+  Medium,
+  High,
+  Critical,
+}
+
+impl ThreatSeverity {
+  pub fn as_str(&self) -> &'static str {
+    match self {
+      ThreatSeverity::Low => "low",
+      ThreatSeverity::Medium => "medium",
+      ThreatSeverity::High => "high",
+      ThreatSeverity::Critical => "critical",
+    }
+  }
+
+  pub fn from_str(s: &str) -> Option<ThreatSeverity> {
+    match s {
+      "low" => Some(ThreatSeverity::Low),
+      "medium" => Some(ThreatSeverity::Medium),
+      "high" => Some(ThreatSeverity::High),
+      "critical" => Some(ThreatSeverity::Critical),
+      _ => None,
+    }
+  }
+}
+
 /// A project feature extracted from documentation.
-/// Groups requirements that describe expected behaviors.
+/// Groups requirements, threats, and their invariants.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Feature {
   /// R-prefixed topic IDs of requirements belonging to this feature
   pub requirement_topics: Vec<topic::Topic>,
+  /// T-prefixed topic IDs of threats belonging to this feature
+  pub threat_topics: Vec<topic::Topic>,
 }
 
 /// A behavioral requirement belonging to a feature.
@@ -194,6 +227,22 @@ pub struct Requirement {
   /// D-prefixed topic IDs of documentation sections that informed this requirement
   pub documentation_topics: Vec<topic::Topic>,
   /// N-prefixed topic IDs of source code topics that satisfy this requirement
+  pub source_topics: Vec<topic::Topic>,
+}
+
+/// A threat describing how an attacker could compromise a feature.
+/// Derived from adversarial reasoning rather than documentation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Threat {
+  /// I-prefixed topic IDs of invariants that defend against this threat
+  pub invariant_topics: Vec<topic::Topic>,
+}
+
+/// An invariant that must hold to prevent a threat.
+/// Linked to source code topics where the invariant is enforced.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Invariant {
+  /// N-prefixed topic IDs of source code topics that enforce this invariant
   pub source_topics: Vec<topic::Topic>,
 }
 
@@ -225,6 +274,10 @@ pub struct AuditData {
   pub features: BTreeMap<topic::Topic, Feature>,
   /// Requirements keyed by R-prefixed topic ID. Each belongs to one feature.
   pub requirements: BTreeMap<topic::Topic, Requirement>,
+  /// Threats keyed by A-prefixed topic ID. Each belongs to one feature.
+  pub threats: BTreeMap<topic::Topic, Threat>,
+  /// Invariants keyed by I-prefixed topic ID. Each belongs to one threat.
+  pub invariants: BTreeMap<topic::Topic, Invariant>,
   /// Reverse index: mentioned topic → comment topics that mention it.
   /// Updated on comment create.
   pub mentions_index: HashMap<topic::Topic, Vec<topic::Topic>>,
@@ -1284,6 +1337,24 @@ pub enum TopicMetadata {
     author_id: i64,
     created_at: String,
   },
+  /// A threat describing how an attacker could compromise a feature
+  ThreatTopic {
+    topic: topic::Topic,
+    description: String,
+    feature_topic: topic::Topic,
+    author_id: i64,
+    created_at: String,
+    severity: ThreatSeverity,
+  },
+  /// An invariant that must hold to prevent a threat
+  InvariantTopic {
+    topic: topic::Topic,
+    description: String,
+    threat_topic: topic::Topic,
+    author_id: i64,
+    created_at: String,
+    severity: ThreatSeverity,
+  },
 }
 
 
@@ -1296,7 +1367,9 @@ impl TopicMetadata {
       | TopicMetadata::TitledTopic { scope, .. }
       | TopicMetadata::CommentTopic { scope, .. } => scope,
       TopicMetadata::FeatureTopic { .. }
-      | TopicMetadata::RequirementTopic { .. } => &Scope::Global,
+      | TopicMetadata::RequirementTopic { .. }
+      | TopicMetadata::ThreatTopic { .. }
+      | TopicMetadata::InvariantTopic { .. } => &Scope::Global,
     }
   }
 
@@ -1308,7 +1381,9 @@ impl TopicMetadata {
       TopicMetadata::UnnamedTopic { .. }
       | TopicMetadata::ControlFlow { .. }
       | TopicMetadata::CommentTopic { .. }
-      | TopicMetadata::RequirementTopic { .. } => None,
+      | TopicMetadata::RequirementTopic { .. }
+      | TopicMetadata::ThreatTopic { .. }
+      | TopicMetadata::InvariantTopic { .. } => None,
     }
   }
 
@@ -1320,7 +1395,9 @@ impl TopicMetadata {
       | TopicMetadata::TitledTopic { topic, .. }
       | TopicMetadata::CommentTopic { topic, .. }
       | TopicMetadata::FeatureTopic { topic, .. }
-      | TopicMetadata::RequirementTopic { topic, .. } => topic,
+      | TopicMetadata::RequirementTopic { topic, .. }
+      | TopicMetadata::ThreatTopic { topic, .. }
+      | TopicMetadata::InvariantTopic { topic, .. } => topic,
     }
   }
 
@@ -1385,8 +1462,12 @@ impl TopicMetadata {
   pub fn target_topic(&self) -> Option<&topic::Topic> {
     match self {
       TopicMetadata::CommentTopic { target_topic, .. } => Some(target_topic),
-      TopicMetadata::RequirementTopic { feature_topic, .. } => {
+      TopicMetadata::RequirementTopic { feature_topic, .. }
+      | TopicMetadata::ThreatTopic { feature_topic, .. } => {
         Some(feature_topic)
+      }
+      TopicMetadata::InvariantTopic { threat_topic, .. } => {
+        Some(threat_topic)
       }
       _ => None,
     }
@@ -1396,7 +1477,9 @@ impl TopicMetadata {
     match self {
       TopicMetadata::CommentTopic { author_id, .. }
       | TopicMetadata::FeatureTopic { author_id, .. }
-      | TopicMetadata::RequirementTopic { author_id, .. } => Some(*author_id),
+      | TopicMetadata::RequirementTopic { author_id, .. }
+      | TopicMetadata::ThreatTopic { author_id, .. }
+      | TopicMetadata::InvariantTopic { author_id, .. } => Some(*author_id),
       _ => None,
     }
   }
@@ -1414,7 +1497,9 @@ impl TopicMetadata {
     match self {
       TopicMetadata::CommentTopic { created_at, .. }
       | TopicMetadata::FeatureTopic { created_at, .. }
-      | TopicMetadata::RequirementTopic { created_at, .. } => {
+      | TopicMetadata::RequirementTopic { created_at, .. }
+      | TopicMetadata::ThreatTopic { created_at, .. }
+      | TopicMetadata::InvariantTopic { created_at, .. } => {
         Some(created_at.as_str())
       }
       _ => None,
@@ -1680,7 +1765,7 @@ pub fn rebuild_feature_context(audit_data: &mut AuditData) {
       .collect();
   }
 
-  // Build context for FeatureTopics: feature itself + requirements in one group
+  // Build context for FeatureTopics: feature itself + requirements + threats
   for (feature_topic, metadata) in &audit_data.topic_metadata {
     if !matches!(metadata, TopicMetadata::FeatureTopic { .. }) {
       continue;
@@ -1697,6 +1782,13 @@ pub fn rebuild_feature_context(audit_data: &mut AuditData) {
       let sort_key = rt.numeric_id().map(|id| id as usize);
       scope_references.push(Reference::ProjectReference {
         reference_topic: rt.clone(),
+        sort_key,
+      });
+    }
+    for at in &feature.threat_topics {
+      let sort_key = at.numeric_id().map(|id| id as usize);
+      scope_references.push(Reference::ProjectReference {
+        reference_topic: at.clone(),
         sort_key,
       });
     }
@@ -1729,6 +1821,46 @@ pub fn rebuild_feature_context(audit_data: &mut AuditData) {
       audit_data
         .topic_context
         .insert(req_topic.clone(), context);
+    }
+  }
+
+  // Build context for ThreatTopics: parent feature as a SourceContext entry
+  for (threat_topic, metadata) in &audit_data.topic_metadata {
+    if let TopicMetadata::ThreatTopic { feature_topic, .. } = metadata {
+      let sort_key = feature_topic.numeric_id().map(|id| id as usize);
+      let context = vec![SourceContext {
+        scope: threat_topic.clone(),
+        sort_key,
+        is_in_scope: true,
+        scope_references: vec![Reference::ProjectReference {
+          reference_topic: feature_topic.clone(),
+          sort_key,
+        }],
+        nested_references: vec![],
+      }];
+      audit_data
+        .topic_context
+        .insert(threat_topic.clone(), context);
+    }
+  }
+
+  // Build context for InvariantTopics: parent threat as a SourceContext entry
+  for (inv_topic, metadata) in &audit_data.topic_metadata {
+    if let TopicMetadata::InvariantTopic { threat_topic, .. } = metadata {
+      let sort_key = threat_topic.numeric_id().map(|id| id as usize);
+      let context = vec![SourceContext {
+        scope: inv_topic.clone(),
+        sort_key,
+        is_in_scope: true,
+        scope_references: vec![Reference::ProjectReference {
+          reference_topic: threat_topic.clone(),
+          sort_key,
+        }],
+        nested_references: vec![],
+      }];
+      audit_data
+        .topic_context
+        .insert(inv_topic.clone(), context);
     }
   }
 }
@@ -1813,6 +1945,8 @@ pub fn new_audit_data(
     topic_context: BTreeMap::new(),
     features: BTreeMap::new(),
     requirements: BTreeMap::new(),
+    threats: BTreeMap::new(),
+    invariants: BTreeMap::new(),
     mentions_index: HashMap::new(),
   }
 }

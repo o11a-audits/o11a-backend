@@ -345,6 +345,18 @@ pub fn highlighted_name(metadata: &TopicMetadata) -> String {
         html_escape(description)
       )
     }
+    TopicMetadata::ThreatTopic { description, .. } => {
+      format!(
+        "<span class=\"threat\">{}</span>",
+        html_escape(description)
+      )
+    }
+    TopicMetadata::InvariantTopic { description, .. } => {
+      format!(
+        "<span class=\"invariant\">{}</span>",
+        html_escape(description)
+      )
+    }
   };
 
   format!("<code>{}</code>", inner)
@@ -376,6 +388,26 @@ fn get_breadcrumb_parts<'a>(
       return vec![
         BreadcrumbPart::Topic(feature_topic),
         BreadcrumbPart::Text("Requirement"),
+      ];
+    }
+  }
+
+  // Threats: parent feature then "Threat" label
+  if matches!(metadata, TopicMetadata::ThreatTopic { .. }) {
+    if let Some(feature_topic) = metadata.target_topic() {
+      return vec![
+        BreadcrumbPart::Topic(feature_topic),
+        BreadcrumbPart::Text("Threat"),
+      ];
+    }
+  }
+
+  // Invariants: parent threat then "Invariant" label
+  if matches!(metadata, TopicMetadata::InvariantTopic { .. }) {
+    if let Some(threat_topic) = metadata.target_topic() {
+      return vec![
+        BreadcrumbPart::Topic(threat_topic),
+        BreadcrumbPart::Text("Invariant"),
       ];
     }
   }
@@ -586,6 +618,42 @@ pub fn render_source_text(
       header, description
     );
     return Some(formatting::format_topic_block(topic, &content, "requirement", topic));
+  }
+
+  // Threat topics: render with comment-style header including severity
+  if let Some(TopicMetadata::ThreatTopic {
+    description,
+    author_id,
+    created_at,
+    severity,
+    ..
+  }) = audit_data.topic_metadata.get(topic)
+  {
+    let keyword = format!("threat [{}]", severity.as_str());
+    let header = render_authored_header(&keyword, *author_id, created_at);
+    let content = format!(
+      "{}<p style=\"margin: 0\">{}</p>",
+      header, description
+    );
+    return Some(formatting::format_topic_block(topic, &content, "threat", topic));
+  }
+
+  // Invariant topics: render with comment-style header including severity
+  if let Some(TopicMetadata::InvariantTopic {
+    description,
+    author_id,
+    created_at,
+    severity,
+    ..
+  }) = audit_data.topic_metadata.get(topic)
+  {
+    let keyword = format!("inv [{}]", severity.as_str());
+    let header = render_authored_header(&keyword, *author_id, created_at);
+    let content = format!(
+      "{}<p style=\"margin: 0\">{}</p>",
+      header, description
+    );
+    return Some(formatting::format_topic_block(topic, &content, "invariant", topic));
   }
 
   // Global builtins
@@ -1237,12 +1305,19 @@ pub fn build_topic_panel_prefix(
       m
     }
     Some(m @ TopicMetadata::RequirementTopic { .. }) => m,
+    Some(m @ TopicMetadata::ThreatTopic { .. }) => m,
+    Some(m @ TopicMetadata::InvariantTopic { .. }) => m,
     _ => return String::new(),
   };
 
-  // For requirements, render as a standalone topic node in its own group
-  if matches!(metadata, TopicMetadata::RequirementTopic { .. }) {
-    let kind_label = "Requirement";
+  // For requirements/threats/invariants, render as a standalone topic node
+  let standalone_label = match metadata {
+    TopicMetadata::RequirementTopic { .. } => Some("Requirement"),
+    TopicMetadata::ThreatTopic { .. } => Some("Threat"),
+    TopicMetadata::InvariantTopic { .. } => Some("Invariant"),
+    _ => None,
+  };
+  if let Some(kind_label) = standalone_label {
     let mut html = String::new();
     html.push_str(
       "<div class=\"component-group\" style=\"margin-bottom: 0.5rem;\">",
@@ -1582,7 +1657,10 @@ fn render_topic_node(
   // Features and requirements include their own authored header in render_source_text
   let has_authored_header = matches!(
     metadata,
-    TopicMetadata::FeatureTopic { .. } | TopicMetadata::RequirementTopic { .. }
+    TopicMetadata::FeatureTopic { .. }
+      | TopicMetadata::RequirementTopic { .. }
+      | TopicMetadata::ThreatTopic { .. }
+      | TopicMetadata::InvariantTopic { .. }
   );
 
   let meta_html = if has_authored_header {
@@ -1668,6 +1746,8 @@ fn topic_kind_label(metadata: &TopicMetadata) -> &'static str {
     TopicMetadata::CommentTopic { .. } => "comment",
     TopicMetadata::FeatureTopic { .. } => "feature",
     TopicMetadata::RequirementTopic { .. } => "requirement",
+    TopicMetadata::ThreatTopic { .. } => "threat",
+    TopicMetadata::InvariantTopic { .. } => "invariant",
   }
 }
 

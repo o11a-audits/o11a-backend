@@ -3459,7 +3459,9 @@ fn populate_context(
         }
       }
       TopicMetadata::FeatureTopic { .. }
-      | TopicMetadata::RequirementTopic { .. } => {}
+      | TopicMetadata::RequirementTopic { .. }
+      | TopicMetadata::ThreatTopic { .. }
+      | TopicMetadata::InvariantTopic { .. } => {}
     }
   }
 }
