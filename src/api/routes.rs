@@ -98,12 +98,12 @@ pub fn create_router(state: AppState) -> Router {
       post(handlers::build_features),
     )
     .route(
-      "/api/v1/audits/:audit_id/features/:feature_id/documentation_topics",
-      post(handlers::add_feature_documentation_topic),
+      "/api/v1/audits/:audit_id/requirements/:requirement_id/documentation_topics",
+      post(handlers::add_requirement_documentation_topic),
     )
     .route(
-      "/api/v1/audits/:audit_id/features/:feature_id/documentation_topics/:topic_id",
-      delete(handlers::remove_feature_documentation_topic),
+      "/api/v1/audits/:audit_id/requirements/:requirement_id/documentation_topics/:topic_id",
+      delete(handlers::remove_requirement_documentation_topic),
     )
     // ============================================
     // Documentation routes
@@ -113,8 +113,8 @@ pub fn create_router(state: AppState) -> Router {
       post(handlers::get_documentation_panel),
     )
     .route(
-      "/api/v1/audits/:audit_id/features/:topic_id",
-      get(handlers::get_topic_features),
+      "/api/v1/audits/:audit_id/requirements/topic/:topic_id",
+      get(handlers::get_topic_requirements),
     )
     // ============================================
     // Requirement routes

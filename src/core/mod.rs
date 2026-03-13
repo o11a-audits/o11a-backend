@@ -178,12 +178,9 @@ pub enum ContractKind {
 }
 
 /// A project feature extracted from documentation.
-/// Links documentation sections to a named capability,
-/// with requirements that describe expected behaviors.
+/// Groups requirements that describe expected behaviors.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Feature {
-  /// D-prefixed topic IDs of documentation sections/paragraphs that inform this feature
-  pub documentation_topics: Vec<topic::Topic>,
   /// R-prefixed topic IDs of requirements belonging to this feature
   pub requirement_topics: Vec<topic::Topic>,
 }
@@ -191,8 +188,11 @@ pub struct Feature {
 /// A behavioral requirement belonging to a feature.
 /// Can be happy-path ("Users can deposit tokens") or non-happy-path
 /// ("Do not allow a user to withdraw another user's funds").
+/// Each requirement has at least one linked documentation topic that informed it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Requirement {
+  /// D-prefixed topic IDs of documentation sections that informed this requirement
+  pub documentation_topics: Vec<topic::Topic>,
   /// N-prefixed topic IDs of source code topics that satisfy this requirement
   pub source_topics: Vec<topic::Topic>,
 }
@@ -1624,18 +1624,33 @@ pub fn load_audit_name(project_root: &Path) -> Result<String, String> {
 /// - `topic_context` for FeatureTopics (linked requirements)
 /// - `topic_context` for RequirementTopics (parent feature)
 pub fn rebuild_feature_context(audit_data: &mut AuditData) {
-  // Build reverse index: doc_topic -> [feature_topics]
-  let mut doc_to_features: HashMap<topic::Topic, Vec<topic::Topic>> = HashMap::new();
-  for (feature_topic, feature) in &audit_data.features {
-    for doc_topic in &feature.documentation_topics {
-      doc_to_features
+  // Build reverse index: doc_topic -> [requirement_topics]
+  let mut doc_to_requirements: HashMap<topic::Topic, Vec<topic::Topic>> = HashMap::new();
+  for (req_topic, requirement) in &audit_data.requirements {
+    for doc_topic in &requirement.documentation_topics {
+      doc_to_requirements
         .entry(doc_topic.clone())
         .or_default()
-        .push(feature_topic.clone());
+        .push(req_topic.clone());
     }
   }
 
   // Update expanded_context for documentation topics (TitledTopic/UnnamedTopic)
+  // Show the parent feature(s) of the requirements that link to this doc topic
+  let mut doc_to_features: HashMap<topic::Topic, Vec<topic::Topic>> = HashMap::new();
+  for (doc_topic, req_topics) in &doc_to_requirements {
+    for rt in req_topics {
+      if let Some(TopicMetadata::RequirementTopic { feature_topic, .. }) =
+        audit_data.topic_metadata.get(rt)
+      {
+        let features = doc_to_features.entry(doc_topic.clone()).or_default();
+        if !features.contains(feature_topic) {
+          features.push(feature_topic.clone());
+        }
+      }
+    }
+  }
+
   for (topic, metadata) in audit_data.topic_metadata.iter_mut() {
     let expanded_context = match metadata {
       TopicMetadata::TitledTopic {

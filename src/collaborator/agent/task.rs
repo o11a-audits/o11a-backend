@@ -4,16 +4,22 @@ use serde::Deserialize;
 
 use crate::collaborator::agent::context;
 use crate::collaborator::agent::router::{self, TaskSize};
+use crate::collaborator::models::AUTHOR_AGENT;
 use crate::core::{self, AST, AuditData, Feature, Requirement, topic};
+
+/// Raw requirement as returned by the LLM (no topic ID yet).
+#[derive(Deserialize)]
+struct LLMRequirement {
+  description: String,
+  documentation_topics: Vec<String>,
+}
 
 /// Raw feature as returned by the LLM (no topic ID yet).
 #[derive(Deserialize)]
 struct LLMFeature {
   name: String,
   description: String,
-  documentation_topics: Vec<String>,
-  #[serde(default)]
-  requirements: Vec<String>,
+  requirements: Vec<LLMRequirement>,
 }
 
 /// Render all documentation ASTs into a single JSON string for the LLM prompt.
@@ -56,26 +62,26 @@ fee distribution within the project).\n\n\
 For each feature, provide:\n\
 - `name`: a short, descriptive name\n\
 - `description`: a one-to-two sentence summary of the feature\n\
-- `documentation_topics`: an array of D-prefixed topic ID strings \
-(e.g., [\"D12\", \"D34\"]) for every documentation section, paragraph, \
-list, or code block that informs or describes this feature\n\
-- `requirements`: an array of strings, where each string is a \
-behavioral requirement that the implementation must satisfy. \
-Include both **happy-path** requirements (what the system should \
+- `requirements`: an array of requirement objects, where each object has:\n\
+  - `description`: a behavioral requirement that the implementation must \
+satisfy. Include both **happy-path** requirements (what the system should \
 do, e.g., \"Users can deposit tokens into the vault\") and \
 **non-happy-path** requirements (what the system must prevent, \
 e.g., \"Do not allow a user to withdraw another user's funds\"). \
-Each requirement should be a single, specific, testable \
-statement.\n\n\
+Each requirement should be a single, specific, testable statement.\n\
+  - `documentation_topics`: an array of D-prefixed topic ID strings \
+(e.g., [\"D12\", \"D34\"]) for every documentation section, paragraph, \
+list, or code block that informed this specific requirement. Each \
+requirement must have at least one documentation topic.\n\n\
 Rules:\n\
 - Every documentation topic ID that describes system behavior, \
-requirements, or constraints should appear in at least one feature. \
+requirements, or constraints should appear in at least one requirement. \
 Exclude boilerplate like tables of contents, version history, or \
 author credits.\n\
-- Choose the most specific section topic IDs to describe each feature, \
+- Choose the most specific section topic IDs to describe each requirement, \
 preferring paragraphs over sections, but choosing sections where all \
 contained paragraphs are relevant.\n\
-- A documentation topic may appear in multiple features if it is \
+- A documentation topic may appear in multiple requirements if it is \
 relevant to more than one.\n\
 - Do not invent topic IDs. Only use IDs present in the documentation.\n\
 - When in doubt whether something is one feature or two, prefer \
@@ -102,9 +108,12 @@ fn parse_features_response(response: &str) -> Result<ParsedFeatures, String> {
     .unwrap_or(response.trim());
   let json_str = json_str.strip_suffix("```").unwrap_or(json_str).trim();
 
-  let raw_features: Vec<LLMFeature> = serde_json::from_str(json_str)
-    .map_err(|e| {
-      eprintln!("Failed to parse features JSON: {}\nResponse:\n{}", e, json_str);
+  let raw_features: Vec<LLMFeature> =
+    serde_json::from_str(json_str).map_err(|e| {
+      eprintln!(
+        "Failed to parse features JSON: {}\nResponse:\n{}",
+        e, json_str
+      );
       format!("Failed to parse features JSON: {}", e)
     })?;
 
@@ -115,30 +124,31 @@ fn parse_features_response(response: &str) -> Result<ParsedFeatures, String> {
 
   for (i, raw) in raw_features.into_iter().enumerate() {
     let feature_topic = topic::new_feature_topic((i + 1) as i32);
-    let doc_topics = raw
-      .documentation_topics
-      .into_iter()
-      .map(|id| topic::new_topic(&id))
-      .collect();
 
     let mut requirement_topics = Vec::new();
-    for description in raw.requirements {
+    for raw_req in raw.requirements {
       req_counter += 1;
       let req_topic = topic::new_requirement_topic(req_counter);
       requirement_topics.push(req_topic.clone());
+      let doc_topics: Vec<topic::Topic> = raw_req
+        .documentation_topics
+        .into_iter()
+        .map(|id| topic::new_topic(&id))
+        .collect();
       topic_metadata.insert(
         req_topic.clone(),
         core::TopicMetadata::RequirementTopic {
           topic: req_topic.clone(),
-          description,
+          description: raw_req.description,
           feature_topic: feature_topic.clone(),
-          author_id: 0,
+          author_id: AUTHOR_AGENT,
           created_at: String::new(),
         },
       );
       requirements.insert(
         req_topic,
         Requirement {
+          documentation_topics: doc_topics,
           source_topics: Vec::new(),
         },
       );
@@ -150,18 +160,12 @@ fn parse_features_response(response: &str) -> Result<ParsedFeatures, String> {
         topic: feature_topic.clone(),
         name: raw.name,
         description: raw.description,
-        author_id: 0,
+        author_id: AUTHOR_AGENT,
         created_at: String::new(),
       },
     );
 
-    features.insert(
-      feature_topic,
-      Feature {
-        documentation_topics: doc_topics,
-        requirement_topics,
-      },
-    );
+    features.insert(feature_topic, Feature { requirement_topics });
   }
 
   Ok(ParsedFeatures {

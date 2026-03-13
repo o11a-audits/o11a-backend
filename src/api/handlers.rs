@@ -822,7 +822,6 @@ pub struct FeatureTopicResponse {
   pub description: String,
   pub author_id: i64,
   pub created_at: String,
-  pub documentation_topics: Vec<String>,
   pub requirement_topics: Vec<String>,
   pub context: Vec<SourceContextResponse>,
 }
@@ -835,6 +834,7 @@ pub struct RequirementTopicResponse {
   pub feature_topic: String,
   pub author_id: i64,
   pub created_at: String,
+  pub documentation_topics: Vec<String>,
   pub source_topics: Vec<String>,
   pub context: Vec<SourceContextResponse>,
 }
@@ -1034,14 +1034,6 @@ fn topic_metadata_to_response(
         description: description.clone(),
         author_id: *author_id,
         created_at: created_at.clone(),
-        documentation_topics: feature
-          .map(|f| {
-            f.documentation_topics
-              .iter()
-              .map(|t| t.id.clone())
-              .collect()
-          })
-          .unwrap_or_default(),
         requirement_topics: feature
           .map(|f| f.requirement_topics.iter().map(|t| t.id.clone()).collect())
           .unwrap_or_default(),
@@ -1063,6 +1055,14 @@ fn topic_metadata_to_response(
         feature_topic: feature_topic.id.clone(),
         author_id: *author_id,
         created_at: created_at.clone(),
+        documentation_topics: requirement
+          .map(|r| {
+            r.documentation_topics
+              .iter()
+              .map(|t| t.id.clone())
+              .collect()
+          })
+          .unwrap_or_default(),
         source_topics: requirement
           .map(|r| r.source_topics.iter().map(|t| t.id.clone()).collect())
           .unwrap_or_default(),
@@ -1736,7 +1736,7 @@ pub async fn get_features(
 pub async fn build_features(
   State(state): State<AppState>,
   Path(audit_id): Path<String>,
-) -> Result<Json<Vec<TopicMetadataResponse>>, StatusCode> {
+) -> Result<StatusCode, StatusCode> {
   println!("POST /api/v1/audits/{}/features/build", audit_id);
 
   // Render documentation JSON while holding the lock, then release it
@@ -1788,11 +1788,6 @@ pub async fn build_features(
       eprintln!("create_feature failed: {}", e);
       StatusCode::INTERNAL_SERVER_ERROR
     })?;
-    for dt in &feature.documentation_topics {
-      let _ =
-        db::add_feature_topic(&state.db, row.id, dt.id(), "documentation")
-          .await;
-    }
     // Persist requirements for this feature
     for req_topic in &feature.requirement_topics {
       // Get description from topic_metadata
@@ -1809,6 +1804,11 @@ pub async fn build_features(
           StatusCode::INTERNAL_SERVER_ERROR
         })?;
       if let Some(req) = parsed.requirements.get(req_topic) {
+        for dt in &req.documentation_topics {
+          let _ =
+            db::add_requirement_documentation_topic(&state.db, req_row.id, dt.id())
+              .await;
+        }
         for st in &req.source_topics {
           let _ =
             db::add_requirement_source_topic(&state.db, req_row.id, st.id())
@@ -1836,22 +1836,11 @@ pub async fn build_features(
   // Insert TopicMetadata from parsed result
   audit_data.topic_metadata.extend(parsed.topic_metadata);
 
-  let feature_keys: Vec<_> = parsed.features.keys().cloned().collect();
   audit_data.features = parsed.features;
   audit_data.requirements = parsed.requirements;
   crate::core::rebuild_feature_context(audit_data);
 
-  let response: Vec<TopicMetadataResponse> = feature_keys
-    .iter()
-    .filter_map(|ft| {
-      audit_data
-        .topic_metadata
-        .get(ft)
-        .map(|m| topic_metadata_to_response(ft, m, audit_data))
-    })
-    .collect();
-
-  Ok(Json(response))
+  Ok(StatusCode::OK)
 }
 
 #[derive(Debug, Deserialize)]
@@ -1885,7 +1874,6 @@ pub async fn create_feature(
 
   let feature_topic = topic::new_feature_topic(row.id as i32);
   let feature = Feature {
-    documentation_topics: Vec::new(),
     requirement_topics: Vec::new(),
   };
 
@@ -1944,99 +1932,98 @@ pub struct AddFeatureTopicRequest {
   pub topic_id: String,
 }
 
-/// POST /api/v1/audits/:audit_id/features/:feature_id/documentation_topics
-/// Adds a documentation topic to a feature.
-pub async fn add_feature_documentation_topic(
+/// POST /api/v1/audits/:audit_id/requirements/:requirement_id/documentation_topics
+/// Adds a documentation topic to a requirement.
+pub async fn add_requirement_documentation_topic(
   State(state): State<AppState>,
-  Path((audit_id, feature_id)): Path<(String, i64)>,
+  Path((audit_id, requirement_id)): Path<(String, i64)>,
   Json(payload): Json<AddFeatureTopicRequest>,
 ) -> Result<Json<TopicMetadataResponse>, StatusCode> {
   println!(
-    "POST /api/v1/audits/{}/features/{}/documentation_topics",
-    audit_id, feature_id
+    "POST /api/v1/audits/{}/requirements/{}/documentation_topics",
+    audit_id, requirement_id
   );
 
-  db::add_feature_topic(
+  db::add_requirement_documentation_topic(
     &state.db,
-    feature_id,
+    requirement_id,
     &payload.topic_id,
-    "documentation",
   )
   .await
   .map_err(|e| {
-    eprintln!("add_feature_topic failed: {}", e);
+    eprintln!("add_requirement_documentation_topic failed: {}", e);
     StatusCode::INTERNAL_SERVER_ERROR
   })?;
 
   let mut ctx = state.data_context.lock().map_err(|e| {
-    eprintln!("Mutex poisoned in add_feature_documentation_topic: {}", e);
+    eprintln!("Mutex poisoned in add_requirement_documentation_topic: {}", e);
     StatusCode::INTERNAL_SERVER_ERROR
   })?;
   let audit_data = ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
-  let feature_topic = topic::new_feature_topic(feature_id as i32);
-  let feature = audit_data
-    .features
-    .get_mut(&feature_topic)
+  let req_topic = topic::new_requirement_topic(requirement_id as i32);
+  let requirement = audit_data
+    .requirements
+    .get_mut(&req_topic)
     .ok_or(StatusCode::NOT_FOUND)?;
 
   let new_topic = topic::new_topic(&payload.topic_id);
-  if !feature.documentation_topics.contains(&new_topic) {
-    feature.documentation_topics.push(new_topic);
+  if !requirement.documentation_topics.contains(&new_topic) {
+    requirement.documentation_topics.push(new_topic);
   }
 
   crate::core::rebuild_feature_context(audit_data);
   let metadata = audit_data
     .topic_metadata
-    .get(&feature_topic)
+    .get(&req_topic)
     .ok_or(StatusCode::NOT_FOUND)?;
   let response =
-    topic_metadata_to_response(&feature_topic, metadata, audit_data);
+    topic_metadata_to_response(&req_topic, metadata, audit_data);
 
   Ok(Json(response))
 }
 
-/// DELETE /api/v1/audits/:audit_id/features/:feature_id/documentation_topics/:topic_id
-/// Removes a documentation topic from a feature.
-pub async fn remove_feature_documentation_topic(
+/// DELETE /api/v1/audits/:audit_id/requirements/:requirement_id/documentation_topics/:topic_id
+/// Removes a documentation topic from a requirement.
+pub async fn remove_requirement_documentation_topic(
   State(state): State<AppState>,
-  Path((audit_id, feature_id, topic_id)): Path<(String, i64, String)>,
+  Path((audit_id, requirement_id, topic_id)): Path<(String, i64, String)>,
 ) -> Result<Json<TopicMetadataResponse>, StatusCode> {
   println!(
-    "DELETE /api/v1/audits/{}/features/{}/documentation_topics/{}",
-    audit_id, feature_id, topic_id
+    "DELETE /api/v1/audits/{}/requirements/{}/documentation_topics/{}",
+    audit_id, requirement_id, topic_id
   );
 
-  db::remove_feature_topic(&state.db, feature_id, &topic_id, "documentation")
+  db::remove_requirement_documentation_topic(&state.db, requirement_id, &topic_id)
     .await
     .map_err(|e| {
-      eprintln!("remove_feature_topic failed: {}", e);
+      eprintln!("remove_requirement_documentation_topic failed: {}", e);
       StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
   let mut ctx = state.data_context.lock().map_err(|e| {
     eprintln!(
-      "Mutex poisoned in remove_feature_documentation_topic: {}",
+      "Mutex poisoned in remove_requirement_documentation_topic: {}",
       e
     );
     StatusCode::INTERNAL_SERVER_ERROR
   })?;
   let audit_data = ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
-  let feature_topic = topic::new_feature_topic(feature_id as i32);
-  let feature = audit_data
-    .features
-    .get_mut(&feature_topic)
+  let req_topic = topic::new_requirement_topic(requirement_id as i32);
+  let requirement = audit_data
+    .requirements
+    .get_mut(&req_topic)
     .ok_or(StatusCode::NOT_FOUND)?;
 
   let remove_topic = topic::new_topic(&topic_id);
-  feature.documentation_topics.retain(|t| t != &remove_topic);
+  requirement.documentation_topics.retain(|t| t != &remove_topic);
 
   crate::core::rebuild_feature_context(audit_data);
   let metadata = audit_data
     .topic_metadata
-    .get(&feature_topic)
+    .get(&req_topic)
     .ok_or(StatusCode::NOT_FOUND)?;
   let response =
-    topic_metadata_to_response(&feature_topic, metadata, audit_data);
+    topic_metadata_to_response(&req_topic, metadata, audit_data);
 
   Ok(Json(response))
 }
@@ -2045,61 +2032,60 @@ pub async fn remove_feature_documentation_topic(
 // Documentation routes
 // ============================================
 
-/// GET /api/v1/audits/:audit_id/features/:topic_id
-/// Returns feature IDs linked to a topic.
-/// For feature topics, returns the feature itself.
-/// For requirement topics, returns the parent feature.
-/// For source topics, returns features via requirements that reference this topic.
-pub async fn get_topic_features(
+/// GET /api/v1/audits/:audit_id/requirements/topic/:topic_id
+/// Returns requirement IDs linked to a topic.
+/// - Requirement topics: returns itself
+/// - Feature topics: returns all the feature's requirement_topics
+/// - Source topics (N-prefixed): reverse-lookups requirements with this source_topic
+/// - Documentation topics (D-prefixed): reverse-lookups requirements with this documentation_topic
+pub async fn get_topic_requirements(
   State(state): State<AppState>,
   Path((audit_id, topic_id)): Path<(String, String)>,
 ) -> Result<Json<Vec<String>>, StatusCode> {
   println!(
-    "GET /api/v1/audits/{}/features/{}",
+    "GET /api/v1/audits/{}/requirements/topic/{}",
     audit_id, topic_id
   );
 
   let ctx = state.data_context.lock().map_err(|e| {
-    eprintln!("Mutex poisoned in get_topic_features: {}", e);
+    eprintln!("Mutex poisoned in get_topic_requirements: {}", e);
     StatusCode::INTERNAL_SERVER_ERROR
   })?;
 
   let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
   let t = new_topic(&topic_id);
 
-  let mut feature_topics: Vec<topic::Topic> = Vec::new();
+  let mut requirement_topics: Vec<topic::Topic> = Vec::new();
   match t.kind() {
-    Some(TopicKind::Feature) => {
-      feature_topics.push(t);
-    }
     Some(TopicKind::Requirement) => {
-      if let Some(metadata) = audit_data.topic_metadata.get(&t) {
-        if let Some(ft) = metadata.target_topic() {
-          feature_topics.push(ft.clone());
+      requirement_topics.push(t);
+    }
+    Some(TopicKind::Feature) => {
+      if let Some(feature) = audit_data.features.get(&t) {
+        for rt in &feature.requirement_topics {
+          if !requirement_topics.contains(rt) {
+            requirement_topics.push(rt.clone());
+          }
         }
       }
     }
     _ => {
       for (req_topic, req) in &audit_data.requirements {
-        if req.source_topics.contains(&t) {
-          if let Some(metadata) = audit_data.topic_metadata.get(req_topic) {
-            if let Some(ft) = metadata.target_topic() {
-              if !feature_topics.contains(ft) {
-                feature_topics.push(ft.clone());
-              }
-            }
+        if req.source_topics.contains(&t) || req.documentation_topics.contains(&t) {
+          if !requirement_topics.contains(req_topic) {
+            requirement_topics.push(req_topic.clone());
           }
         }
       }
     }
   }
 
-  let feature_ids: Vec<String> = feature_topics
+  let requirement_ids: Vec<String> = requirement_topics
     .iter()
-    .map(|ft| ft.id.clone())
+    .map(|rt| rt.id.clone())
     .collect();
 
-  Ok(Json(feature_ids))
+  Ok(Json(requirement_ids))
 }
 
 #[derive(Debug, Deserialize)]
@@ -2108,11 +2094,11 @@ pub struct DocumentationPanelRequest {
 }
 
 /// POST /api/v1/audits/:audit_id/documentation
-/// Returns rendered HTML panel of documentation from the given feature topics.
+/// Returns rendered HTML panel of documentation linked to the given topics.
 /// Accepts feature (F), requirement (R), or any other topic IDs.
-/// - Feature topics: directly use their documentation_topics
-/// - Requirement topics: resolve to parent feature, then use its documentation_topics
-/// - Other topics: reverse-lookup requirements with this source_topic, then their features
+/// - Feature topics: collect documentation from all their requirements
+/// - Requirement topics: use their documentation_topics directly
+/// - Other topics: reverse-lookup requirements with this source_topic
 pub async fn get_documentation_panel(
   State(state): State<AppState>,
   Path(audit_id): Path<String>,
@@ -2127,35 +2113,32 @@ pub async fn get_documentation_panel(
 
   let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
 
-  // Resolve all input topic IDs to feature topics
-  let mut feature_topics: Vec<topic::Topic> = Vec::new();
+  // Resolve all input topic IDs to requirement topics
+  let mut requirement_topics: Vec<topic::Topic> = Vec::new();
   for id in &payload.feature_topics {
     let t = new_topic(id);
     match t.kind() {
       Some(TopicKind::Feature) => {
-        if !feature_topics.contains(&t) {
-          feature_topics.push(t);
+        // Collect all requirements for this feature
+        if let Some(feature) = audit_data.features.get(&t) {
+          for rt in &feature.requirement_topics {
+            if !requirement_topics.contains(rt) {
+              requirement_topics.push(rt.clone());
+            }
+          }
         }
       }
       Some(TopicKind::Requirement) => {
-        if let Some(metadata) = audit_data.topic_metadata.get(&t) {
-          if let Some(ft) = metadata.target_topic() {
-            if !feature_topics.contains(ft) {
-              feature_topics.push(ft.clone());
-            }
-          }
+        if !requirement_topics.contains(&t) {
+          requirement_topics.push(t);
         }
       }
       _ => {
         // Reverse lookup: find requirements that have this topic as a source_topic
         for (req_topic, req) in &audit_data.requirements {
           if req.source_topics.contains(&t) {
-            if let Some(metadata) = audit_data.topic_metadata.get(req_topic) {
-              if let Some(ft) = metadata.target_topic() {
-                if !feature_topics.contains(ft) {
-                  feature_topics.push(ft.clone());
-                }
-              }
+            if !requirement_topics.contains(req_topic) {
+              requirement_topics.push(req_topic.clone());
             }
           }
         }
@@ -2170,7 +2153,7 @@ pub async fn get_documentation_panel(
     .unwrap_or_default();
 
   let html = super::topic_view::build_documentation_panel(
-    &feature_topics,
+    &requirement_topics,
     audit_data,
     &source_text_cache,
   );
@@ -2186,6 +2169,8 @@ pub async fn get_documentation_panel(
 pub struct CreateRequirementRequest {
   pub description: String,
   pub author_id: i64,
+  #[serde(default)]
+  pub documentation_topics: Vec<String>,
 }
 
 /// POST /api/v1/audits/:audit_id/features/:feature_id/requirements
@@ -2212,10 +2197,24 @@ pub async fn create_requirement(
     StatusCode::INTERNAL_SERVER_ERROR
   })?;
 
+  // Persist documentation topics for this requirement
+  for dt_id in &payload.documentation_topics {
+    let _ =
+      db::add_requirement_documentation_topic(&state.db, row.id, dt_id)
+        .await;
+  }
+
   let feature_topic = topic::new_feature_topic(feature_id as i32);
   let req_topic = topic::new_requirement_topic(row.id as i32);
 
+  let doc_topics: Vec<topic::Topic> = payload
+    .documentation_topics
+    .iter()
+    .map(|id| topic::new_topic(id))
+    .collect();
+
   let requirement = core::Requirement {
+    documentation_topics: doc_topics,
     source_topics: Vec::new(),
   };
 

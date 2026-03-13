@@ -1675,20 +1675,20 @@ fn topic_kind_label(metadata: &TopicMetadata) -> &'static str {
 // Documentation API helpers
 // ============================================================================
 
-/// Build an HTML panel from a list of feature topics by collecting all their
+/// Build an HTML panel from a list of requirement topics by collecting all their
 /// documentation topics' source contexts and rendering them as a grouped source panel.
-/// Deduplicates documentation topics across features.
+/// Deduplicates documentation topics across requirements.
 pub fn build_documentation_panel(
-  feature_topics: &[topic::Topic],
+  requirement_topics: &[topic::Topic],
   audit_data: &AuditData,
   source_text_cache: &std::collections::HashMap<String, String>,
 ) -> String {
   let mut all_contexts: Vec<SourceContext> = Vec::new();
   let mut seen_doc_topics: Vec<topic::Topic> = Vec::new();
 
-  for feature_topic in feature_topics {
-    if let Some(feature) = audit_data.features.get(feature_topic) {
-      for doc_topic in &feature.documentation_topics {
+  for req_topic in requirement_topics {
+    if let Some(requirement) = audit_data.requirements.get(req_topic) {
+      for doc_topic in &requirement.documentation_topics {
         if !seen_doc_topics.contains(doc_topic) {
           seen_doc_topics.push(doc_topic.clone());
         }

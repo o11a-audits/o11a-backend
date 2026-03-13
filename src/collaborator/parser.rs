@@ -166,9 +166,7 @@ fn scan_inline_nodes(
 /// Flush the text buffer into a Text node if non-empty.
 fn flush_text(buf: &mut String, nodes: &mut Vec<CommentNode>) {
   if !buf.is_empty() {
-    nodes.push(CommentNode::Text {
-      value: buf.clone(),
-    });
+    nodes.push(CommentNode::Text { value: buf.clone() });
     buf.clear();
   }
 }
@@ -298,18 +296,17 @@ fn tokenize_comment_code(
       if doc_parser::is_keyword(&ident) {
         tokens.push(CommentNode::CodeKeyword { value: ident });
       } else {
-        let (referenced_topic, kind, referenced_name) =
-          if let Some(metadata) =
-            doc_parser::find_declaration_by_name(audit_data, &ident)
-          {
-            (
-              Some(metadata.topic().clone()),
-              doc_parser::get_named_topic_kind(metadata),
-              metadata.name().map(|n| n.to_string()),
-            )
-          } else {
-            (None, None, None)
-          };
+        let (referenced_topic, kind, referenced_name) = if let Some(metadata) =
+          doc_parser::find_declaration_by_name(audit_data, &ident)
+        {
+          (
+            Some(metadata.topic().clone()),
+            doc_parser::get_named_topic_kind(metadata),
+            metadata.name().map(|n| n.to_string()),
+          )
+        } else {
+          (None, None, None)
+        };
 
         tokens.push(CommentNode::CodeIdentifier {
           value: ident,
@@ -325,9 +322,7 @@ fn tokenize_comment_code(
   }
 
   if !text_buffer.is_empty() {
-    tokens.push(CommentNode::CodeText {
-      value: text_buffer,
-    });
+    tokens.push(CommentNode::CodeText { value: text_buffer });
   }
 
   tokens
