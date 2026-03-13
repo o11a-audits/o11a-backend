@@ -365,6 +365,21 @@ enum BreadcrumbPart<'a> {
 fn get_breadcrumb_parts<'a>(
   metadata: &'a TopicMetadata,
 ) -> Vec<BreadcrumbPart<'a>> {
+  // Features: just the feature topic, no "global" prefix
+  if matches!(metadata, TopicMetadata::FeatureTopic { .. }) {
+    return vec![BreadcrumbPart::Topic(metadata.topic())];
+  }
+
+  // Requirements: parent feature then "Requirement" label
+  if matches!(metadata, TopicMetadata::RequirementTopic { .. }) {
+    if let Some(feature_topic) = metadata.target_topic() {
+      return vec![
+        BreadcrumbPart::Topic(feature_topic),
+        BreadcrumbPart::Text("Requirement"),
+      ];
+    }
+  }
+
   match metadata.scope() {
     Scope::Global => {
       vec![
@@ -517,40 +532,60 @@ fn render_subscope_title(
 // Source Text Helpers
 // ============================================================================
 
+/// Render a metadata header for authored content (features, requirements).
+/// The keyword is rendered at full size/opacity; author and date are subtle.
+fn render_authored_header(
+  kind: &str,
+  author_id: i64,
+  created_at: &str,
+) -> String {
+  format!(
+    "<div style=\"display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.25rem;\">\
+     <span class=\"keyword\">{}</span> \
+     <span class=\"comment-author\" style=\"font-size: 0.8em; opacity: 0.7;\">author:{}</span> \
+     <span class=\"comment-time\" style=\"font-size: 0.8em; opacity: 0.7;\">{}</span></div>",
+    html_escape(kind),
+    author_id,
+    html_escape(created_at),
+  )
+}
+
 /// Render source text HTML for a topic from its data.
 /// Returns None if the topic has no renderable content.
 pub fn render_source_text(
   topic: &topic::Topic,
   audit_data: &AuditData,
 ) -> Option<String> {
-  // Feature topics: render name and description
-  if let Some(TopicMetadata::FeatureTopic { description, .. }) =
-    audit_data.topic_metadata.get(topic)
+  // Feature topics: render with comment-style header
+  if let Some(TopicMetadata::FeatureTopic {
+    description,
+    author_id,
+    created_at,
+    ..
+  }) = audit_data.topic_metadata.get(topic)
   {
-    return Some(format!(
-      "<p style=\"margin: 0\">{}</p>",
-      formatting::format_topic_block(
-        topic,
-        &format!("{} {}", formatting::format_keyword("feat"), description),
-        "feature",
-        topic
-      )
-    ));
+    let header = render_authored_header("feat", *author_id, created_at);
+    let content = format!(
+      "{}<p style=\"margin: 0\">{}</p>",
+      header, description
+    );
+    return Some(formatting::format_topic_block(topic, &content, "feature", topic));
   }
 
-  // Requirement topics: render description as a paragraph
-  if let Some(TopicMetadata::RequirementTopic { description, .. }) =
-    audit_data.topic_metadata.get(topic)
+  // Requirement topics: render with comment-style header
+  if let Some(TopicMetadata::RequirementTopic {
+    description,
+    author_id,
+    created_at,
+    ..
+  }) = audit_data.topic_metadata.get(topic)
   {
-    return Some(format!(
-      "<p style=\"margin: 0\">{}</p>",
-      formatting::format_topic_block(
-        topic,
-        &format!("{} {}", formatting::format_keyword("req"), description),
-        "requirement",
-        topic
-      )
-    ));
+    let header = render_authored_header("req", *author_id, created_at);
+    let content = format!(
+      "{}<p style=\"margin: 0\">{}</p>",
+      header, description
+    );
+    return Some(formatting::format_topic_block(topic, &content, "requirement", topic));
   }
 
   // Global builtins
@@ -1196,10 +1231,32 @@ pub fn build_topic_panel_prefix(
 ) -> String {
   let topic = topic::new_topic(topic_id);
   let metadata = match audit_data.topic_metadata.get(&topic) {
-    Some(m) if m.target_topic().is_some() => m,
+    Some(m @ TopicMetadata::CommentTopic { .. })
+      if m.target_topic().is_some() =>
+    {
+      m
+    }
+    Some(m @ TopicMetadata::RequirementTopic { .. }) => m,
     _ => return String::new(),
   };
 
+  // For requirements, render as a standalone topic node in its own group
+  if matches!(metadata, TopicMetadata::RequirementTopic { .. }) {
+    let kind_label = "Requirement";
+    let mut html = String::new();
+    html.push_str(
+      "<div class=\"component-group\" style=\"margin-bottom: 0.5rem;\">",
+    );
+    html.push_str(&format!(
+      "<div class=\"topic-reference-title scope-standard\" style=\"{}\"><span style=\"{}\"><code><span>{}</span></code></span></div>",
+      SCOPE_STYLE, SCOPE_ITEM_STYLE, html_escape(kind_label)
+    ));
+    html.push_str(&render_topic_node(metadata, audit_data, source_text_cache));
+    html.push_str("</div>");
+    return html;
+  }
+
+  // For comments, render the parent chain
   let chain = collect_parent_chain(metadata, audit_data);
   let total = chain.len();
   let mut html = String::new();
@@ -1273,7 +1330,7 @@ pub fn build_topic_view(
         source_text_cache,
         true,
       );
-      let breadcrumb = render_history_breadcrumb(view_metadata, audit_data);
+      let breadcrumb = render_history_breadcrumb(metadata, audit_data);
       let css = render_highlight_css(view_metadata.topic().id(), view_metadata);
       (topic_html, expanded_html, breadcrumb, css)
     }
@@ -1514,29 +1571,46 @@ fn build_comment_thread_html(
 
 /// Render a non-comment topic as a thread node.
 /// Shows a metadata header (kind + name) followed by the topic's source text.
+/// For features and requirements, the header is already included in render_source_text.
 fn render_topic_node(
   metadata: &TopicMetadata,
   audit_data: &AuditData,
   source_text_cache: &std::collections::HashMap<String, String>,
 ) -> String {
   let topic_id = metadata.topic().id();
-  let kind_label = topic_kind_label(metadata);
-  let name = metadata.name().unwrap_or(topic_id);
 
-  let meta_html = format!(
-    "<div style=\"{}\"><span class=\"comment-type keyword\">{}</span> \
-     <span class=\"comment-author\">{}</span></div>",
-    COMMENT_META_STYLE,
-    html_escape(kind_label),
-    html_escape(name),
+  // Features and requirements include their own authored header in render_source_text
+  let has_authored_header = matches!(
+    metadata,
+    TopicMetadata::FeatureTopic { .. } | TopicMetadata::RequirementTopic { .. }
   );
+
+  let meta_html = if has_authored_header {
+    String::new()
+  } else {
+    let kind_label = topic_kind_label(metadata);
+    let name = metadata.name().unwrap_or(topic_id);
+    format!(
+      "<div style=\"{}\"><span class=\"comment-type keyword\">{}</span> \
+       <span class=\"comment-author\">{}</span></div>",
+      COMMENT_META_STYLE,
+      html_escape(kind_label),
+      html_escape(name),
+    )
+  };
 
   let content_html =
     get_source_text(metadata.topic(), audit_data, source_text_cache);
 
+  let content_class = if has_authored_header {
+    "comment-content"
+  } else {
+    "comment-content code-style"
+  };
+
   let inner = format!(
-    "{}<div class=\"comment-content code-style\">{}</div>",
-    meta_html, content_html
+    "{}<div class=\"{}\">{}</div>",
+    meta_html, content_class, content_html
   );
 
   let style = format!("{} {}", COMBINED_PANEL_STYLE, first_last_style(0, 1));
