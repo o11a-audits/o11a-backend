@@ -1151,15 +1151,25 @@ pub fn render_grouped_source_panel(
     }
 
     // Render nested-level children, grouped by subscope
+    // Skip the subscope title if the subscope is already rendered as a scope reference
     for nested_group in group.nested_references() {
+      let subscope_already_rendered = group
+        .scope_references()
+        .iter()
+        .any(|r| r.reference_topic() == nested_group.subscope());
+      let subscope_title = if subscope_already_rendered {
+        None
+      } else {
+        Some(nested_group.subscope())
+      };
       let (nested_html, next_index) = render_source_children(
         nested_group.children(),
         group.scope(),
         group.is_in_scope(),
         index,
         total_references,
-        0,
-        Some(nested_group.subscope()),
+        if subscope_already_rendered { 1 } else { 0 },
+        subscope_title,
         audit_data,
         source_text_cache,
       );

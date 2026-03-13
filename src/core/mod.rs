@@ -1704,6 +1704,41 @@ pub fn load_audit_name(project_root: &Path) -> Result<String, String> {
   Ok(audit_name)
 }
 
+/// Builds nested references for invariants under their parent threats.
+/// Each threat with invariants becomes a NestedSourceContext (subscope = threat topic)
+/// containing only the invariant references as children.
+/// The threat itself is expected to be in scope_references already.
+fn build_invariant_nested_refs(
+  threat_topics: &[topic::Topic],
+  threats: &std::collections::BTreeMap<topic::Topic, Threat>,
+) -> Vec<NestedSourceContext> {
+  let mut nested = Vec::new();
+  for tt in threat_topics {
+    let threat = match threats.get(tt) {
+      Some(t) if !t.invariant_topics.is_empty() => t,
+      _ => continue,
+    };
+    let sort_key = tt.numeric_id().map(|id| id as usize);
+    let children = threat
+      .invariant_topics
+      .iter()
+      .map(|inv_topic| {
+        let inv_sort_key = inv_topic.numeric_id().map(|id| id as usize);
+        SourceChild::Reference(Reference::ProjectReference {
+          reference_topic: inv_topic.clone(),
+          sort_key: inv_sort_key,
+        })
+      })
+      .collect();
+    nested.push(NestedSourceContext {
+      subscope: tt.clone(),
+      sort_key,
+      children,
+    });
+  }
+  nested
+}
+
 /// Rebuilds feature-related context:
 /// - `expanded_context` on documentation TitledTopics/UnnamedTopics (linked features)
 /// - `topic_context` for FeatureTopics (linked requirements)
@@ -1765,7 +1800,8 @@ pub fn rebuild_feature_context(audit_data: &mut AuditData) {
       .collect();
   }
 
-  // Build context for FeatureTopics: feature itself + requirements + threats
+  // Build context for FeatureTopics: feature + requirements + threats as scope refs,
+  // invariants as nested refs indented under their parent threats
   for (feature_topic, metadata) in &audit_data.topic_metadata {
     if !matches!(metadata, TopicMetadata::FeatureTopic { .. }) {
       continue;
@@ -1785,19 +1821,21 @@ pub fn rebuild_feature_context(audit_data: &mut AuditData) {
         sort_key,
       });
     }
-    for at in &feature.threat_topics {
-      let sort_key = at.numeric_id().map(|id| id as usize);
+    for tt in &feature.threat_topics {
+      let sort_key = tt.numeric_id().map(|id| id as usize);
       scope_references.push(Reference::ProjectReference {
-        reference_topic: at.clone(),
+        reference_topic: tt.clone(),
         sort_key,
       });
     }
+    let nested_references =
+      build_invariant_nested_refs(&feature.threat_topics, &audit_data.threats);
     let context = vec![SourceContext {
       scope: feature_topic.clone(),
       sort_key: Some(0),
       is_in_scope: true,
       scope_references,
-      nested_references: vec![],
+      nested_references,
     }];
     audit_data
       .topic_context
@@ -1824,19 +1862,30 @@ pub fn rebuild_feature_context(audit_data: &mut AuditData) {
     }
   }
 
-  // Build context for ThreatTopics: parent feature as a SourceContext entry
+  // Build context for ThreatTopics: parent feature + threat as scope refs,
+  // invariants as nested refs indented under the threat
   for (threat_topic, metadata) in &audit_data.topic_metadata {
     if let TopicMetadata::ThreatTopic { feature_topic, .. } = metadata {
-      let sort_key = feature_topic.numeric_id().map(|id| id as usize);
+      let feat_sort_key = feature_topic.numeric_id().map(|id| id as usize);
+      let threat_sort_key = threat_topic.numeric_id().map(|id| id as usize);
+      let scope_references = vec![
+        Reference::ProjectReference {
+          reference_topic: feature_topic.clone(),
+          sort_key: feat_sort_key,
+        },
+        Reference::ProjectReference {
+          reference_topic: threat_topic.clone(),
+          sort_key: threat_sort_key,
+        },
+      ];
+      let nested_references =
+        build_invariant_nested_refs(&[threat_topic.clone()], &audit_data.threats);
       let context = vec![SourceContext {
         scope: threat_topic.clone(),
-        sort_key,
+        sort_key: threat_sort_key,
         is_in_scope: true,
-        scope_references: vec![Reference::ProjectReference {
-          reference_topic: feature_topic.clone(),
-          sort_key,
-        }],
-        nested_references: vec![],
+        scope_references,
+        nested_references,
       }];
       audit_data
         .topic_context
