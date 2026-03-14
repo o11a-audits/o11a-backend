@@ -61,8 +61,25 @@ pub async fn chat_completion(
   task_size: TaskSize,
   system_message: &str,
   prompt: &str,
+  dry_run_label: Option<&str>,
 ) -> Result<String, String> {
-  if let Ok(path) = std::env::var("AGENT_DRY_RUN") {
+  if let Ok(base_path) = std::env::var("AGENT_DRY_RUN") {
+    let path = match dry_run_label {
+      Some(label) => {
+        let p = std::path::Path::new(&base_path);
+        let stem = p.file_stem().unwrap_or_default().to_string_lossy();
+        let ext = p
+          .extension()
+          .map(|e| format!(".{}", e.to_string_lossy()))
+          .unwrap_or_default();
+        let parent = p.parent().unwrap_or(std::path::Path::new(""));
+        parent
+          .join(format!("{}_{}{}", stem, label, ext))
+          .to_string_lossy()
+          .to_string()
+      }
+      None => base_path,
+    };
     let model = match task_size {
       TaskSize::Large => LARGE_MODEL,
       TaskSize::Small => SMALL_MODEL,

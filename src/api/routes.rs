@@ -106,6 +106,10 @@ pub fn create_router(state: AppState) -> Router {
       post(handlers::build_features),
     )
     .route(
+      "/api/v1/audits/:audit_id/threats/build",
+      post(handlers::build_threats),
+    )
+    .route(
       "/api/v1/audits/:audit_id/requirements/:requirement_id/documentation_topics",
       post(handlers::add_requirement_documentation_topic),
     )

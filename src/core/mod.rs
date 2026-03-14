@@ -231,7 +231,6 @@ pub struct Requirement {
 }
 
 /// A threat describing how an attacker could compromise a feature.
-/// Derived from adversarial reasoning rather than documentation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Threat {
   /// I-prefixed topic IDs of invariants that defend against this threat

@@ -1966,3 +1966,42 @@ pub fn build_agent_topic_context(
     }),
   }
 }
+
+/// Render a single feature and its requirements as JSON for the threat-building prompt.
+/// Returns `None` if the feature topic has no metadata.
+pub fn render_feature_for_threats(
+  feature_topic: &topic::Topic,
+  feature: &core::Feature,
+  audit_data: &AuditData,
+) -> Option<String> {
+  let (name, description) = match audit_data.topic_metadata.get(feature_topic) {
+    Some(TopicMetadata::FeatureTopic { name, description, .. }) => {
+      (name.clone(), description.clone())
+    }
+    _ => return None,
+  };
+
+  let reqs: Vec<serde_json::Value> = feature
+    .requirement_topics
+    .iter()
+    .filter_map(|rt| {
+      if let Some(TopicMetadata::RequirementTopic { description, .. }) =
+        audit_data.topic_metadata.get(rt)
+      {
+        Some(serde_json::json!({
+          "description": description,
+        }))
+      } else {
+        None
+      }
+    })
+    .collect();
+
+  let feature_obj = serde_json::json!({
+    "name": name,
+    "description": description,
+    "requirements": reqs,
+  });
+
+  Some(serde_json::to_string(&feature_obj).unwrap_or_default())
+}

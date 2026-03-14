@@ -665,7 +665,7 @@ pub async fn remove_feature_topic(
 }
 
 /// Deletes all features and their associated data for an audit.
-/// Cascades: requirement_documentation_topics → requirement_source_topics → requirements → feature_topics → features.
+/// Cascades all feature-related data for an audit.
 pub async fn delete_all_features_for_audit(
   pool: &SqlitePool,
   audit_id: &str,
@@ -1182,6 +1182,56 @@ pub async fn create_threat(
     .await
 }
 
+/// Deletes all threats and invariants for an audit, leaving features and
+/// requirements intact.
+pub async fn delete_all_threats_for_audit(
+  pool: &SqlitePool,
+  audit_id: &str,
+) -> Result<(), sqlx::Error> {
+  // Delete invariant source topic associations
+  sqlx::query(
+    r#"
+        DELETE FROM invariant_source_topics WHERE invariant_id IN (
+            SELECT i.id FROM invariants i
+            JOIN threats t ON i.threat_id = t.id
+            JOIN features f ON t.feature_id = f.id
+            WHERE f.audit_id = ?
+        )
+        "#,
+  )
+  .bind(audit_id)
+  .execute(pool)
+  .await?;
+
+  // Delete invariants
+  sqlx::query(
+    r#"
+        DELETE FROM invariants WHERE threat_id IN (
+            SELECT t.id FROM threats t
+            JOIN features f ON t.feature_id = f.id
+            WHERE f.audit_id = ?
+        )
+        "#,
+  )
+  .bind(audit_id)
+  .execute(pool)
+  .await?;
+
+  // Delete threats
+  sqlx::query(
+    r#"
+        DELETE FROM threats WHERE feature_id IN (
+            SELECT id FROM features WHERE audit_id = ?
+        )
+        "#,
+  )
+  .bind(audit_id)
+  .execute(pool)
+  .await?;
+
+  Ok(())
+}
+
 /// Deletes a threat and its associated invariants
 pub async fn delete_threat(
   pool: &SqlitePool,
@@ -1309,3 +1359,4 @@ pub async fn remove_invariant_source_topic(
   .await?;
   Ok(())
 }
+
