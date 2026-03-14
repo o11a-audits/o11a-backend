@@ -25,12 +25,21 @@ pub fn load_project(
       format!("Failed to load document files from documents.txt: {}", e)
     })?;
 
+  // Load security notes from security.md (optional)
+  let security_notes = core::load_security_notes(project_root)
+    .map_err(|e| format!("Failed to load security notes: {}", e))?;
+
   // Create the audit if it doesn't exist
   {
     let mut ctx = data_context
       .lock()
       .map_err(|e| format!("Mutex poisoned while creating audit: {}", e))?;
-    if !ctx.create_audit(audit_id.to_string(), audit_name, in_scope_files) {
+    if !ctx.create_audit(
+      audit_id.to_string(),
+      audit_name,
+      in_scope_files,
+      security_notes,
+    ) {
       return Err(format!("Audit '{}' already exists", audit_id));
     }
   }

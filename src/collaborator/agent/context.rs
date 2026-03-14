@@ -1967,6 +1967,88 @@ pub fn build_agent_topic_context(
   }
 }
 
+/// Render all features with their threats and invariants as JSON for the
+/// security coverage review prompt.
+pub fn render_all_features_with_threats(
+  audit_data: &AuditData,
+) -> String {
+  let features: Vec<serde_json::Value> = audit_data
+    .features
+    .iter()
+    .filter_map(|(ft, feature)| {
+      let (name, description) =
+        match audit_data.topic_metadata.get(ft) {
+          Some(TopicMetadata::FeatureTopic {
+            name, description, ..
+          }) => (name.clone(), description.clone()),
+          _ => return None,
+        };
+
+      let reqs: Vec<serde_json::Value> = feature
+        .requirement_topics
+        .iter()
+        .filter_map(|rt| {
+          if let Some(TopicMetadata::RequirementTopic {
+            description, ..
+          }) = audit_data.topic_metadata.get(rt)
+          {
+            Some(serde_json::json!({ "description": description }))
+          } else {
+            None
+          }
+        })
+        .collect();
+
+      let threats: Vec<serde_json::Value> = feature
+        .threat_topics
+        .iter()
+        .filter_map(|tt| {
+          let (desc, severity) = match audit_data.topic_metadata.get(tt) {
+            Some(TopicMetadata::ThreatTopic {
+              description,
+              severity,
+              ..
+            }) => (description.clone(), severity.as_str().to_string()),
+            _ => return None,
+          };
+
+          let threat = audit_data.threats.get(tt)?;
+          let invariants: Vec<String> = threat
+            .invariant_topics
+            .iter()
+            .filter_map(|it| {
+              if let Some(TopicMetadata::InvariantTopic {
+                description, ..
+              }) = audit_data.topic_metadata.get(it)
+              {
+                Some(description.clone())
+              } else {
+                None
+              }
+            })
+            .collect();
+
+          Some(serde_json::json!({
+            "description": desc,
+            "severity": severity,
+            "invariants": invariants,
+          }))
+        })
+        .collect();
+
+      Some(serde_json::json!({
+        "feature_topic": ft.id(),
+        "name": name,
+        "description": description,
+        "requirements": reqs,
+        "threats": threats,
+      }))
+    })
+    .collect();
+
+  serde_json::to_string(&features).unwrap_or_else(|_| "[]".to_string())
+}
+
 /// Render a single feature and its requirements as JSON for the threat-building prompt.
 /// Returns `None` if the feature topic has no metadata.
 pub fn render_feature_for_threats(

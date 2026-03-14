@@ -2000,14 +2000,14 @@ pub async fn build_threats(
   println!("POST /api/v1/audits/{}/threats/build", audit_id);
 
   // Render per-feature JSON while holding the lock, then release it
-  let feature_entries: Vec<(topic::Topic, String)> = {
+  let (feature_entries, security_notes): (Vec<(topic::Topic, String)>, Option<String>) = {
     let ctx = state.data_context.lock().map_err(|e| {
       eprintln!("Mutex poisoned in build_threats: {}", e);
       StatusCode::INTERNAL_SERVER_ERROR
     })?;
     let audit_data = ctx.get_audit(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
 
-    audit_data
+    let entries = audit_data
       .features
       .iter()
       .filter_map(|(ft, feature)| {
@@ -2018,7 +2018,9 @@ pub async fn build_threats(
         )?;
         Some((ft.clone(), json))
       })
-      .collect()
+      .collect();
+
+    (entries, audit_data.security_notes.clone())
   };
 
   if feature_entries.is_empty() {
@@ -2026,10 +2028,12 @@ pub async fn build_threats(
   }
 
   // Fire one LLM call per feature concurrently
+  let security_notes = std::sync::Arc::new(security_notes);
   let mut handles = Vec::new();
   for (i, (ft, json)) in feature_entries.into_iter().enumerate() {
     let threat_start = (i * 1000) as i32;
     let invariant_start = (i * 1000) as i32;
+    let notes = security_notes.clone();
     handles.push(tokio::spawn(async move {
       let result =
         crate::collaborator::agent::task::build_threats_for_feature(
@@ -2037,6 +2041,7 @@ pub async fn build_threats(
           &json,
           threat_start,
           invariant_start,
+          notes.as_deref(),
         )
         .await;
       (ft, result)
@@ -2179,37 +2184,217 @@ pub async fn build_threats(
     }
   }
 
-  // Update in-memory audit data
-  let mut ctx = state.data_context.lock().map_err(|e| {
-    eprintln!("Mutex poisoned in build_threats (store): {}", e);
-    StatusCode::INTERNAL_SERVER_ERROR
-  })?;
-  let audit_data = ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+  // Update in-memory audit data and extract review input (if security notes exist)
+  let review_input = {
+    let mut ctx = state.data_context.lock().map_err(|e| {
+      eprintln!("Mutex poisoned in build_threats (store): {}", e);
+      StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let audit_data = ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
 
-  // Clear old threat/invariant metadata
-  audit_data.topic_metadata.retain(|_, m| {
-    !matches!(
-      m,
-      core::TopicMetadata::ThreatTopic { .. }
-        | core::TopicMetadata::InvariantTopic { .. }
-    )
-  });
+    // Clear old threat/invariant metadata
+    audit_data.topic_metadata.retain(|_, m| {
+      !matches!(
+        m,
+        core::TopicMetadata::ThreatTopic { .. }
+          | core::TopicMetadata::InvariantTopic { .. }
+      )
+    });
 
-  audit_data.topic_metadata.extend(new_topic_metadata);
-  audit_data.threats = new_threats;
-  audit_data.invariants = new_invariants;
+    audit_data.topic_metadata.extend(new_topic_metadata);
+    audit_data.threats = new_threats;
+    audit_data.invariants = new_invariants;
 
-  // Update feature threat_topics
-  for feature in audit_data.features.values_mut() {
-    feature.threat_topics.clear();
-  }
-  for (feat_topic, threat_topics) in new_feature_threats {
-    if let Some(feature) = audit_data.features.get_mut(&feat_topic) {
-      feature.threat_topics = threat_topics;
+    // Update feature threat_topics
+    for feature in audit_data.features.values_mut() {
+      feature.threat_topics.clear();
+    }
+    for (feat_topic, threat_topics) in new_feature_threats {
+      if let Some(feature) = audit_data.features.get_mut(&feat_topic) {
+        feature.threat_topics = threat_topics;
+      }
+    }
+
+    crate::core::rebuild_feature_context(audit_data);
+
+    // --- Security coverage review pass ---
+    // Extract what we need while holding the lock, then release it.
+    if let Some(ref notes) = *security_notes {
+      let features_json =
+        crate::collaborator::agent::context::render_all_features_with_threats(
+          audit_data,
+        );
+
+      let review_threat_start = audit_data
+        .threats
+        .keys()
+        .filter_map(|t| t.numeric_id())
+        .max()
+        .unwrap_or(0) as i32;
+      let review_inv_start = audit_data
+        .invariants
+        .keys()
+        .filter_map(|t| t.numeric_id())
+        .max()
+        .unwrap_or(0) as i32;
+
+      Some((notes.clone(), features_json, review_threat_start, review_inv_start))
+    } else {
+      None
+    }
+  }; // ctx dropped here
+
+  if let Some((notes, features_json, review_threat_start, review_inv_start)) = review_input {
+
+    let review_results =
+      crate::collaborator::agent::task::review_security_coverage(
+        &notes,
+        &features_json,
+        review_threat_start,
+        review_inv_start,
+      )
+      .await
+      .map_err(|e| {
+        eprintln!("review_security_coverage failed: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+      })?;
+
+    // Persist additional threats/invariants from the review
+    if !review_results.is_empty() {
+      let mut review_threats = std::collections::BTreeMap::new();
+      let mut review_invariants = std::collections::BTreeMap::new();
+      let mut review_metadata = std::collections::BTreeMap::new();
+      let mut review_feature_threats: std::collections::BTreeMap<
+        topic::Topic,
+        Vec<topic::Topic>,
+      > = std::collections::BTreeMap::new();
+
+      for parsed in &review_results {
+        for (feat_topic, threat_topics) in &parsed.feature_threat_topics {
+          let feature_id = feat_topic.numeric_id().ok_or_else(|| {
+            eprintln!("Invalid feature topic in review: {}", feat_topic.id());
+            StatusCode::INTERNAL_SERVER_ERROR
+          })?;
+
+          for tt in threat_topics {
+            let (description, severity) = match parsed.topic_metadata.get(tt) {
+              Some(core::TopicMetadata::ThreatTopic {
+                description,
+                severity,
+                ..
+              }) => (description.clone(), *severity),
+              _ => continue,
+            };
+
+            let threat_row = db::create_threat(
+              &state.db,
+              feature_id,
+              &description,
+              AUTHOR_AGENT,
+              severity.as_str(),
+            )
+            .await
+            .map_err(|e| {
+              eprintln!("create_threat (review) failed: {}", e);
+              StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+
+            let real_threat_topic =
+              topic::new_attack_vector_topic(threat_row.id as i32);
+
+            let mut real_invariant_topics = Vec::new();
+            if let Some(threat) = parsed.threats.get(tt) {
+              for inv_topic in &threat.invariant_topics {
+                let inv_desc = match parsed.topic_metadata.get(inv_topic) {
+                  Some(core::TopicMetadata::InvariantTopic {
+                    description, ..
+                  }) => description.clone(),
+                  _ => continue,
+                };
+
+                let inv_row = db::create_invariant(
+                  &state.db,
+                  threat_row.id,
+                  &inv_desc,
+                  AUTHOR_AGENT,
+                  severity.as_str(),
+                )
+                .await
+                .map_err(|e| {
+                  eprintln!("create_invariant (review) failed: {}", e);
+                  StatusCode::INTERNAL_SERVER_ERROR
+                })?;
+
+                let real_inv_topic =
+                  topic::new_invariant_topic(inv_row.id as i32);
+
+                review_metadata.insert(
+                  real_inv_topic.clone(),
+                  core::TopicMetadata::InvariantTopic {
+                    topic: real_inv_topic.clone(),
+                    description: inv_desc,
+                    threat_topic: real_threat_topic.clone(),
+                    author_id: AUTHOR_AGENT,
+                    created_at: inv_row.created_at,
+                    severity,
+                  },
+                );
+                review_invariants.insert(
+                  real_inv_topic.clone(),
+                  core::Invariant {
+                    source_topics: Vec::new(),
+                  },
+                );
+                real_invariant_topics.push(real_inv_topic);
+              }
+            }
+
+            review_metadata.insert(
+              real_threat_topic.clone(),
+              core::TopicMetadata::ThreatTopic {
+                topic: real_threat_topic.clone(),
+                description,
+                feature_topic: feat_topic.clone(),
+                author_id: AUTHOR_AGENT,
+                created_at: threat_row.created_at,
+                severity,
+              },
+            );
+            review_threats.insert(
+              real_threat_topic.clone(),
+              core::Threat {
+                invariant_topics: real_invariant_topics,
+              },
+            );
+            review_feature_threats
+              .entry(feat_topic.clone())
+              .or_default()
+              .push(real_threat_topic);
+          }
+        }
+      }
+
+      // Merge review results into in-memory state
+      let mut ctx = state.data_context.lock().map_err(|e| {
+        eprintln!("Mutex poisoned in build_threats (review store): {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+      })?;
+      let audit_data =
+        ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+
+      audit_data.topic_metadata.extend(review_metadata);
+      audit_data.threats.extend(review_threats);
+      audit_data.invariants.extend(review_invariants);
+
+      for (feat_topic, threat_topics) in review_feature_threats {
+        if let Some(feature) = audit_data.features.get_mut(&feat_topic) {
+          feature.threat_topics.extend(threat_topics);
+        }
+      }
+
+      crate::core::rebuild_feature_context(audit_data);
     }
   }
-
-  crate::core::rebuild_feature_context(audit_data);
 
   Ok(StatusCode::OK)
 }

@@ -251,6 +251,10 @@ pub struct AuditData {
   pub audit_name: String,
   // A list of files that are in scope for this audit
   pub in_scope_files: HashSet<ProjectPath>,
+  /// Free-form security notes loaded from security.md. Contains role
+  /// definitions, known threats/invariants, and other security considerations
+  /// that the threat-building agent should incorporate.
+  pub security_notes: Option<String>,
   // Contains the ASTs for a given file path
   pub asts: BTreeMap<ProjectPath, AST>,
   // Contains the node for a given topic
@@ -1703,6 +1707,29 @@ pub fn load_audit_name(project_root: &Path) -> Result<String, String> {
   Ok(audit_name)
 }
 
+/// Reads "security.md" from the project root and returns its contents.
+/// This file contains free-form prose describing roles, known threats,
+/// invariants, and other security considerations for the audit.
+/// Returns `None` if the file does not exist (security notes are optional).
+pub fn load_security_notes(
+  project_root: &Path,
+) -> Result<Option<String>, String> {
+  let security_file = project_root.join("security.md");
+  if !security_file.exists() {
+    return Ok(None);
+  }
+
+  let content = std::fs::read_to_string(&security_file)
+    .map_err(|e| format!("Failed to read security.md: {}", e))?;
+
+  let trimmed = content.trim();
+  if trimmed.is_empty() {
+    return Ok(None);
+  }
+
+  Ok(Some(trimmed.to_string()))
+}
+
 /// Builds nested references for invariants under their parent threats.
 /// Each threat with invariants becomes a NestedSourceContext (subscope = threat topic)
 /// containing only the invariant references as children.
@@ -1916,6 +1943,7 @@ pub fn rebuild_feature_context(audit_data: &mut AuditData) {
 pub fn new_audit_data(
   audit_name: String,
   in_scope_files: HashSet<ProjectPath>,
+  security_notes: Option<String>,
 ) -> AuditData {
   let mut topic_metadata = BTreeMap::new();
 
@@ -1983,6 +2011,7 @@ pub fn new_audit_data(
   AuditData {
     audit_name,
     in_scope_files,
+    security_notes,
     asts: BTreeMap::new(),
     nodes: BTreeMap::new(),
     topic_metadata,
@@ -2014,13 +2043,15 @@ impl DataContext {
     audit_id: String,
     audit_name: String,
     in_scope_files: HashSet<ProjectPath>,
+    security_notes: Option<String>,
   ) -> bool {
     if self.audits.contains_key(&audit_id) {
       return false;
     }
-    self
-      .audits
-      .insert(audit_id, new_audit_data(audit_name, in_scope_files));
+    self.audits.insert(
+      audit_id,
+      new_audit_data(audit_name, in_scope_files, security_notes),
+    );
     true
   }
 

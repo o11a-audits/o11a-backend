@@ -27,7 +27,7 @@ struct LLMFeature {
 
 /// Raw threat as returned by the LLM for threat analysis.
 /// Invariants are plain description strings; severity is inherited from the threat.
-#[derive(Deserialize)]
+#[derive(Deserialize, serde::Serialize)]
 struct LLMThreat {
   description: String,
   severity: String,
@@ -329,8 +329,26 @@ statement like \"the system should be secure\".\n\
 - The feature should have at least one threat\n\
 - If a requirement for a feature is describing an invariant, make sure it gets \
 added as an actual invariant to a threat on the feature.\n\
-- Return ONLY a JSON array of threat objects, no other text.\n\n\
-Feature:\n";
+- Return ONLY a JSON array of threat objects, no other text.\n\n";
+
+/// Appended to the threat prompt when a security notes document is present.
+const SECURITY_NOTES_PREAMBLE: &str = "\
+The project developers have provided a **Security Notes** document \
+containing roles, known threats, invariants, and other security \
+considerations. You MUST incorporate this information:\n\n\
+- If the document defines **roles** (named actors in the access control \
+model), those are the ONLY roles that exist. When writing access-control \
+invariants, reference only these roles by name. The enforcement of these \
+roles (e.g., \"only the `guardian` role can pause the protocol\") is a \
+valid and encouraged invariant. Do not invent roles that are not listed, \
+and do not create access control invariants that are not based on these roles.\n\
+- If the document describes **threats or attack vectors** that are \
+relevant to this feature, make sure they appear in your output as \
+threats (with matching invariants).\n\
+- If the document describes **invariants or security properties** that \
+are relevant to this feature, make sure they appear as invariants under \
+an appropriate threat.\n\n\
+Security Notes:\n";
 
 /// Result of parsing LLM threats: threats, invariants, and topic metadata.
 pub struct ParsedThreats {
@@ -437,13 +455,23 @@ fn parse_threats_response(
 /// The caller renders the feature JSON while holding the lock, then passes
 /// it to this function after releasing it. `threat_start` and `invariant_start`
 /// are the current max IDs so new topics get unique sequential IDs.
+///
+/// When `security_notes` is provided, the security document is injected into
+/// the prompt so the LLM can incorporate roles, known threats, and invariants.
 pub async fn build_threats_for_feature(
   feature_topic: &topic::Topic,
   feature_json: &str,
   threat_start: i32,
   invariant_start: i32,
+  security_notes: Option<&str>,
 ) -> Result<ParsedThreats, String> {
-  let prompt = format!("{}{}", BUILD_THREATS_PROMPT, feature_json);
+  let prompt = match security_notes {
+    Some(notes) => format!(
+      "{}{}{}\n\nFeature:\n{}",
+      BUILD_THREATS_PROMPT, SECURITY_NOTES_PREAMBLE, notes, feature_json
+    ),
+    None => format!("{}Feature:\n{}", BUILD_THREATS_PROMPT, feature_json),
+  };
   let response = router::chat_completion(
     TaskSize::Large,
     router::SYSTEM_MESSAGE_DOCUMENTATION,
@@ -458,6 +486,105 @@ pub async fn build_threats_for_feature(
     threat_start,
     invariant_start,
   )
+}
+
+/// Prompt for the security coverage review pass.
+const REVIEW_SECURITY_COVERAGE_PROMPT: &str = "\
+You are reviewing a smart contract audit's threat model for completeness \
+against a **Security Notes** document provided by the project developers.\n\n\
+Below you will find:\n\
+1. The Security Notes document (roles, known threats, invariants, and \
+   other security considerations written by the developers).\n\
+2. All features that were extracted from the project documentation, each \
+   with their generated threats and invariants.\n\n\
+Your task is to identify any information in the Security Notes that is NOT \
+yet accounted for in the generated threats and invariants. For each gap, \
+produce additional threats and invariants under the most appropriate \
+feature.\n\n\
+Output rules:\n\
+- Return a JSON array of objects, one per feature that needs additions. \
+  Each object has:\n\
+  - `feature_topic`: the topic ID string of the feature (e.g., \"F1\")\n\
+  - `threats`: an array of threat objects (same format as the threat \
+    builder: `description`, `severity`, `invariants`)\n\
+- If all Security Notes content is already covered, return an empty array `[]`.\n\
+- Do NOT repeat threats or invariants that already exist.\n\
+- If the Security Notes define **roles**, ensure that access-control \
+  invariants referencing those roles exist under appropriate threats. \
+  Only use the roles defined in the Security Notes.\n\
+- Return ONLY the JSON array, no other text.\n\n";
+
+/// A single feature's additional threats from the review pass.
+#[derive(Deserialize)]
+struct LLMReviewEntry {
+  feature_topic: String,
+  threats: Vec<LLMThreat>,
+}
+
+/// Review the security notes against all generated features/threats/invariants
+/// and return additional threats to fill any gaps.
+pub async fn review_security_coverage(
+  security_notes: &str,
+  features_json: &str,
+  threat_start: i32,
+  invariant_start: i32,
+) -> Result<Vec<ParsedThreats>, String> {
+  let prompt = format!(
+    "{}Security Notes:\n{}\n\nFeatures with existing threats:\n{}",
+    REVIEW_SECURITY_COVERAGE_PROMPT, security_notes, features_json
+  );
+
+  let response = router::chat_completion(
+    TaskSize::Large,
+    router::SYSTEM_MESSAGE_DOCUMENTATION,
+    &prompt,
+    Some("security_review"),
+  )
+  .await?;
+
+  // Strip markdown code fences if present
+  let json_str = response
+    .trim()
+    .strip_prefix("```json")
+    .or_else(|| response.trim().strip_prefix("```"))
+    .unwrap_or(response.trim());
+  let json_str = json_str.strip_suffix("```").unwrap_or(json_str).trim();
+
+  let review_entries: Vec<LLMReviewEntry> = serde_json::from_str(json_str)
+    .map_err(|e| {
+      eprintln!(
+        "Failed to parse security review JSON: {}\nResponse:\n{}",
+        e, json_str
+      );
+      format!("Failed to parse security review JSON: {}", e)
+    })?;
+
+  // Convert each entry into ParsedThreats using the same parser
+  let mut results = Vec::new();
+  let mut t_offset = threat_start;
+  let mut i_offset = invariant_start;
+
+  for entry in review_entries {
+    if entry.threats.is_empty() {
+      continue;
+    }
+    let feature_topic = topic::new_topic(&entry.feature_topic);
+
+    // Build a synthetic JSON response to reuse parse_threats_response
+    let synthetic = serde_json::to_string(&entry.threats)
+      .map_err(|e| format!("Failed to re-serialize review threats: {}", e))?;
+
+    let parsed =
+      parse_threats_response(&synthetic, &feature_topic, t_offset, i_offset)?;
+
+    // Advance offsets past the IDs we just used
+    t_offset += parsed.threats.len() as i32;
+    i_offset += parsed.invariants.len() as i32;
+
+    results.push(parsed);
+  }
+
+  Ok(results)
 }
 
 /// Generate documentation for all top-level contracts in the audit.
