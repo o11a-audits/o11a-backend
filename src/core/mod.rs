@@ -704,7 +704,6 @@ pub enum UnnamedTopicKind {
   Reference,
   MutableReference,
   Signature,
-  DocumentationRoot,
   DocumentationHeading,
   DocumentationParagraph,
   DocumentationSentence,
@@ -1358,6 +1357,12 @@ pub enum TopicMetadata {
     created_at: String,
     severity: ThreatSeverity,
   },
+  /// A documentation root topic (project or technical documentation)
+  DocumentationTopic {
+    topic: topic::Topic,
+    scope: Scope,
+    is_technical: bool,
+  },
 }
 
 
@@ -1368,7 +1373,8 @@ impl TopicMetadata {
       | TopicMetadata::UnnamedTopic { scope, .. }
       | TopicMetadata::ControlFlow { scope, .. }
       | TopicMetadata::TitledTopic { scope, .. }
-      | TopicMetadata::CommentTopic { scope, .. } => scope,
+      | TopicMetadata::CommentTopic { scope, .. }
+      | TopicMetadata::DocumentationTopic { scope, .. } => scope,
       TopicMetadata::FeatureTopic { .. }
       | TopicMetadata::RequirementTopic { .. }
       | TopicMetadata::ThreatTopic { .. }
@@ -1386,7 +1392,8 @@ impl TopicMetadata {
       | TopicMetadata::CommentTopic { .. }
       | TopicMetadata::RequirementTopic { .. }
       | TopicMetadata::ThreatTopic { .. }
-      | TopicMetadata::InvariantTopic { .. } => None,
+      | TopicMetadata::InvariantTopic { .. }
+      | TopicMetadata::DocumentationTopic { .. } => None,
     }
   }
 
@@ -1400,7 +1407,8 @@ impl TopicMetadata {
       | TopicMetadata::FeatureTopic { topic, .. }
       | TopicMetadata::RequirementTopic { topic, .. }
       | TopicMetadata::ThreatTopic { topic, .. }
-      | TopicMetadata::InvariantTopic { topic, .. } => topic,
+      | TopicMetadata::InvariantTopic { topic, .. }
+      | TopicMetadata::DocumentationTopic { topic, .. } => topic,
     }
   }
 
@@ -1655,13 +1663,23 @@ pub fn load_in_scope_files(
   Ok(in_scope_files)
 }
 
+/// A document file entry from documents.txt, with its technical flag.
+#[derive(Debug, Clone)]
+pub struct DocumentFileEntry {
+  pub project_path: ProjectPath,
+  pub is_technical: bool,
+}
+
 /// Reads "documents.txt" from the project root and returns an ordered list
-/// of document file paths. Order matters — documents are parsed in this order
+/// of document file entries. Order matters — documents are parsed in this order
 /// to produce deterministic node IDs. New documents should be appended to the
 /// end of the file to preserve existing IDs.
+///
+/// Lines prefixed with "technical:" indicate technical documentation.
+/// Plain lines are project documentation.
 pub fn load_document_files(
   project_root: &Path,
-) -> Result<Vec<ProjectPath>, String> {
+) -> Result<Vec<DocumentFileEntry>, String> {
   let doc_file = project_root.join("documents.txt");
   if !doc_file.exists() {
     return Err("documents.txt file not found in project root".to_string());
@@ -1674,8 +1692,17 @@ pub fn load_document_files(
   for line in content.lines() {
     let line = line.trim();
     if !line.is_empty() {
-      let project_path = new_project_path(&line.to_string(), project_root);
-      document_files.push(project_path);
+      let (path_str, is_technical) =
+        if let Some(path) = line.strip_prefix("technical:") {
+          (path.trim().to_string(), true)
+        } else {
+          (line.to_string(), false)
+        };
+      let project_path = new_project_path(&path_str, project_root);
+      document_files.push(DocumentFileEntry {
+        project_path,
+        is_technical,
+      });
     }
   }
 
@@ -1716,7 +1743,9 @@ pub fn load_security_notes(
 ) -> Result<Option<String>, String> {
   let security_file = project_root.join("security.md");
   if !security_file.exists() {
-    return Ok(None);
+    return Err(
+      "security.md file not found in project root".to_string(),
+    );
   }
 
   let content = std::fs::read_to_string(&security_file)

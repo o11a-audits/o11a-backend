@@ -269,14 +269,9 @@ pub async fn get_documents(
 
   // Iterate through all topic metadata and filter for documentation roots
   for (topic, metadata) in &audit_data.topic_metadata {
-    match metadata {
-      crate::core::TopicMetadata::UnnamedTopic { kind, .. }
-        if *kind == crate::core::UnnamedTopicKind::DocumentationRoot =>
-      {
-        documents.push(topic_metadata_to_response(topic, metadata, audit_data));
-      }
-      _ => (),
-    };
+    if matches!(metadata, crate::core::TopicMetadata::DocumentationTopic { .. }) {
+      documents.push(topic_metadata_to_response(topic, metadata));
+    }
   }
 
   Ok(Json(DocumentsResponse { documents }))
@@ -311,7 +306,8 @@ pub async fn get_contracts(
       | crate::core::TopicMetadata::FeatureTopic { .. }
       | crate::core::TopicMetadata::RequirementTopic { .. }
       | crate::core::TopicMetadata::ThreatTopic { .. }
-      | crate::core::TopicMetadata::InvariantTopic { .. } => false,
+      | crate::core::TopicMetadata::InvariantTopic { .. }
+      | crate::core::TopicMetadata::DocumentationTopic { .. } => false,
     };
 
     if is_contract {
@@ -327,7 +323,7 @@ pub async fn get_contracts(
         continue;
       }
 
-      contracts.push(topic_metadata_to_response(topic, metadata, audit_data));
+      contracts.push(topic_metadata_to_response(topic, metadata));
     }
   }
 
@@ -762,9 +758,6 @@ pub struct NamedTopicResponse {
   pub sub_kind: Option<String>,
   pub visibility: String,
   pub scope: ScopeInfo,
-  pub context: Vec<SourceContextResponse>,
-  pub expanded_context: Vec<SourceContextResponse>,
-  pub ancestry: Vec<SourceContextResponse>,
   pub ancestors: Vec<String>,
   pub descendants: Vec<String>,
   pub relatives: Vec<String>,
@@ -779,8 +772,6 @@ pub struct TitledTopicResponse {
   pub title: String,
   pub kind: String,
   pub scope: ScopeInfo,
-  pub context: Vec<SourceContextResponse>,
-  pub expanded_context: Vec<SourceContextResponse>,
 }
 
 /// Response for UnnamedTopic metadata
@@ -789,8 +780,14 @@ pub struct UnnamedTopicResponse {
   pub topic_id: String,
   pub kind: String,
   pub scope: ScopeInfo,
-  pub context: Vec<SourceContextResponse>,
-  pub expanded_context: Vec<SourceContextResponse>,
+}
+
+/// Response for DocumentationTopic metadata (documentation root)
+#[derive(Debug, Serialize)]
+pub struct DocumentationTopicResponse {
+  pub topic_id: String,
+  pub scope: ScopeInfo,
+  pub is_technical: bool,
 }
 
 /// Response for ControlFlow metadata
@@ -800,7 +797,6 @@ pub struct ControlFlowTopicResponse {
   pub kind: String,
   pub scope: ScopeInfo,
   pub condition: String,
-  pub context: Vec<SourceContextResponse>,
 }
 
 /// Response for CommentTopic metadata
@@ -813,7 +809,6 @@ pub struct CommentTopicResponse {
   pub created_at: String,
   pub scope: ScopeInfo,
   pub mentioned_topics: Vec<String>,
-  pub context: Vec<SourceContextResponse>,
 }
 
 /// Response for FeatureTopic metadata
@@ -824,7 +819,6 @@ pub struct FeatureTopicResponse {
   pub description: String,
   pub author_id: i64,
   pub created_at: String,
-  pub context: Vec<SourceContextResponse>,
 }
 
 /// Response for RequirementTopic metadata
@@ -835,7 +829,6 @@ pub struct RequirementTopicResponse {
   pub feature_topic: String,
   pub author_id: i64,
   pub created_at: String,
-  pub context: Vec<SourceContextResponse>,
 }
 
 /// Response for ThreatTopic metadata
@@ -847,7 +840,6 @@ pub struct ThreatTopicResponse {
   pub author_id: i64,
   pub created_at: String,
   pub severity: String,
-  pub context: Vec<SourceContextResponse>,
 }
 
 /// Response for InvariantTopic metadata
@@ -859,7 +851,6 @@ pub struct InvariantTopicResponse {
   pub author_id: i64,
   pub created_at: String,
   pub severity: String,
-  pub context: Vec<SourceContextResponse>,
 }
 
 /// Enum for different topic metadata response types
@@ -884,6 +875,8 @@ pub enum TopicMetadataResponse {
   Threat(ThreatTopicResponse),
   #[serde(rename = "invariant")]
   Invariant(InvariantTopicResponse),
+  #[serde(rename = "documentation")]
+  Documentation(DocumentationTopicResponse),
 }
 
 // Helper function to convert SourceChild to SourceChildResponse
@@ -941,11 +934,8 @@ fn convert_source_context(
 fn topic_metadata_to_response(
   topic: &crate::core::topic::Topic,
   metadata: &crate::core::TopicMetadata,
-  audit_data: &crate::core::AuditData,
 ) -> TopicMetadataResponse {
   let scope_info = ScopeInfo::from_scope(metadata.scope());
-  let empty_ctx: Vec<crate::core::SourceContext> = vec![];
-  let ctx = audit_data.topic_context.get(topic).unwrap_or(&empty_ctx);
 
   match metadata {
     crate::core::TopicMetadata::NamedTopic {
@@ -984,9 +974,6 @@ fn topic_metadata_to_response(
         sub_kind,
         visibility: format!("{:?}", visibility),
         scope: scope_info,
-        context: convert_source_context(ctx),
-        expanded_context: convert_source_context(metadata.expanded_context()),
-        ancestry: convert_source_context(metadata.ancestry()),
         ancestors: metadata.ancestors().iter().map(|t| t.id.clone()).collect(),
         descendants: metadata
           .descendants()
@@ -1004,8 +991,6 @@ fn topic_metadata_to_response(
         title: title.clone(),
         kind: format!("{:?}", kind),
         scope: scope_info,
-        context: convert_source_context(ctx),
-        expanded_context: convert_source_context(metadata.expanded_context()),
       })
     }
 
@@ -1014,10 +999,16 @@ fn topic_metadata_to_response(
         topic_id: topic.id.clone(),
         kind: format!("{:?}", kind),
         scope: scope_info,
-        context: convert_source_context(ctx),
-        expanded_context: convert_source_context(metadata.expanded_context()),
       })
     }
+
+    crate::core::TopicMetadata::DocumentationTopic {
+      is_technical, ..
+    } => TopicMetadataResponse::Documentation(DocumentationTopicResponse {
+      topic_id: topic.id.clone(),
+      scope: scope_info,
+      is_technical: *is_technical,
+    }),
 
     crate::core::TopicMetadata::ControlFlow {
       kind, condition, ..
@@ -1026,7 +1017,6 @@ fn topic_metadata_to_response(
       kind: format!("{:?}", kind),
       scope: scope_info,
       condition: condition.id.clone(),
-      context: convert_source_context(ctx),
     }),
 
     crate::core::TopicMetadata::CommentTopic {
@@ -1044,7 +1034,6 @@ fn topic_metadata_to_response(
       created_at: created_at.clone(),
       scope: scope_info,
       mentioned_topics: mentioned_topics.iter().map(|t| t.id.clone()).collect(),
-      context: convert_source_context(ctx),
     }),
 
     crate::core::TopicMetadata::FeatureTopic {
@@ -1060,7 +1049,6 @@ fn topic_metadata_to_response(
         description: description.clone(),
         author_id: *author_id,
         created_at: created_at.clone(),
-        context: convert_source_context(ctx),
       })
     }
 
@@ -1077,7 +1065,6 @@ fn topic_metadata_to_response(
         feature_topic: feature_topic.id.clone(),
         author_id: *author_id,
         created_at: created_at.clone(),
-        context: convert_source_context(ctx),
       })
     }
 
@@ -1096,7 +1083,6 @@ fn topic_metadata_to_response(
         author_id: *author_id,
         created_at: created_at.clone(),
         severity: severity.as_str().to_string(),
-        context: convert_source_context(ctx),
       })
     }
 
@@ -1115,7 +1101,6 @@ fn topic_metadata_to_response(
         author_id: *author_id,
         created_at: created_at.clone(),
         severity: severity.as_str().to_string(),
-        context: convert_source_context(ctx),
       })
     }
   }
@@ -1147,9 +1132,7 @@ pub async fn get_metadata(
     StatusCode::NOT_FOUND
   })?;
 
-  Ok(Json(topic_metadata_to_response(
-    &topic, metadata, audit_data,
-  )))
+  Ok(Json(topic_metadata_to_response(&topic, metadata)))
 }
 
 // Get pre-rendered topic view HTML for a specific topic within an audit.
@@ -1774,7 +1757,7 @@ pub async fn get_features(
       audit_data
         .topic_metadata
         .get(ft)
-        .map(|m| topic_metadata_to_response(ft, m, audit_data))
+        .map(|m| topic_metadata_to_response(ft, m))
     })
     .collect();
 
@@ -2453,7 +2436,7 @@ pub async fn create_feature(
     .insert(feature_topic.clone(), metadata.clone());
 
   let response =
-    topic_metadata_to_response(&feature_topic, &metadata, audit_data);
+    topic_metadata_to_response(&feature_topic, &metadata);
   Ok(Json(response))
 }
 
@@ -2480,7 +2463,6 @@ pub async fn get_feature(
   Ok(Json(topic_metadata_to_response(
     &feature_topic,
     metadata,
-    audit_data,
   )))
 }
 
@@ -2534,7 +2516,7 @@ pub async fn add_requirement_documentation_topic(
     .get(&req_topic)
     .ok_or(StatusCode::NOT_FOUND)?;
   let response =
-    topic_metadata_to_response(&req_topic, metadata, audit_data);
+    topic_metadata_to_response(&req_topic, metadata);
 
   Ok(Json(response))
 }
@@ -2580,7 +2562,7 @@ pub async fn remove_requirement_documentation_topic(
     .get(&req_topic)
     .ok_or(StatusCode::NOT_FOUND)?;
   let response =
-    topic_metadata_to_response(&req_topic, metadata, audit_data);
+    topic_metadata_to_response(&req_topic, metadata);
 
   Ok(Json(response))
 }
@@ -2806,7 +2788,7 @@ pub async fn create_requirement(
 
   crate::core::rebuild_feature_context(audit_data);
 
-  let response = topic_metadata_to_response(&req_topic, &metadata, audit_data);
+  let response = topic_metadata_to_response(&req_topic, &metadata);
   Ok(Json(response))
 }
 
@@ -2878,9 +2860,7 @@ pub async fn get_requirement(
     .get(&req_topic)
     .ok_or(StatusCode::NOT_FOUND)?;
 
-  Ok(Json(topic_metadata_to_response(
-    &req_topic, metadata, audit_data,
-  )))
+  Ok(Json(topic_metadata_to_response(&req_topic, metadata)))
 }
 
 #[derive(Debug, Deserialize)]
@@ -2931,7 +2911,7 @@ pub async fn add_requirement_source_topic(
     .topic_metadata
     .get(&req_topic)
     .ok_or(StatusCode::NOT_FOUND)?;
-  let response = topic_metadata_to_response(&req_topic, metadata, audit_data);
+  let response = topic_metadata_to_response(&req_topic, metadata);
   Ok(Json(response))
 }
 
@@ -2971,7 +2951,7 @@ pub async fn remove_requirement_source_topic(
     .topic_metadata
     .get(&req_topic)
     .ok_or(StatusCode::NOT_FOUND)?;
-  let response = topic_metadata_to_response(&req_topic, metadata, audit_data);
+  let response = topic_metadata_to_response(&req_topic, metadata);
   Ok(Json(response))
 }
 
@@ -3049,7 +3029,7 @@ pub async fn create_threat(
 
   crate::core::rebuild_feature_context(audit_data);
 
-  let response = topic_metadata_to_response(&threat_topic, &metadata, audit_data);
+  let response = topic_metadata_to_response(&threat_topic, &metadata);
   Ok(Json(response))
 }
 
@@ -3123,9 +3103,7 @@ pub async fn get_threat(
     .get(&threat_topic)
     .ok_or(StatusCode::NOT_FOUND)?;
 
-  Ok(Json(topic_metadata_to_response(
-    &threat_topic, metadata, audit_data,
-  )))
+  Ok(Json(topic_metadata_to_response(&threat_topic, metadata)))
 }
 
 // ============================================
@@ -3211,7 +3189,7 @@ pub async fn create_invariant(
 
   crate::core::rebuild_feature_context(audit_data);
 
-  let response = topic_metadata_to_response(&inv_topic, &metadata, audit_data);
+  let response = topic_metadata_to_response(&inv_topic, &metadata);
   Ok(Json(response))
 }
 
@@ -3276,9 +3254,7 @@ pub async fn get_invariant(
     .get(&inv_topic)
     .ok_or(StatusCode::NOT_FOUND)?;
 
-  Ok(Json(topic_metadata_to_response(
-    &inv_topic, metadata, audit_data,
-  )))
+  Ok(Json(topic_metadata_to_response(&inv_topic, metadata)))
 }
 
 /// POST /api/v1/audits/:audit_id/invariants/:invariant_id/source_topics
@@ -3319,7 +3295,7 @@ pub async fn add_invariant_source_topic(
     .topic_metadata
     .get(&inv_topic)
     .ok_or(StatusCode::NOT_FOUND)?;
-  let response = topic_metadata_to_response(&inv_topic, metadata, audit_data);
+  let response = topic_metadata_to_response(&inv_topic, metadata);
   Ok(Json(response))
 }
 
@@ -3358,6 +3334,6 @@ pub async fn remove_invariant_source_topic(
     .topic_metadata
     .get(&inv_topic)
     .ok_or(StatusCode::NOT_FOUND)?;
-  let response = topic_metadata_to_response(&inv_topic, metadata, audit_data);
+  let response = topic_metadata_to_response(&inv_topic, metadata);
   Ok(Json(response))
 }

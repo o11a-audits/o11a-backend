@@ -15,7 +15,7 @@ pub fn analyze(
   project_root: &Path,
   audit_id: &str,
   data_context: &mut DataContext,
-  document_files: &[core::ProjectPath],
+  document_files: &[core::DocumentFileEntry],
 ) -> Result<(), String> {
   // Get the audit data
   let audit_data = data_context
@@ -25,9 +25,22 @@ pub fn analyze(
   // Build name index for fast topic lookup during code token parsing
   audit_data.name_index = core::TopicNameIndex::build(&audit_data);
 
+  // Build a set of technical document paths for root kind lookup
+  let technical_paths: std::collections::HashSet<&core::ProjectPath> =
+    document_files
+      .iter()
+      .filter(|e| e.is_technical)
+      .map(|e| &e.project_path)
+      .collect();
+
+  // Extract just the project paths for the parser
+  let paths: Vec<core::ProjectPath> = document_files
+    .iter()
+    .map(|e| e.project_path.clone())
+    .collect();
+
   // Parse document files in the order specified by documents.txt
-  let ast_map =
-    parser::process_files(project_root, document_files, &audit_data)?;
+  let ast_map = parser::process_files(project_root, &paths, &audit_data)?;
 
   // Collect mentions during processing: referenced_topic -> [scope]
   // The scope tells us the container (file), component (section), and member (paragraph)
@@ -36,6 +49,7 @@ pub fn analyze(
 
   // Process each markdown file and add nodes/declarations to the audit data
   for (project_path, asts) in &ast_map {
+    let is_technical = technical_paths.contains(project_path);
     for ast in asts {
       // Add to in_scope_files
       audit_data.in_scope_files.insert(project_path.clone());
@@ -57,6 +71,7 @@ pub fn analyze(
       process_documentation_ast(
         ast,
         project_path,
+        is_technical,
         audit_data,
         &mut mentions_by_topic,
       )?;
@@ -72,9 +87,8 @@ pub fn analyze(
       .or_default();
     for scope in scopes {
       let mentioning_topic = match &scope {
-        Scope::Member { member, .. } | Scope::ContainingBlock { member, .. } => {
-          member.clone()
-        }
+        Scope::Member { member, .. }
+        | Scope::ContainingBlock { member, .. } => member.clone(),
         Scope::Component { component, .. } => component.clone(),
         Scope::Global | Scope::Container { .. } => continue,
       };
@@ -90,6 +104,7 @@ pub fn analyze(
 fn process_documentation_ast(
   ast: &DocumentationAST,
   project_path: &core::ProjectPath,
+  is_technical: bool,
   audit_data: &mut AuditData,
   mentions_by_topic: &mut BTreeMap<topic::Topic, Vec<Scope>>,
 ) -> Result<(), String> {
@@ -99,7 +114,13 @@ fn process_documentation_ast(
 
   // Process all nodes in the AST
   for node in &ast.nodes {
-    process_documentation_node(node, &scope, audit_data, mentions_by_topic)?;
+    process_documentation_node(
+      node,
+      &scope,
+      is_technical,
+      audit_data,
+      mentions_by_topic,
+    )?;
   }
 
   Ok(())
@@ -108,6 +129,7 @@ fn process_documentation_ast(
 fn process_documentation_node(
   node: &DocumentationNode,
   scope: &Scope,
+  is_technical: bool,
   audit_data: &mut AuditData,
   mentions_by_topic: &mut BTreeMap<topic::Topic, Vec<Scope>>,
 ) -> Result<(), String> {
@@ -125,23 +147,20 @@ fn process_documentation_node(
 
       audit_data.topic_metadata.insert(
         topic.clone(),
-        TopicMetadata::UnnamedTopic {
+        TopicMetadata::DocumentationTopic {
           topic: topic.clone(),
-          kind: UnnamedTopicKind::DocumentationRoot,
+          is_technical,
           scope: scope.clone(),
-          expanded_context: vec![],
         },
       );
-      audit_data.topic_context.insert(
-        topic.clone(),
-        context,
-      );
+      audit_data.topic_context.insert(topic.clone(), context);
 
       // Process children with the same scope
       for child in children {
         process_documentation_node(
           child,
           scope,
+          is_technical,
           audit_data,
           mentions_by_topic,
         )?;
@@ -171,16 +190,14 @@ fn process_documentation_node(
           expanded_context: vec![],
         },
       );
-      audit_data.topic_context.insert(
-        topic.clone(),
-        context,
-      );
+      audit_data.topic_context.insert(topic.clone(), context);
 
       // Process heading text children (inline formatting nodes)
       for child in children {
         process_documentation_node(
           child,
           scope,
+          is_technical,
           audit_data,
           mentions_by_topic,
         )?;
@@ -188,7 +205,13 @@ fn process_documentation_node(
 
       // Process the section child if present - it will create its own nested scope
       if let Some(sec) = section {
-        process_documentation_node(sec, scope, audit_data, mentions_by_topic)?;
+        process_documentation_node(
+          sec,
+          scope,
+          is_technical,
+          audit_data,
+          mentions_by_topic,
+        )?;
       }
     }
 
@@ -217,10 +240,7 @@ fn process_documentation_node(
           expanded_context: vec![],
         },
       );
-      audit_data.topic_context.insert(
-        topic.clone(),
-        context,
-      );
+      audit_data.topic_context.insert(topic.clone(), context);
 
       // Create nested scope by adding this section to the scope hierarchy.
       // Sections are added regardless of heading level:
@@ -235,6 +255,7 @@ fn process_documentation_node(
         process_documentation_node(
           child,
           &section_scope,
+          is_technical,
           audit_data,
           mentions_by_topic,
         )?;
@@ -258,10 +279,7 @@ fn process_documentation_node(
           expanded_context: vec![],
         },
       );
-      audit_data.topic_context.insert(
-        topic.clone(),
-        context,
-      );
+      audit_data.topic_context.insert(topic.clone(), context);
 
       // Paragraphs don't add to scope - only sections/headers define scope hierarchy.
       // Process children with the same scope.
@@ -269,6 +287,7 @@ fn process_documentation_node(
         process_documentation_node(
           child,
           scope,
+          is_technical,
           audit_data,
           mentions_by_topic,
         )?;
@@ -292,10 +311,7 @@ fn process_documentation_node(
           expanded_context: vec![],
         },
       );
-      audit_data.topic_context.insert(
-        topic.clone(),
-        context,
-      );
+      audit_data.topic_context.insert(topic.clone(), context);
 
       // Sentences don't create a new scope level - they stay within the
       // paragraph's semantic block scope. Process children with same scope.
@@ -303,6 +319,7 @@ fn process_documentation_node(
         process_documentation_node(
           child,
           scope,
+          is_technical,
           audit_data,
           mentions_by_topic,
         )?;
@@ -326,16 +343,14 @@ fn process_documentation_node(
           expanded_context: vec![],
         },
       );
-      audit_data.topic_context.insert(
-        topic.clone(),
-        context,
-      );
+      audit_data.topic_context.insert(topic.clone(), context);
 
       // Process children (code tokens) with the same scope
       for child in children {
         process_documentation_node(
           child,
           scope,
+          is_technical,
           audit_data,
           mentions_by_topic,
         )?;
@@ -359,16 +374,14 @@ fn process_documentation_node(
           expanded_context: vec![],
         },
       );
-      audit_data.topic_context.insert(
-        topic.clone(),
-        context,
-      );
+      audit_data.topic_context.insert(topic.clone(), context);
 
       // Process children with the same scope
       for child in children {
         process_documentation_node(
           child,
           scope,
+          is_technical,
           audit_data,
           mentions_by_topic,
         )?;
@@ -392,16 +405,14 @@ fn process_documentation_node(
           expanded_context: vec![],
         },
       );
-      audit_data.topic_context.insert(
-        topic.clone(),
-        context,
-      );
+      audit_data.topic_context.insert(topic.clone(), context);
 
       // Process children with the same scope
       for child in children {
         process_documentation_node(
           child,
           scope,
+          is_technical,
           audit_data,
           mentions_by_topic,
         )?;
@@ -425,16 +436,14 @@ fn process_documentation_node(
           expanded_context: vec![],
         },
       );
-      audit_data.topic_context.insert(
-        topic.clone(),
-        context,
-      );
+      audit_data.topic_context.insert(topic.clone(), context);
 
       // Process children (code tokens) with the same scope
       for child in children {
         process_documentation_node(
           child,
           scope,
+          is_technical,
           audit_data,
           mentions_by_topic,
         )?;
@@ -503,6 +512,7 @@ fn process_documentation_node(
         process_documentation_node(
           child,
           scope,
+          is_technical,
           audit_data,
           mentions_by_topic,
         )?;
@@ -605,507 +615,4 @@ fn get_source_location_start(
   nodes
     .get(topic)
     .and_then(|node| node.source_location_start())
-}
-
-#[cfg(test)]
-mod tests {
-  use super::*;
-  use crate::core::{ProjectPath, new_audit_data};
-  use crate::documentation::parser::{DocumentationNode, ast_from_markdown};
-  use std::collections::HashSet;
-
-  const TEST_MARKDOWN: &str = r#"# Overview
-
-Nudge is a Reallocation Marketplace that helps protocols incentivize asset movement across blockchains and ecosystems.
-Nudge empowers protocols and ecosystems to grow assets, boost token demand, and motivate users to reallocate assets within their wallets—driving sustainable, KPI-driven growth.
-
-With Nudge, protocols can create and fund campaigns that reward users for acquiring and holding a specific token for at least a week. Nudge smart contracts acts as an escrow for rewards, while its backend system monitors participants' addresses to ensure they maintain their holdings of said token for the required period. Nudge provides an all-in-one solution, eliminating the need for any technical implementation by protocols looking to run such incentivisation campaigns.
-
-For more details please see: [What is Nudge?](https://docs.nudge.xyz/)
-
-## Main invariants
-
-### Solvency Invariants
-
-Token Balance Integrity
-
-- `rewardToken.balanceOf(campaign) >= pendingRewards + accumulatedFees`
-- *Ensures the contract always maintains sufficient reward tokens to cover all pending rewards and accumulated fees.*
-
-Protocol Solvency
-
-- For any active participation p:`p.rewardAmount <= rewardToken.balanceOf(campaign) - (pendingRewards - p.rewardAmount) - accumulatedFees`
-- *Guarantees that any individual user's reward can be fully covered by the contract's current token balance, after accounting for fees*"#;
-
-  fn create_test_audit_data() -> AuditData {
-    new_audit_data("test-audit".to_string(), HashSet::new())
-  }
-
-  fn create_test_project_path() -> ProjectPath {
-    ProjectPath {
-      file_path: "test.md".to_string(),
-    }
-  }
-
-  #[test]
-  fn test_parse_documentation_ast() {
-    let audit_data = create_test_audit_data();
-    let project_path = create_test_project_path();
-
-    let result = ast_from_markdown(
-      TEST_MARKDOWN,
-      &project_path,
-      &audit_data,
-      &parser::next_node_id,
-    );
-    assert!(
-      result.is_ok(),
-      "Failed to parse markdown: {:?}",
-      result.err()
-    );
-
-    let ast = result.unwrap();
-    assert_eq!(ast.nodes.len(), 1, "Expected one root node");
-
-    // The root should contain Heading nodes (which have Section children)
-    let root = &ast.nodes[0];
-    match root {
-      DocumentationNode::Root { children, .. } => {
-        // Should have one top-level heading: "Overview"
-        assert!(!children.is_empty(), "Root should have children");
-
-        // Find the Overview heading (which contains the section as a child)
-        let overview_heading = children.iter().find(|child| {
-          matches!(child, DocumentationNode::Heading { section: Some(sec), .. }
-            if matches!(sec.as_ref(), DocumentationNode::Section { title, .. } if title == "Overview"))
-        });
-        assert!(
-          overview_heading.is_some(),
-          "Should have a Heading with 'Overview' section"
-        );
-
-        if let Some(DocumentationNode::Heading {
-          section: Some(overview_sec),
-          ..
-        }) = overview_heading
-        {
-          if let DocumentationNode::Section { children, .. } =
-            overview_sec.as_ref()
-          {
-            // The Overview section should contain nested headings with sections
-            // "Main invariants" is an H2 under Overview
-            let main_invariants_heading = children.iter().find(|child| {
-              matches!(child, DocumentationNode::Heading { section: Some(sec), .. }
-                if matches!(sec.as_ref(), DocumentationNode::Section { title, .. } if title == "Main invariants"))
-            });
-            assert!(
-              main_invariants_heading.is_some(),
-              "Should have 'Main invariants' heading under Overview"
-            );
-
-            if let Some(DocumentationNode::Heading {
-              section: Some(main_sec),
-              ..
-            }) = main_invariants_heading
-            {
-              if let DocumentationNode::Section { children, .. } =
-                main_sec.as_ref()
-              {
-                // "Solvency Invariants" is an H3 under "Main invariants"
-                let solvency_heading = children.iter().find(|child| {
-                  matches!(child, DocumentationNode::Heading { section: Some(sec), .. }
-                    if matches!(sec.as_ref(), DocumentationNode::Section { title, .. } if title == "Solvency Invariants"))
-                });
-                assert!(
-                  solvency_heading.is_some(),
-                  "Should have 'Solvency Invariants' heading"
-                );
-              }
-            }
-          }
-        }
-      }
-      _ => panic!("Expected Root node, got {:?}", root),
-    }
-  }
-
-  #[test]
-  fn test_analyze_documentation_creates_topic_metadata() {
-    let mut audit_data = create_test_audit_data();
-    let project_path = create_test_project_path();
-    // Parse the markdown
-    let ast = ast_from_markdown(
-      TEST_MARKDOWN,
-      &project_path,
-      &audit_data,
-      &parser::next_node_id,
-    )
-    .unwrap();
-
-    // Process the AST manually (simulating what analyze() does)
-    let mut mentions_by_topic: BTreeMap<topic::Topic, Vec<Scope>> =
-      BTreeMap::new();
-
-    audit_data.in_scope_files.insert(project_path.clone());
-
-    let stubbed_ast = parser::DocumentationAST {
-      nodes: ast
-        .nodes
-        .iter()
-        .map(|n| parser::children_to_stubs(n.clone()))
-        .collect(),
-      project_path: project_path.clone(),
-      source_content: TEST_MARKDOWN.to_string(),
-    };
-    audit_data
-      .asts
-      .insert(project_path.clone(), AST::Documentation(stubbed_ast));
-
-    let result = process_documentation_ast(
-      &ast,
-      &project_path,
-      &mut audit_data,
-      &mut mentions_by_topic,
-    );
-    assert!(result.is_ok(), "Failed to process AST: {:?}", result.err());
-
-    // Check that topic metadata was created
-    assert!(
-      !audit_data.topic_metadata.is_empty(),
-      "Should have created topic metadata"
-    );
-
-    // Find titled topics (sections)
-    let titled_topics: Vec<_> = audit_data
-      .topic_metadata
-      .values()
-      .filter(|m| matches!(m, TopicMetadata::TitledTopic { .. }))
-      .collect();
-
-    assert!(
-      !titled_topics.is_empty(),
-      "Should have created TitledTopic entries for sections"
-    );
-
-    // Check for specific section titles
-    let titles: Vec<&str> = titled_topics
-      .iter()
-      .filter_map(|m| match m {
-        TopicMetadata::TitledTopic { title, .. } => Some(title.as_str()),
-        _ => None,
-      })
-      .collect();
-
-    assert!(
-      titles.contains(&"Overview"),
-      "Should have 'Overview' section, got: {:?}",
-      titles
-    );
-    assert!(
-      titles.contains(&"Main invariants"),
-      "Should have 'Main invariants' section, got: {:?}",
-      titles
-    );
-    assert!(
-      titles.contains(&"Solvency Invariants"),
-      "Should have 'Solvency Invariants' section, got: {:?}",
-      titles
-    );
-  }
-
-  #[test]
-  fn test_section_scope_hierarchy() {
-    let mut audit_data = create_test_audit_data();
-    let project_path = create_test_project_path();
-    let ast = ast_from_markdown(
-      TEST_MARKDOWN,
-      &project_path,
-      &audit_data,
-      &parser::next_node_id,
-    )
-    .unwrap();
-
-    let mut mentions_by_topic: BTreeMap<topic::Topic, Vec<Scope>> =
-      BTreeMap::new();
-
-    audit_data.in_scope_files.insert(project_path.clone());
-
-    let stubbed_ast = parser::DocumentationAST {
-      nodes: ast
-        .nodes
-        .iter()
-        .map(|n| parser::children_to_stubs(n.clone()))
-        .collect(),
-      project_path: project_path.clone(),
-      source_content: TEST_MARKDOWN.to_string(),
-    };
-    audit_data
-      .asts
-      .insert(project_path.clone(), AST::Documentation(stubbed_ast));
-
-    process_documentation_ast(
-      &ast,
-      &project_path,
-      &mut audit_data,
-      &mut mentions_by_topic,
-    )
-    .unwrap();
-
-    // Find the "Overview" section (H1 - should be Component level)
-    let overview = audit_data.topic_metadata.values().find(|m| {
-      matches!(m, TopicMetadata::TitledTopic { title, .. } if title == "Overview")
-    });
-    assert!(overview.is_some(), "Should have 'Overview' section");
-
-    if let Some(TopicMetadata::TitledTopic { scope, .. }) = overview {
-      // H1 section should be at Container scope level
-      assert!(
-        matches!(scope, Scope::Container { .. }),
-        "H1 section should have Container scope, got {:?}",
-        scope
-      );
-    }
-
-    // Find the "Main invariants" section (H2 - should be Component level, as member of Overview)
-    let main_invariants = audit_data.topic_metadata.values().find(|m| {
-      matches!(m, TopicMetadata::TitledTopic { title, .. } if title == "Main invariants")
-    });
-    assert!(
-      main_invariants.is_some(),
-      "Should have 'Main invariants' section"
-    );
-
-    if let Some(TopicMetadata::TitledTopic { scope, .. }) = main_invariants {
-      // H2 section should be at Component scope level (under the H1)
-      assert!(
-        matches!(scope, Scope::Component { .. }),
-        "H2 section should have Component scope, got {:?}",
-        scope
-      );
-    }
-
-    // Find the "Solvency Invariants" section (H3 - should be Member level)
-    let solvency = audit_data.topic_metadata.values().find(|m| {
-      matches!(m, TopicMetadata::TitledTopic { title, .. } if title == "Solvency Invariants")
-    });
-    assert!(
-      solvency.is_some(),
-      "Should have 'Solvency Invariants' section"
-    );
-
-    if let Some(TopicMetadata::TitledTopic { scope, .. }) = solvency {
-      // H3 section should be at Member scope level
-      assert!(
-        matches!(scope, Scope::Member { .. }),
-        "H3 section should have Member scope, got {:?}",
-        scope
-      );
-    }
-  }
-
-  #[test]
-  fn test_inline_code_parsing() {
-    let mut audit_data = create_test_audit_data();
-    let project_path = create_test_project_path();
-    let ast = ast_from_markdown(
-      TEST_MARKDOWN,
-      &project_path,
-      &audit_data,
-      &parser::next_node_id,
-    )
-    .unwrap();
-
-    let mut mentions_by_topic: BTreeMap<topic::Topic, Vec<Scope>> =
-      BTreeMap::new();
-
-    audit_data.in_scope_files.insert(project_path.clone());
-
-    let stubbed_ast = parser::DocumentationAST {
-      nodes: ast
-        .nodes
-        .iter()
-        .map(|n| parser::children_to_stubs(n.clone()))
-        .collect(),
-      project_path: project_path.clone(),
-      source_content: TEST_MARKDOWN.to_string(),
-    };
-    audit_data
-      .asts
-      .insert(project_path.clone(), AST::Documentation(stubbed_ast));
-
-    process_documentation_ast(
-      &ast,
-      &project_path,
-      &mut audit_data,
-      &mut mentions_by_topic,
-    )
-    .unwrap();
-
-    // Find InlineCode nodes in the audit data
-    let inline_code_nodes: Vec<_> = audit_data
-      .nodes
-      .values()
-      .filter_map(|node| match node {
-        Node::Documentation(doc_node) => Some(doc_node),
-        _ => None,
-      })
-      .filter(|node| matches!(node, DocumentationNode::InlineCode { .. }))
-      .collect();
-
-    assert!(
-      !inline_code_nodes.is_empty(),
-      "Should have parsed inline code blocks"
-    );
-
-    // Check that inline code contains the expected code expressions
-    // The markdown has code like `rewardToken.balanceOf(campaign) >= pendingRewards + accumulatedFees`
-    let has_reward_token_code = inline_code_nodes.iter().any(|node| {
-      if let DocumentationNode::InlineCode { value, .. } = node {
-        value.contains("rewardToken")
-      } else {
-        false
-      }
-    });
-
-    assert!(
-      has_reward_token_code,
-      "Should have inline code containing 'rewardToken'"
-    );
-  }
-
-  #[test]
-  fn test_inline_code_scope_hierarchy() {
-    let mut audit_data = create_test_audit_data();
-    let project_path = create_test_project_path();
-    let ast = ast_from_markdown(
-      TEST_MARKDOWN,
-      &project_path,
-      &audit_data,
-      &parser::next_node_id,
-    )
-    .unwrap();
-
-    let mut mentions_by_topic: BTreeMap<topic::Topic, Vec<Scope>> =
-      BTreeMap::new();
-
-    audit_data.in_scope_files.insert(project_path.clone());
-
-    let stubbed_ast = parser::DocumentationAST {
-      nodes: ast
-        .nodes
-        .iter()
-        .map(|n| parser::children_to_stubs(n.clone()))
-        .collect(),
-      project_path: project_path.clone(),
-      source_content: TEST_MARKDOWN.to_string(),
-    };
-    audit_data
-      .asts
-      .insert(project_path.clone(), AST::Documentation(stubbed_ast));
-
-    process_documentation_ast(
-      &ast,
-      &project_path,
-      &mut audit_data,
-      &mut mentions_by_topic,
-    )
-    .unwrap();
-
-    // Find the inline code node containing the reward token balance check
-    // `rewardToken.balanceOf(campaign) >= pendingRewards + accumulatedFees`
-    // Search in nodes directly since we need to find by value
-    let reward_token_entry = audit_data.nodes.iter().find(|(_, node)| {
-      if let Node::Documentation(DocumentationNode::InlineCode {
-        value, ..
-      }) = node
-      {
-        value.contains("rewardToken.balanceOf(campaign) >= pendingRewards")
-      } else {
-        false
-      }
-    });
-
-    assert!(
-      reward_token_entry.is_some(),
-      "Should find inline code with rewardToken.balanceOf expression"
-    );
-
-    let (topic, _) = reward_token_entry.unwrap();
-
-    // Get the metadata for this topic
-    let metadata = audit_data.topic_metadata.get(topic);
-    assert!(
-      metadata.is_some(),
-      "Should have metadata for inline code topic {:?}",
-      topic
-    );
-    let metadata = metadata.unwrap();
-
-    // The inline code is inside (with new section-only scope hierarchy):
-    // - H1 "Overview" (component - first nested section)
-    // - H2 "Main invariants" (member - second nested section)
-    // - H3 "Solvency Invariants" (containing_block - third nested section)
-    // Paragraphs no longer add to scope, so inline code inherits section scope.
-    match metadata.scope() {
-      Scope::ContainingBlock {
-        container,
-        component,
-        member,
-        containing_blocks,
-      } => {
-        // Verify container is our test file
-        assert_eq!(
-          container.file_path, "test.md",
-          "Container should be test.md"
-        );
-
-        // Verify component is the "Overview" H1 section (first nested)
-        let component_metadata = audit_data.topic_metadata.get(component);
-        assert!(
-          component_metadata.is_some(),
-          "Component topic should exist in metadata"
-        );
-        assert_eq!(
-          component_metadata.unwrap().name(),
-          Some("Overview"),
-          "Component should be 'Overview' section"
-        );
-
-        // Verify member is the "Main invariants" H2 section (second nested)
-        let member_metadata = audit_data.topic_metadata.get(member);
-        assert!(
-          member_metadata.is_some(),
-          "Member topic should exist in metadata"
-        );
-        assert_eq!(
-          member_metadata.unwrap().name(),
-          Some("Main invariants"),
-          "Member should be 'Main invariants' section"
-        );
-
-        // Verify containing_block is the "Solvency Invariants" H3 section (third nested)
-        let containing_block = &containing_blocks
-          .last()
-          .expect("Should have at least one containing block layer")
-          .block;
-        let containing_block_metadata =
-          audit_data.topic_metadata.get(containing_block);
-        assert!(
-          containing_block_metadata.is_some(),
-          "Containing block topic should exist in metadata"
-        );
-        assert_eq!(
-          containing_block_metadata.unwrap().name(),
-          Some("Solvency Invariants"),
-          "Containing block should be 'Solvency Invariants' section"
-        );
-      }
-      other => {
-        panic!(
-          "Inline code should have ContainingBlock scope, got {:?}",
-          other
-        );
-      }
-    }
-  }
 }

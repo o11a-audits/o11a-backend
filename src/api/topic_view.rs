@@ -289,9 +289,6 @@ pub fn highlighted_name(metadata: &TopicMetadata) -> String {
       UnnamedTopicKind::Signature => {
         "<span class=\"identifier\">Signature</span>".to_string()
       }
-      UnnamedTopicKind::DocumentationRoot => {
-        "<span>Documentation</span>".to_string()
-      }
       UnnamedTopicKind::DocumentationHeading => {
         "<span>DocumentationHeading</span>".to_string()
       }
@@ -321,6 +318,13 @@ pub fn highlighted_name(metadata: &TopicMetadata) -> String {
       }
       UnnamedTopicKind::Other => "<span>Other</span>".to_string(),
     },
+    TopicMetadata::DocumentationTopic { is_technical, .. } => {
+      if *is_technical {
+        "<span>Technical Documentation</span>".to_string()
+      } else {
+        "<span>Documentation</span>".to_string()
+      }
+    }
     TopicMetadata::ControlFlow { kind, .. } => match kind {
       ControlFlowStatementKind::If => {
         "<span class=\"keyword\">IfStatement</span>".to_string()
@@ -1740,10 +1744,8 @@ fn topic_kind_label(metadata: &TopicMetadata) -> &'static str {
       NamedTopicKind::LocalVariable => "variable",
       NamedTopicKind::Builtin => "builtin",
     },
-    TopicMetadata::UnnamedTopic { kind, .. } => match kind {
-      UnnamedTopicKind::DocumentationRoot => "document",
-      _ => "expression",
-    },
+    TopicMetadata::UnnamedTopic { .. } => "expression",
+    TopicMetadata::DocumentationTopic { .. } => "document",
     TopicMetadata::ControlFlow { kind, .. } => match kind {
       ControlFlowStatementKind::If => "if",
       ControlFlowStatementKind::For => "for",

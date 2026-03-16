@@ -86,6 +86,9 @@ fn resolve_topic_name(topic: &topic::Topic, audit_data: &AuditData) -> String {
     Some(TopicMetadata::InvariantTopic { description, .. }) => {
       description.clone()
     }
+    Some(TopicMetadata::DocumentationTopic { .. }) => {
+      topic.id().to_string()
+    }
     None => topic.id().to_string(),
   }
 }
@@ -195,6 +198,9 @@ fn plaintext_name_from_metadata(metadata: &TopicMetadata) -> String {
     TopicMetadata::RequirementTopic { description, .. } => description.clone(),
     TopicMetadata::ThreatTopic { description, .. } => description.clone(),
     TopicMetadata::InvariantTopic { description, .. } => description.clone(),
+    TopicMetadata::DocumentationTopic { .. } => {
+      metadata.topic().id().to_string()
+    }
   }
 }
 
@@ -1958,6 +1964,24 @@ pub fn build_agent_topic_context(
       topic: topic_id_string,
       name,
       kind: "Invariant".to_string(),
+      sub_kind: None,
+      condition: None,
+      context,
+      expanded_context: None,
+      mentions,
+    }),
+
+    TopicMetadata::DocumentationTopic {
+      is_technical, ..
+    } => Some(AgentTopicContext {
+      topic: topic_id_string,
+      name,
+      kind: if *is_technical {
+        "TechnicalDocumentation"
+      } else {
+        "Documentation"
+      }
+      .to_string(),
       sub_kind: None,
       condition: None,
       context,

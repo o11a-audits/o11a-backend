@@ -3461,7 +3461,8 @@ fn populate_context(
       TopicMetadata::FeatureTopic { .. }
       | TopicMetadata::RequirementTopic { .. }
       | TopicMetadata::ThreatTopic { .. }
-      | TopicMetadata::InvariantTopic { .. } => {}
+      | TopicMetadata::InvariantTopic { .. }
+      | TopicMetadata::DocumentationTopic { .. } => {}
     }
   }
 }
