@@ -10,7 +10,7 @@ use sqlx::FromRow;
 use crate::api::AppState;
 use crate::collaborator::{db, formatter, models::*, parser, store};
 use crate::core::{
-  self, Feature, Node, project,
+  self, Feature, project,
   topic::{self, TopicKind, new_topic},
 };
 
@@ -269,7 +269,10 @@ pub async fn get_documents(
 
   // Iterate through all topic metadata and filter for documentation roots
   for (topic, metadata) in &audit_data.topic_metadata {
-    if matches!(metadata, crate::core::TopicMetadata::DocumentationTopic { .. }) {
+    if matches!(
+      metadata,
+      crate::core::TopicMetadata::DocumentationTopic { .. }
+    ) {
       documents.push(topic_metadata_to_response(topic, metadata));
     }
   }
@@ -377,11 +380,11 @@ pub async fn get_source_text(
   // Create topic from the topic_id
   let topic = new_topic(&topic_id);
 
-  let source_text =
-    super::topic_view::render_source_text(&topic, audit_data).ok_or_else(|| {
-      eprintln!("Topic '{}' not found in audit '{}'", topic_id, audit_id);
-      StatusCode::NOT_FOUND
-    })?;
+  let source_text = super::topic_view::render_source_text(&topic, audit_data)
+    .ok_or_else(|| {
+    eprintln!("Topic '{}' not found in audit '{}'", topic_id, audit_id);
+    StatusCode::NOT_FOUND
+  })?;
 
   Ok(Html(source_text))
 }
@@ -685,40 +688,6 @@ pub enum ReferenceResponse {
   },
 }
 
-impl ReferenceResponse {
-  fn from_reference(reference: &crate::core::Reference) -> Self {
-    match reference {
-      crate::core::Reference::ProjectReference {
-        reference_topic, ..
-      } => ReferenceResponse::Project {
-        reference_topic: reference_topic.id().to_string(),
-      },
-      crate::core::Reference::ProjectReferenceWithMentions {
-        reference_topic,
-        mention_topics,
-        ..
-      } => ReferenceResponse::ProjectWithMentions {
-        reference_topic: reference_topic.id().to_string(),
-        mention_topics: mention_topics
-          .iter()
-          .map(|t| t.id().to_string())
-          .collect(),
-      },
-      crate::core::Reference::CommentMention {
-        reference_topic,
-        mention_topics,
-        ..
-      } => ReferenceResponse::Comment {
-        reference_topic: reference_topic.id().to_string(),
-        mention_topics: mention_topics
-          .iter()
-          .map(|t| t.id().to_string())
-          .collect(),
-      },
-    }
-  }
-}
-
 /// A child element in a source context — either a direct reference or an annotated block group.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "child_type")]
@@ -880,55 +849,6 @@ pub enum TopicMetadataResponse {
 }
 
 // Helper function to convert SourceChild to SourceChildResponse
-fn convert_children(
-  children: &[crate::core::SourceChild],
-) -> Vec<SourceChildResponse> {
-  children
-    .iter()
-    .map(|child| match child {
-      crate::core::SourceChild::Reference(r) => {
-        SourceChildResponse::Reference {
-          reference: ReferenceResponse::from_reference(r),
-        }
-      }
-      crate::core::SourceChild::AnnotatedBlock(g) => {
-        SourceChildResponse::AnnotatedBlock {
-          annotation: BlockAnnotationResponse {
-            topic: g.annotation().topic.id.clone(),
-            kind: BlockAnnotationKindInfo::from_core(&g.annotation().kind),
-          },
-          children: convert_children(g.children()),
-          has_sibling_branch: g.has_sibling_branch(),
-        }
-      }
-    })
-    .collect()
-}
-
-fn convert_source_context(
-  groups: &[crate::core::SourceContext],
-) -> Vec<SourceContextResponse> {
-  groups
-    .iter()
-    .map(|group| SourceContextResponse {
-      scope: group.scope().id().to_string(),
-      is_in_scope: group.is_in_scope(),
-      scope_references: group
-        .scope_references()
-        .iter()
-        .map(ReferenceResponse::from_reference)
-        .collect(),
-      nested_references: group
-        .nested_references()
-        .iter()
-        .map(|m| NestedSourceContextResponse {
-          subscope: m.subscope().id().to_string(),
-          children: convert_children(m.children()),
-        })
-        .collect(),
-    })
-    .collect()
-}
 
 // Helper function to convert TopicMetadata to TopicMetadataResponse
 fn topic_metadata_to_response(
@@ -1002,13 +922,13 @@ fn topic_metadata_to_response(
       })
     }
 
-    crate::core::TopicMetadata::DocumentationTopic {
-      is_technical, ..
-    } => TopicMetadataResponse::Documentation(DocumentationTopicResponse {
-      topic_id: topic.id.clone(),
-      scope: scope_info,
-      is_technical: *is_technical,
-    }),
+    crate::core::TopicMetadata::DocumentationTopic { is_technical, .. } => {
+      TopicMetadataResponse::Documentation(DocumentationTopicResponse {
+        topic_id: topic.id.clone(),
+        scope: scope_info,
+        is_technical: *is_technical,
+      })
+    }
 
     crate::core::TopicMetadata::ControlFlow {
       kind, condition, ..
@@ -1042,15 +962,13 @@ fn topic_metadata_to_response(
       author_id,
       created_at,
       ..
-    } => {
-      TopicMetadataResponse::Feature(FeatureTopicResponse {
-        topic_id: topic.id.clone(),
-        name: name.clone(),
-        description: description.clone(),
-        author_id: *author_id,
-        created_at: created_at.clone(),
-      })
-    }
+    } => TopicMetadataResponse::Feature(FeatureTopicResponse {
+      topic_id: topic.id.clone(),
+      name: name.clone(),
+      description: description.clone(),
+      author_id: *author_id,
+      created_at: created_at.clone(),
+    }),
 
     crate::core::TopicMetadata::RequirementTopic {
       description,
@@ -1058,15 +976,13 @@ fn topic_metadata_to_response(
       author_id,
       created_at,
       ..
-    } => {
-      TopicMetadataResponse::Requirement(RequirementTopicResponse {
-        topic_id: topic.id.clone(),
-        description: description.clone(),
-        feature_topic: feature_topic.id.clone(),
-        author_id: *author_id,
-        created_at: created_at.clone(),
-      })
-    }
+    } => TopicMetadataResponse::Requirement(RequirementTopicResponse {
+      topic_id: topic.id.clone(),
+      description: description.clone(),
+      feature_topic: feature_topic.id.clone(),
+      author_id: *author_id,
+      created_at: created_at.clone(),
+    }),
 
     crate::core::TopicMetadata::ThreatTopic {
       description,
@@ -1075,16 +991,14 @@ fn topic_metadata_to_response(
       created_at,
       severity,
       ..
-    } => {
-      TopicMetadataResponse::Threat(ThreatTopicResponse {
-        topic_id: topic.id.clone(),
-        description: description.clone(),
-        feature_topic: feature_topic.id.clone(),
-        author_id: *author_id,
-        created_at: created_at.clone(),
-        severity: severity.as_str().to_string(),
-      })
-    }
+    } => TopicMetadataResponse::Threat(ThreatTopicResponse {
+      topic_id: topic.id.clone(),
+      description: description.clone(),
+      feature_topic: feature_topic.id.clone(),
+      author_id: *author_id,
+      created_at: created_at.clone(),
+      severity: severity.as_str().to_string(),
+    }),
 
     crate::core::TopicMetadata::InvariantTopic {
       description,
@@ -1093,16 +1007,14 @@ fn topic_metadata_to_response(
       created_at,
       severity,
       ..
-    } => {
-      TopicMetadataResponse::Invariant(InvariantTopicResponse {
-        topic_id: topic.id.clone(),
-        description: description.clone(),
-        threat_topic: threat_topic.id.clone(),
-        author_id: *author_id,
-        created_at: created_at.clone(),
-        severity: severity.as_str().to_string(),
-      })
-    }
+    } => TopicMetadataResponse::Invariant(InvariantTopicResponse {
+      topic_id: topic.id.clone(),
+      description: description.clone(),
+      threat_topic: threat_topic.id.clone(),
+      author_id: *author_id,
+      created_at: created_at.clone(),
+      severity: severity.as_str().to_string(),
+    }),
   }
 }
 
@@ -1819,11 +1731,8 @@ pub async fn get_feature_threats(
     .get(&feature_topic)
     .ok_or(StatusCode::NOT_FOUND)?;
 
-  let ids: Vec<String> = feature
-    .threat_topics
-    .iter()
-    .map(|t| t.id.clone())
-    .collect();
+  let ids: Vec<String> =
+    feature.threat_topics.iter().map(|t| t.id.clone()).collect();
 
   Ok(Json(ids))
 }
@@ -1933,9 +1842,12 @@ pub async fn build_features(
         })?;
       if let Some(req) = parsed.requirements.get(req_topic) {
         for dt in &req.documentation_topics {
-          let _ =
-            db::add_requirement_documentation_topic(&state.db, req_row.id, dt.id())
-              .await;
+          let _ = db::add_requirement_documentation_topic(
+            &state.db,
+            req_row.id,
+            dt.id(),
+          )
+          .await;
         }
         for st in &req.source_topics {
           let _ =
@@ -1983,7 +1895,10 @@ pub async fn build_threats(
   println!("POST /api/v1/audits/{}/threats/build", audit_id);
 
   // Render per-feature JSON while holding the lock, then release it
-  let (feature_entries, security_notes): (Vec<(topic::Topic, String)>, Option<String>) = {
+  let (feature_entries, security_notes): (
+    Vec<(topic::Topic, String)>,
+    Option<String>,
+  ) = {
     let ctx = state.data_context.lock().map_err(|e| {
       eprintln!("Mutex poisoned in build_threats: {}", e);
       StatusCode::INTERNAL_SERVER_ERROR
@@ -1994,11 +1909,10 @@ pub async fn build_threats(
       .features
       .iter()
       .filter_map(|(ft, feature)| {
-        let json = crate::collaborator::agent::context::render_feature_for_threats(
-          ft,
-          feature,
-          audit_data,
-        )?;
+        let json =
+          crate::collaborator::agent::context::render_feature_for_threats(
+            ft, feature, audit_data,
+          )?;
         Some((ft.clone(), json))
       })
       .collect();
@@ -2018,15 +1932,14 @@ pub async fn build_threats(
     let invariant_start = (i * 1000) as i32;
     let notes = security_notes.clone();
     handles.push(tokio::spawn(async move {
-      let result =
-        crate::collaborator::agent::task::build_threats_for_feature(
-          &ft,
-          &json,
-          threat_start,
-          invariant_start,
-          notes.as_deref(),
-        )
-        .await;
+      let result = crate::collaborator::agent::task::build_threats_for_feature(
+        &ft,
+        &json,
+        threat_start,
+        invariant_start,
+        notes.as_deref(),
+      )
+      .await;
       (ft, result)
     }));
   }
@@ -2118,8 +2031,7 @@ pub async fn build_threats(
               StatusCode::INTERNAL_SERVER_ERROR
             })?;
 
-            let real_inv_topic =
-              topic::new_invariant_topic(inv_row.id as i32);
+            let real_inv_topic = topic::new_invariant_topic(inv_row.id as i32);
 
             new_topic_metadata.insert(
               real_inv_topic.clone(),
@@ -2173,7 +2085,8 @@ pub async fn build_threats(
       eprintln!("Mutex poisoned in build_threats (store): {}", e);
       StatusCode::INTERNAL_SERVER_ERROR
     })?;
-    let audit_data = ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
+    let audit_data =
+      ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
 
     // Clear old threat/invariant metadata
     audit_data.topic_metadata.retain(|_, m| {
@@ -2221,14 +2134,20 @@ pub async fn build_threats(
         .max()
         .unwrap_or(0) as i32;
 
-      Some((notes.clone(), features_json, review_threat_start, review_inv_start))
+      Some((
+        notes.clone(),
+        features_json,
+        review_threat_start,
+        review_inv_start,
+      ))
     } else {
       None
     }
   }; // ctx dropped here
 
-  if let Some((notes, features_json, review_threat_start, review_inv_start)) = review_input {
-
+  if let Some((notes, features_json, review_threat_start, review_inv_start)) =
+    review_input
+  {
     let review_results =
       crate::collaborator::agent::task::review_security_coverage(
         &notes,
@@ -2290,7 +2209,8 @@ pub async fn build_threats(
               for inv_topic in &threat.invariant_topics {
                 let inv_desc = match parsed.topic_metadata.get(inv_topic) {
                   Some(core::TopicMetadata::InvariantTopic {
-                    description, ..
+                    description,
+                    ..
                   }) => description.clone(),
                   _ => continue,
                 };
@@ -2435,8 +2355,7 @@ pub async fn create_feature(
     .topic_metadata
     .insert(feature_topic.clone(), metadata.clone());
 
-  let response =
-    topic_metadata_to_response(&feature_topic, &metadata);
+  let response = topic_metadata_to_response(&feature_topic, &metadata);
   Ok(Json(response))
 }
 
@@ -2460,10 +2379,7 @@ pub async fn get_feature(
     .get(&feature_topic)
     .ok_or(StatusCode::NOT_FOUND)?;
 
-  Ok(Json(topic_metadata_to_response(
-    &feature_topic,
-    metadata,
-  )))
+  Ok(Json(topic_metadata_to_response(&feature_topic, metadata)))
 }
 
 #[derive(Debug, Deserialize)]
@@ -2495,7 +2411,10 @@ pub async fn add_requirement_documentation_topic(
   })?;
 
   let mut ctx = state.data_context.lock().map_err(|e| {
-    eprintln!("Mutex poisoned in add_requirement_documentation_topic: {}", e);
+    eprintln!(
+      "Mutex poisoned in add_requirement_documentation_topic: {}",
+      e
+    );
     StatusCode::INTERNAL_SERVER_ERROR
   })?;
   let audit_data = ctx.get_audit_mut(&audit_id).ok_or(StatusCode::NOT_FOUND)?;
@@ -2515,8 +2434,7 @@ pub async fn add_requirement_documentation_topic(
     .topic_metadata
     .get(&req_topic)
     .ok_or(StatusCode::NOT_FOUND)?;
-  let response =
-    topic_metadata_to_response(&req_topic, metadata);
+  let response = topic_metadata_to_response(&req_topic, metadata);
 
   Ok(Json(response))
 }
@@ -2532,12 +2450,16 @@ pub async fn remove_requirement_documentation_topic(
     audit_id, requirement_id, topic_id
   );
 
-  db::remove_requirement_documentation_topic(&state.db, requirement_id, &topic_id)
-    .await
-    .map_err(|e| {
-      eprintln!("remove_requirement_documentation_topic failed: {}", e);
-      StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+  db::remove_requirement_documentation_topic(
+    &state.db,
+    requirement_id,
+    &topic_id,
+  )
+  .await
+  .map_err(|e| {
+    eprintln!("remove_requirement_documentation_topic failed: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
 
   let mut ctx = state.data_context.lock().map_err(|e| {
     eprintln!(
@@ -2554,15 +2476,16 @@ pub async fn remove_requirement_documentation_topic(
     .ok_or(StatusCode::NOT_FOUND)?;
 
   let remove_topic = topic::new_topic(&topic_id);
-  requirement.documentation_topics.retain(|t| t != &remove_topic);
+  requirement
+    .documentation_topics
+    .retain(|t| t != &remove_topic);
 
   crate::core::rebuild_feature_context(audit_data);
   let metadata = audit_data
     .topic_metadata
     .get(&req_topic)
     .ok_or(StatusCode::NOT_FOUND)?;
-  let response =
-    topic_metadata_to_response(&req_topic, metadata);
+  let response = topic_metadata_to_response(&req_topic, metadata);
 
   Ok(Json(response))
 }
@@ -2610,7 +2533,9 @@ pub async fn get_topic_requirements(
     }
     _ => {
       for (req_topic, req) in &audit_data.requirements {
-        if req.source_topics.contains(&t) || req.documentation_topics.contains(&t) {
+        if req.source_topics.contains(&t)
+          || req.documentation_topics.contains(&t)
+        {
           if !requirement_topics.contains(req_topic) {
             requirement_topics.push(req_topic.clone());
           }
@@ -2619,10 +2544,8 @@ pub async fn get_topic_requirements(
     }
   }
 
-  let requirement_ids: Vec<String> = requirement_topics
-    .iter()
-    .map(|rt| rt.id.clone())
-    .collect();
+  let requirement_ids: Vec<String> =
+    requirement_topics.iter().map(|rt| rt.id.clone()).collect();
 
   Ok(Json(requirement_ids))
 }
@@ -2739,8 +2662,7 @@ pub async fn create_requirement(
   // Persist documentation topics for this requirement
   for dt_id in &payload.documentation_topics {
     let _ =
-      db::add_requirement_documentation_topic(&state.db, row.id, dt_id)
-        .await;
+      db::add_requirement_documentation_topic(&state.db, row.id, dt_id).await;
   }
 
   let feature_topic = topic::new_feature_topic(feature_id as i32);
@@ -3043,12 +2965,10 @@ pub async fn delete_threat(
     audit_id, feature_id, threat_id
   );
 
-  db::delete_threat(&state.db, threat_id)
-    .await
-    .map_err(|e| {
-      eprintln!("delete_threat failed: {}", e);
-      StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+  db::delete_threat(&state.db, threat_id).await.map_err(|e| {
+    eprintln!("delete_threat failed: {}", e);
+    StatusCode::INTERNAL_SERVER_ERROR
+  })?;
 
   let threat_topic = topic::new_attack_vector_topic(threat_id as i32);
   let feature_topic = topic::new_feature_topic(feature_id as i32);
@@ -3240,7 +3160,10 @@ pub async fn get_invariant(
   State(state): State<AppState>,
   Path((audit_id, invariant_id)): Path<(String, i32)>,
 ) -> Result<Json<TopicMetadataResponse>, StatusCode> {
-  println!("GET /api/v1/audits/{}/invariants/{}", audit_id, invariant_id);
+  println!(
+    "GET /api/v1/audits/{}/invariants/{}",
+    audit_id, invariant_id
+  );
 
   let ctx = state.data_context.lock().map_err(|e| {
     eprintln!("Mutex poisoned in get_invariant: {}", e);

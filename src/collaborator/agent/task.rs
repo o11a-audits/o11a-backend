@@ -587,6 +587,127 @@ pub async fn review_security_coverage(
   Ok(results)
 }
 
+/// Prompt for normalizing a documentation file for plain text readability.
+const NORMALIZE_DOCUMENTATION_PROMPT: &str = "Below is a documentation file from a smart contract \
+project. Your task is to normalize it for optimal plain text readability \
+by both LLMs and human readers.\n\n\
+Apply the following transformations:\n\
+- **Emojis**: Remove emojis entirely, or replace them with a plain text \
+  symbol or word equivalent where the emoji carries semantic meaning \
+  (e.g., ⚠️ -> WARNING, ✅ -> [OK]).\n\
+- **Images and videos**: Replace inline images/videos with their alt text \
+  or title on its own line, followed by a markdown link to the resource. \
+  For example: `![Architecture diagram](url)` becomes:\n  \
+  Architecture diagram\n  Link: url\n\
+- **HTML tags**: Convert any inline HTML to its plain text or markdown \
+  equivalent. Remove purely presentational HTML (e.g., `<br>`, `<hr>`, \
+  `<div>`, `<span>` wrappers) while preserving semantic content. Convert \
+  `<a href=\"url\">text</a>` to `[text](url)`, `<strong>` to `**`, \
+  `<em>` to `*`, `<code>` to backticks, and HTML tables to markdown tables.\n\
+- **Badges and shields**: Remove CI/CD badges, status shields, and \
+  similar decorative image links entirely.\n\
+- **Decorative formatting**: Remove decorative horizontal rules, excessive \
+  blank lines (collapse to at most two), and ornamental characters used \
+  for visual separation (e.g., lines of `---`, `===`, `***` used purely \
+  for decoration, not as markdown thematic breaks between sections).\n\
+- **Anchor links and fragments**: Remove HTML anchor tags (`<a name=\"...\">`) \
+  used only for in-page navigation. Keep the heading or text content.\n\
+- **Internal navigation**: Remove documentation navigation elements such as \
+  \"next section\", \"previous section\", \"back to top\", breadcrumb trails, \
+  tables of contents, and similar inter-page or intra-page navigation links \
+  that only serve a browsing purpose and carry no informational content.\n\
+- **Markdown structure**: Preserve headings, lists, code blocks, tables, \
+  blockquotes, and links. These carry semantic value.\n\
+- **Content**: Do NOT alter, summarize, rephrase, or remove any textual \
+  content. Every sentence, paragraph, and data point must be preserved \
+  verbatim. Only formatting and presentation should change.\n\n\
+Return ONLY the normalized document text, with no wrapper, no explanation, \
+and no code fences around the output.\n\n\
+Document:\n";
+
+/// A single documentation file to be normalized: its project-relative path
+/// and raw source content.
+pub struct DocumentationFile {
+  pub file_path: String,
+  pub source_content: String,
+}
+
+/// Collect documentation files from the audit data for normalization.
+pub fn collect_documentation_files(
+  audit_data: &AuditData,
+) -> Vec<DocumentationFile> {
+  let mut files = Vec::new();
+  for (path, ast) in &audit_data.asts {
+    let doc_ast = match ast {
+      AST::Documentation(doc_ast) => doc_ast,
+      _ => continue,
+    };
+    files.push(DocumentationFile {
+      file_path: path.file_path.clone(),
+      source_content: doc_ast.source_content.clone(),
+    });
+  }
+  files
+}
+
+/// Result of normalizing documentation files: maps file paths to their
+/// normalized content.
+pub struct NormalizedDocumentation {
+  pub files: BTreeMap<String, String>,
+}
+
+/// Normalize all documentation files for plain text readability via LLM.
+///
+/// Each file is processed independently in parallel. The caller collects
+/// documentation files while holding the lock, then passes them to this
+/// function after releasing it. Returns a map of file paths to normalized
+/// content that the caller can write back to disk.
+pub async fn normalize_documentation(
+  documentation_files: &[DocumentationFile],
+) -> Result<NormalizedDocumentation, String> {
+  if documentation_files.is_empty() {
+    return Err("No documentation files to normalize".to_string());
+  }
+
+  let mut handles = Vec::new();
+  for doc in documentation_files {
+    let prompt =
+      format!("{}{}", NORMALIZE_DOCUMENTATION_PROMPT, doc.source_content);
+    let file_path = doc.file_path.clone();
+    handles.push(tokio::spawn(async move {
+      let result = router::chat_completion(
+        TaskSize::Large,
+        router::SYSTEM_MESSAGE_DOCUMENTATION,
+        &prompt,
+        Some(&file_path),
+      )
+      .await;
+      (file_path, result)
+    }));
+  }
+
+  let mut files = BTreeMap::new();
+  for handle in handles {
+    match handle.await {
+      Ok((path, Ok(response))) => {
+        files.insert(path, response);
+      }
+      Ok((path, Err(e))) => {
+        eprintln!("normalize_documentation failed for {}: {}", path, e);
+      }
+      Err(e) => {
+        eprintln!("normalize_documentation task panicked: {}", e);
+      }
+    }
+  }
+
+  if files.is_empty() {
+    return Err("All documentation normalizations failed".to_string());
+  }
+
+  Ok(NormalizedDocumentation { files })
+}
+
 /// Generate documentation for all top-level contracts in the audit.
 pub fn document_contracts(
   audit_data: &AuditData,
