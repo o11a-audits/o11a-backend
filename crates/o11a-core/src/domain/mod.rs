@@ -2,6 +2,10 @@ use std::path::{Path, PathBuf};
 
 pub mod topic;
 
+/// Unified value IR (scaffold — see module docs). Not yet wired into `AuditData`
+/// or produced by any analyzer; types only.
+pub mod ir;
+
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
